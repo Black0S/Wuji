@@ -9,13 +9,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private var layout: BrowserLayout!
 
     private let favicons = FaviconStore()
+    private let session = SessionStore()
     private let settings = Settings()
     private var settingsWindow: SettingsWindow?
 
     /// Les onglets appartiennent à un espace, jamais à l'application. Tout ce qui suit
     /// passe donc par `currentSpace` — c'est ce qui évite d'avoir deux notions
     /// d'« onglet courant » qui se désynchronisent.
-    private var spaces: [Space] = [Space(name: "Personnel", symbol: Space.symbol(forIndex: 0))]
+    private var spaces: [Space] = []
     private var currentSpaceIndex = 0
 
     /// Position et total de la recherche dans la page, tenus à la main — voir `countMatches`.
@@ -60,9 +61,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         settings.onChange = { [weak self] in self?.applySettings() }
         applySettings()
 
-        newTab(url: URL(string: settings.homepage))
+        restoreSession()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // La sauvegarde différée peut être en attente au moment où l'on quitte.
+        session.save(snapshot())
+    }
+
+    // MARK: - Session
+
+    private func restoreSession() {
+        guard let stored = session.load(), !stored.spaces.isEmpty else {
+            spaces = [Space(name: "Personnel", symbol: Space.symbol(forIndex: 0))]
+            newTab(url: URL(string: settings.homepage))
+            return
+        }
+
+        spaces = stored.spaces.map { storedSpace in
+            let space = Space(name: storedSpace.name, symbol: storedSpace.symbol)
+            for storedFolder in storedSpace.folders {
+                let folder = space.addFolder(named: storedFolder.name)
+                folder.isExpanded = storedFolder.isExpanded
+                storedFolder.tabs.forEach { space.place(restore($0), at: .into(folder)) }
+                folder.isExpanded = storedFolder.isExpanded
+            }
+            storedSpace.loose.forEach { space.place(restore($0), at: .looseEnd) }
+            let order = space.allTabs
+            if let index = storedSpace.currentTab, order.indices.contains(index) {
+                space.current = order[index]
+            } else {
+                space.current = order.first
+            }
+            return space
+        }
+        currentSpaceIndex = min(max(0, stored.currentSpace), spaces.count - 1)
+
+        if currentSpace.isEmpty {
+            newTab(url: URL(string: settings.homepage))
+        } else {
+            activateCurrentTab()
+        }
+    }
+
+    private func restore(_ stored: StoredTab) -> Tab {
+        makeTab(pendingURL: stored.url.flatMap(URL.init(string:)), pendingTitle: stored.title)
+    }
+
+    private func snapshot() -> StoredSession {
+        StoredSession(
+            spaces: spaces.map { space in
+                let order = space.allTabs
+                return StoredSpace(
+                    name: space.name,
+                    symbol: space.symbol,
+                    folders: space.folders.map { folder in
+                        StoredFolder(name: folder.name, isExpanded: folder.isExpanded,
+                                     tabs: folder.tabs.map(store))
+                    },
+                    loose: space.loose.map(store),
+                    currentTab: order.firstIndex { $0 === space.current })
+            },
+            currentSpace: currentSpaceIndex)
+    }
+
+    private func store(_ tab: Tab) -> StoredTab {
+        StoredTab(url: tab.url?.absoluteString, title: tab.title)
     }
 
     /// Un seul endroit où les réglages descendent dans l'application. Sans ça, chaque
@@ -111,8 +177,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         if let url { tab.webView.load(URLRequest(url: url)) }
     }
 
-    private func makeTab(configuration override: WKWebViewConfiguration? = nil) -> Tab {
-        let tab = Tab(configuration: override ?? configuration)
+    private func makeTab(configuration override: WKWebViewConfiguration? = nil,
+                         pendingURL: URL? = nil, pendingTitle: String? = nil) -> Tab {
+        let tab = Tab(configuration: override ?? configuration,
+                      pendingURL: pendingURL, pendingTitle: pendingTitle)
         tab.webView.navigationDelegate = self
         tab.webView.uiDelegate = self
         tab.webView.pageZoom = settings.pageZoom
@@ -224,12 +292,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private func activateCurrentTab() {
         guard let tab = currentSpace.current ?? currentSpace.allTabs.first else { return }
         currentSpace.current = tab
+        // C'est ici que le chargement différé se dénoue : un onglet restauré ne va
+        // chercher sa page qu'au moment où on le regarde.
+        tab.loadIfPending()
         layout.content.attach(tab.webView)
         syncChrome()
     }
 
     private func syncChrome() {
-        guard let tab = currentTab else { return }
+        // Les observations posées avec `.initial` se déclenchent pendant la construction
+        // des onglets — donc avant que `spaces` existe, au moment de la restauration.
+        guard !spaces.isEmpty, let tab = currentTab else { return }
         let state = tab.security
         layout.content.border.set(state)
         layout.content.setProgress(tab.webView.estimatedProgress, isLoading: tab.webView.isLoading)
@@ -244,6 +317,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// Construit la liste affichée : les dossiers avec leur contenu, puis les onglets de
     /// passage. La sidebar ne reçoit que des identités et de quoi dessiner.
     private func syncSidebar() {
+        guard !spaces.isEmpty else { return }
         let space = currentSpace
         layout.sidebar.update(space: SpaceSnapshot(name: space.name, symbol: space.symbol))
 
@@ -258,6 +332,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         items.append(contentsOf: space.loose.map { item(for: $0, depth: 0) })
 
         layout.sidebar.update(items: items, selected: space.current?.id)
+        session.scheduleSave(self.snapshot())
     }
 
     private func item(for tab: Tab, depth: Int) -> SidebarItem {
