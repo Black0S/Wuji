@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private let favicons = FaviconStore()
     private let session = SessionStore()
+    private let history = HistoryStore()
     private let settings = Settings()
     private var settingsWindow: SettingsWindow?
 
@@ -61,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         settings.onChange = { [weak self] in self?.applySettings() }
         applySettings()
 
+        history.purge(olderThan: settings.historyRetention)
         restoreSession()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
@@ -145,7 +147,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     @objc func openSettings(_ sender: Any?) {
         if settingsWindow == nil {
-            settingsWindow = SettingsWindow(settings: settings)
+            let window = SettingsWindow(settings: settings)
+            window.historyCount = { [weak self] in self?.history.count ?? 0 }
+            window.onClearHistory = { [weak self] in self?.history.clear() }
+            settingsWindow = window
         }
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
@@ -215,6 +220,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
               let url = navigationAction.request.url else { return .allow }
         openInNewTab(url, activate: navigationAction.modifierFlags.contains(.shift))
         return .cancel
+    }
+
+    /// Une page vue est une page arrivée. Enregistrer au départ de la navigation
+    /// compterait les redirections et les erreurs comme des visites.
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard let url = webView.url else { return }
+        history.record(url: url, title: webView.title ?? "")
     }
 
     /// `target="_blank"` et `window.open` : WebKit demande une nouvelle vue plutôt que de
@@ -742,6 +754,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         guard !trimmed.isEmpty else { return matchingTabs }
 
         var results = matchingTabs
+        // L'historique après les onglets ouverts : un onglet déjà là se retrouve plus vite
+        // qu'une page à recharger, même si on l'a visitée cent fois.
+        let openURLs = Set(spaces.flatMap(\.allTabs).compactMap(\.url?.absoluteString))
+        for entry in history.search(trimmed) where !openURLs.contains(entry.url.absoluteString) {
+            results.append(.history(url: entry.url, title: entry.title,
+                                    icon: favicons.icon(for: entry.url)))
+        }
         if let url = Self.directURL(trimmed) { results.append(.url(url)) }
         results.append(.search(trimmed))
         return results
@@ -753,6 +772,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             currentSpaceIndex = spaceIndex
             if let tab = currentSpace.tab(with: tabID) { currentSpace.current = tab }
             activateCurrentTab()
+        case .history(let url, _, _):
+            currentTab?.webView.load(URLRequest(url: url))
         case .url(let url):
             currentTab?.webView.load(URLRequest(url: url))
         case .search(let query):

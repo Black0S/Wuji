@@ -7,12 +7,14 @@ enum OmniboxResult {
     /// tous les espaces, pas seulement celui qui est ouvert. Sans ça, retrouver un onglet
     /// demanderait de deviner d'abord dans quel espace on l'a laissé.
     case tab(space: Int, tab: UUID, title: String, subtitle: String, icon: NSImage?)
+    case history(url: URL, title: String, icon: NSImage?)
     case url(URL)
     case search(String)
 
     var title: String {
         switch self {
         case .tab(_, _, let title, _, _): return title
+        case .history(_, let title, _):   return title
         case .url(let url):               return url.absoluteString
         case .search(let query):          return query
         }
@@ -21,6 +23,7 @@ enum OmniboxResult {
     var subtitle: String {
         switch self {
         case .tab(_, _, _, let subtitle, _): return subtitle
+        case .history(let url, _, _):        return url.host() ?? url.absoluteString
         case .url:                           return "Ouvrir l'adresse"
         case .search:                        return "Rechercher"
         }
@@ -30,21 +33,28 @@ enum OmniboxResult {
     /// forme, jamais à une couleur (spec §4.6).
     var icon: NSImage? {
         switch self {
-        case .tab(_, _, _, _, let icon): return icon
-        default:                         return nil
+        case .tab(_, _, _, _, let icon):  return icon
+        case .history(_, _, let icon):    return icon
+        default:                          return nil
         }
     }
 
     var fallbackGlyph: String {
         switch self {
-        case .tab:    return "square.on.square"
-        case .url:    return "arrow.up.right"
-        case .search: return "magnifyingglass"
+        case .tab:     return "square.on.square"
+        case .history: return "clock"
+        case .url:     return "arrow.up.right"
+        case .search:  return "magnifyingglass"
         }
     }
 
     var isTab: Bool {
         if case .tab = self { return true }
+        return false
+    }
+
+    var isHistory: Bool {
+        if case .history = self { return true }
         return false
     }
 }
@@ -271,18 +281,20 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
         headers = []
         entries = []
 
-        // Deux groupes seulement : ce qui est déjà ouvert, et ce qui ne l'est pas. Au-delà,
-        // les titres coûteraient plus de lecture qu'ils n'en font gagner.
-        let tabs = results.indices.filter { results[$0].isTab }
-        let others = results.indices.filter { !results[$0].isTab }
-
-        if !tabs.isEmpty {
-            appendHeader("Onglets ouverts")
-            tabs.forEach { appendRow(at: $0) }
-        }
-        if !others.isEmpty {
-            if !tabs.isEmpty { appendHeader("Suggestions") }
-            others.forEach { appendRow(at: $0) }
+        // Trois natures, dans l'ordre où elles répondent à la question « où est-ce que je
+        // veux aller » : ce qui est déjà ouvert, ce qu'on a déjà visité, puis ce qu'il
+        // faudrait aller chercher.
+        let groups: [(String, [Int])] = [
+            ("Onglets ouverts", results.indices.filter { results[$0].isTab }),
+            ("Déjà visité", results.indices.filter { results[$0].isHistory }),
+            ("Suggestions", results.indices.filter { !results[$0].isTab && !results[$0].isHistory })
+        ]
+        let visible = groups.filter { !$0.1.isEmpty }
+        for (title, indices) in visible {
+            // Un seul groupe n'a pas besoin d'être nommé : le titre coûterait plus de
+            // lecture qu'il n'en ferait gagner.
+            if visible.count > 1 { appendHeader(title) }
+            indices.forEach { appendRow(at: $0) }
         }
         updateSelection()
     }

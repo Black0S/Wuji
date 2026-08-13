@@ -133,7 +133,22 @@ final class SettingsWindow: NSWindow {
         }
     }
 
+    /// Fourni par l'application : le panneau ne connaît pas l'historique, il déclenche.
+    var onClearHistory: (() -> Void)?
+    var historyCount: () -> Int = { 0 }
+
     private func buildPrivacy(_ pane: PaneBuilder) {
+        pane.slider(title: "Conserver l'historique",
+                    subtitle: "Au-delà, les pages sont effacées au lancement suivant.",
+                    value: CGFloat(settings.historyRetention), range: 7...365, unit: "j") { [weak self] in
+            self?.settings.historyRetention = Int($0)
+        }
+        pane.button(title: "Effacer l'historique",
+                    subtitle: "\(historyCount()) page(s) enregistrée(s). L'effacement est immédiat et définitif.",
+                    action: "Effacer") { [weak self] in
+            self?.onClearHistory?()
+            self?.select(.privacy)
+        }
         pane.toggle(title: "Autoriser l'inspection Safari",
                     subtitle: "Ouvre l'inspecteur web d'Apple sur les pages de Wuji. Aucun inspecteur maison n'est prévu.",
                     isOn: settings.safariInspection) { [weak self] in self?.settings.safariInspection = $0 }
@@ -219,6 +234,16 @@ private final class PaneBuilder {
             readout.stringValue = String(format: "%.2f %@", control.doubleValue, unit)
             action(CGFloat(control.doubleValue))
         }
+        container.addSubview(control)
+        cursor += height
+    }
+
+    func button(title: String, subtitle: String?, action label: String, handler: @escaping () -> Void) {
+        let height = row(title: title, subtitle: subtitle)
+        let control = NSButton(title: label, target: nil, action: nil)
+        control.bezelStyle = .rounded
+        control.frame = NSRect(x: width - Tokens.Space.xl - 110, y: cursor, width: 110, height: 24)
+        Handler.attach(to: control) { handler() }
         container.addSubview(control)
         cursor += height
     }

@@ -68,6 +68,9 @@ final class Settings {
     var homepage = "https://www.apple.com" { didSet { changed() } }
     var pageZoom: CGFloat = 1 { didSet { changed() } }
     var safariInspection = false { didSet { changed() } }
+    /// Rétention de l'historique, en jours. La spec §4.1 la veut configurable : c'est ce
+    /// qui rend « vos données restent chez vous » vérifiable plutôt que déclaratif.
+    var historyRetention: Int = 90 { didSet { changed() } }
 
     var onChange: (() -> Void)?
 
