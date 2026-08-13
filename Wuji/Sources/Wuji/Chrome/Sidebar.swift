@@ -409,7 +409,7 @@ private final class SpaceSwitcher: ThemedView {
     var hoverEnabled = true
 
     private let glyph = NSImageView()
-    private let label = NSTextField(labelWithString: "")
+    private let label = InsetTextField.label(weight: .medium)
     private let chevron = NSImageView()
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
@@ -461,8 +461,9 @@ private final class SpaceSwitcher: ThemedView {
 
         glyph.frame = NSRect(x: Tokens.Space.s, y: (bounds.height - 14) / 2, width: 14, height: 14)
         let left = Tokens.Space.s + 14 + Tokens.Space.m
-        label.frame = NSRect(x: left, y: (bounds.height - 16) / 2,
-                             width: bounds.width - left - 28, height: 16)
+        // Cadre pleine hauteur : une étiquette d'une ligne se centre dans son cadre,
+        // alors qu'un cadre à hauteur fixe la laisse flotter au-dessus du glyphe.
+        label.frame = NSRect(x: left, y: 0, width: bounds.width - left - 28, height: bounds.height)
         chevron.frame = NSRect(x: bounds.width - 22, y: (bounds.height - 12) / 2, width: 12, height: 12)
     }
 
@@ -486,8 +487,8 @@ private final class FolderRow: ThemedView {
 
     private let chevron = NSImageView()
     private let glyph = NSImageView()
-    private let label = NSTextField(labelWithString: "")
-    private let count = NSTextField(labelWithString: "")
+    private let label = InsetTextField.label(weight: .medium)
+    private let count = InsetTextField.label(size: 12, alignment: .right)
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
 
@@ -539,9 +540,9 @@ private final class FolderRow: ThemedView {
         chevron.frame = NSRect(x: Tokens.Space.xs, y: (bounds.height - 10) / 2, width: 10, height: 10)
         glyph.frame = NSRect(x: Tokens.Space.m + 4, y: (bounds.height - 14) / 2, width: 14, height: 14)
         let left = Tokens.Space.m + 4 + 14 + Tokens.Space.s
-        count.frame = NSRect(x: bounds.width - 30, y: (bounds.height - 15) / 2, width: 22, height: 15)
-        label.frame = NSRect(x: left, y: (bounds.height - 16) / 2,
-                             width: count.frame.minX - left - Tokens.Space.xs, height: 16)
+        count.frame = NSRect(x: bounds.width - 30, y: 0, width: 22, height: bounds.height)
+        label.frame = NSRect(x: left, y: 0,
+                             width: count.frame.minX - left - Tokens.Space.xs, height: bounds.height)
     }
 
 
@@ -565,7 +566,7 @@ private final class TabRow: ThemedView {
     var hoverEnabled = true { didSet { if !hoverEnabled { isHovered = false; needsLayout = true } } }
 
     private let icon = NSImageView()
-    private let label = NSTextField(labelWithString: "")
+    private let label = InsetTextField.label()
     private let close = NSButton()
     private let isSelected: Bool
     private let depth: Int
@@ -641,8 +642,7 @@ private final class TabRow: ThemedView {
         icon.frame = NSRect(x: Tokens.Space.s + indent, y: (bounds.height - iconSize) / 2,
                             width: iconSize, height: iconSize)
         let left = Tokens.Space.s + indent + iconSize + Tokens.Space.m
-        label.frame = NSRect(x: left, y: (bounds.height - 16) / 2,
-                             width: max(0, bounds.width - left - 26), height: 16)
+        label.frame = NSRect(x: left, y: 0, width: max(0, bounds.width - left - 26), height: bounds.height)
         close.frame = NSRect(x: bounds.width - 22, y: (bounds.height - 18) / 2, width: 18, height: 18)
     }
 
@@ -662,8 +662,8 @@ private final class FooterButton: ThemedView {
     var onClick: (() -> Void)?
 
     private let glyph = NSImageView()
-    private let label = NSTextField(labelWithString: "")
-    private let shortcut = NSTextField(labelWithString: "")
+    private let label = InsetTextField.label()
+    private let shortcut = InsetTextField.label(size: 12, alignment: .right)
 
     init(symbol: String, title: String, shortcut key: String) {
         super.init(frame: .zero)
@@ -685,9 +685,9 @@ private final class FooterButton: ThemedView {
         label.textColor = Tokens.textSecondary
         shortcut.textColor = Tokens.textSecondary
         glyph.frame = NSRect(x: Tokens.Space.s, y: (bounds.height - 14) / 2, width: 14, height: 14)
-        label.frame = NSRect(x: Tokens.Space.s + 14 + Tokens.Space.s, y: (bounds.height - 16) / 2,
-                             width: bounds.width - 90, height: 16)
-        shortcut.frame = NSRect(x: bounds.width - 44, y: (bounds.height - 15) / 2, width: 36, height: 15)
+        label.frame = NSRect(x: Tokens.Space.s + 14 + Tokens.Space.s, y: 0,
+                             width: bounds.width - 90, height: bounds.height)
+        shortcut.frame = NSRect(x: bounds.width - 44, y: 0, width: 36, height: bounds.height)
     }
 
 

@@ -236,8 +236,8 @@ private final class SpaceRow: ThemedView, NSTextFieldDelegate {
     var onRename: ((String) -> Void)?
 
     private let glyph = NSImageView()
-    private let label = NSTextField(labelWithString: "")
-    private let count = NSTextField(labelWithString: "")
+    private let label = InsetTextField.label()
+    private let count = InsetTextField.label(size: 12, alignment: .right)
     private let isCurrent: Bool
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
@@ -297,10 +297,12 @@ private final class SpaceRow: ThemedView, NSTextFieldDelegate {
 
         glyph.frame = NSRect(x: Tokens.Space.m, y: (bounds.height - 15) / 2, width: 15, height: 15)
         let left = Tokens.Space.m + 15 + Tokens.Space.m
-        count.frame = NSRect(x: bounds.width - 44, y: (bounds.height - 15) / 2, width: 36, height: 15)
-        count.isHidden = isRenaming
-        label.frame = NSRect(x: left, y: (bounds.height - 20) / 2,
-                             width: count.frame.minX - left - Tokens.Space.s, height: 20)
+        // Cadres pleine hauteur : une étiquette sur une seule ligne se centre dans son
+        // cadre, alors qu'un cadre à hauteur fixe la laisse flotter d'un point ou deux
+        // au-dessus du glyphe. C'est peu et ça se voit.
+        count.frame = NSRect(x: bounds.width - 44, y: 0, width: 36, height: bounds.height)
+        label.frame = NSRect(x: left, y: 0,
+                             width: count.frame.minX - left - Tokens.Space.s, height: bounds.height)
     }
 
     override func mouseDown(with event: NSEvent) {

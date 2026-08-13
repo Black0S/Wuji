@@ -41,7 +41,7 @@ final class ActionSheet: ThemedView {
     private var isCentered = false
 
     /// Champ de saisie, pour les feuilles qui demandent un mot plutôt qu'un choix.
-    private let field = NSTextField()
+    private let field = InsetTextField()
     private var hasField = false
 
     /// Pile de navigation : la racine, puis chaque niveau ouvert.
@@ -78,6 +78,7 @@ final class ActionSheet: ThemedView {
 
         field.isBordered = false
         field.drawsBackground = true
+        field.contentInset = Tokens.Space.m
         field.focusRingType = .none
         field.font = .systemFont(ofSize: 13, weight: .regular)
         field.isHidden = true
@@ -248,7 +249,7 @@ final class ActionSheet: ThemedView {
         let textWidth = Self.cardWidth - Tokens.Space.l * 2
         let messageHeight: CGFloat
         if hasField {
-            messageHeight = 30
+            messageHeight = 34
         } else if hasHeader {
             messageHeight = messageLabel.sizeThatFits(NSSize(width: textWidth,
                                                             height: .greatestFiniteMagnitude)).height
@@ -378,8 +379,8 @@ private final class ActionRow: ThemedView {
     var isSelected = false { didSet { needsLayout = true } }
 
     private let glyph = NSImageView()
-    private let label = NSTextField(labelWithString: "")
-    private let shortcut = NSTextField(labelWithString: "")
+    private let label = InsetTextField.label()
+    private let shortcut = InsetTextField.label(size: 12, alignment: .right)
     private let chevron = NSImageView()
     private let isEnabled: Bool
     private let isDestructive: Bool
@@ -450,11 +451,12 @@ private final class ActionRow: ThemedView {
                              width: glyphSize, height: glyphSize)
         let left = Tokens.Space.s + glyphSize + Tokens.Space.m
         let rightWidth: CGFloat = 56
-        shortcut.frame = NSRect(x: bounds.width - rightWidth - Tokens.Space.s,
-                                y: (bounds.height - 15) / 2, width: rightWidth, height: 15)
+        shortcut.frame = NSRect(x: bounds.width - rightWidth - Tokens.Space.s, y: 0,
+                                width: rightWidth, height: bounds.height)
         chevron.frame = NSRect(x: bounds.width - 18, y: (bounds.height - 11) / 2, width: 11, height: 11)
-        label.frame = NSRect(x: left, y: (bounds.height - 16) / 2,
-                             width: max(0, shortcut.frame.minX - left - Tokens.Space.xs), height: 16)
+        label.frame = NSRect(x: left, y: 0,
+                             width: max(0, shortcut.frame.minX - left - Tokens.Space.xs),
+                             height: bounds.height)
     }
 
     override func mouseUp(with event: NSEvent) {
