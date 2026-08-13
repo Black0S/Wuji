@@ -63,9 +63,15 @@ final class Settings {
 
     // Apparence
     var theme: Theme = .auto { didSet { changed() } }
-    /// Le garde-fou d'accessibilité de la spec §4.5 : l'auto-masquage est hostile à la
-    /// navigation clavier exclusive et à VoiceOver. En faire un choix, jamais une contrainte.
-    var alwaysVisibleUI = false { didSet { changed() } }
+    /// Interface visible en permanence, **par défaut**.
+    ///
+    /// La spec avait prévu ce réglage comme garde-fou d'accessibilité (§4.5) : l'auto-
+    /// masquage est hostile à la navigation clavier exclusive et à VoiceOver. Il devient
+    /// le comportement par défaut, l'escamotage automatique un choix.
+    ///
+    /// C'est l'inverse de ce que dit le principe 1, et c'est une décision de produit à
+    /// trancher, pas un réglage à ajuster — voir la note dans le README.
+    var alwaysVisibleUI = true { didSet { changed() } }
     var hideDelay: TimeInterval = 0.35 { didSet { changed() } }
 
     // Révélation — les seuils que J0 doit trouver, réglables sans recompiler

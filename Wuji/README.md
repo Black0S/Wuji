@@ -40,11 +40,31 @@ Sources/Wuji/
 
 Le curseur poussé contre le bord haut ou le bord gauche révèle l'interface.
 
+## ⚠️ Décision en attente : l'interface reste visible
+
+**L'interface est désormais visible en permanence par défaut.** L'escamotage automatique
+existe toujours et se réactive dans Réglages › Apparence, mais il n'est plus le
+comportement de départ.
+
+C'est l'inverse du principe 1 de la spec, et ce n'est pas un réglage d'agrément : c'est le
+risque n°2 de la roadmap — *« l'auto-masquage est fatigant à l'usage »*, dont la parade
+prévue était précisément ce réglage. Deux lectures possibles, et elles n'ont pas les mêmes
+conséquences :
+
+1. **Confort de développement.** On garde l'interface visible pendant qu'on construit, et
+   l'escamotage redevient le défaut plus tard. Rien à changer dans la spec.
+2. **Verdict sur le concept.** Vivre sans interface est désagréable, et alors *« le
+   navigateur qui disparaît »* ne tient pas comme thèse produit. Il faut réécrire le
+   principe 1, l'identité (§9) et une partie de la roadmap.
+
+**Tant que ce n'est pas tranché, le reste du projet avance sur une base incertaine.**
+
 ## Ce qui existe
 
 - **Layout vertical ancré.** Sidebar à gauche, contenu après elle. Quand l'interface
   s'escamote, la sidebar sort par la gauche et le contenu reprend toute la fenêtre.
 - **Révélation à l'intention**, avec hystérésis et délai réglables en direct.
+  Désactivée par défaut — voir ci-dessus.
 - **Palette omnibox** — adresse, recherche, et les onglets ouverts en tête des résultats.
 - **Liseré de sécurité** pour les connexions non chiffrées, posé au-dessus du web view
   et non autour : la page ne se remet jamais en page.
