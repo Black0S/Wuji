@@ -23,7 +23,12 @@ final class Tab {
     }
 
     var url: URL? { webView.url }
-    var title: String { webView.title ?? url?.host() ?? "Nouvel onglet" }
+    /// Un titre vide n'est pas `nil` : une page qui commence à charger en renvoie un, et
+    /// la ligne se réduirait alors à son marqueur de chargement.
+    var title: String {
+        if let title = webView.title, !title.isEmpty { return title }
+        return url?.host() ?? "Nouvel onglet"
+    }
 
     /// L'état de sécurité déduit de l'URL. Le vrai signal (certificat invalide,
     /// permission caméra active) arrive en J1/J2 — ici on valide le vocabulaire visuel.

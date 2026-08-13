@@ -69,6 +69,7 @@ final class Space {
     /// entre deux lignes — c'est ce qui permet de sortir d'un dossier en glissant sous lui.
     enum Destination {
         case before(Tab)
+        case after(Tab)
         case into(TabFolder)
         case pinnedEnd
         case looseEnd
@@ -131,7 +132,9 @@ final class Space {
         detach(tab)
         switch destination {
         case .before(let neighbour):
-            insert(tab, before: neighbour)
+            insert(tab, before: neighbour, offset: 0)
+        case .after(let neighbour):
+            insert(tab, before: neighbour, offset: 1)
         case .into(let folder):
             tab.isPinned = false
             folder.tabs.append(tab)
@@ -185,22 +188,22 @@ final class Space {
 
     /// Le conteneur d'arrivée est celui du voisin : déposer sous le dernier onglet d'un
     /// dossier fait entrer dans ce dossier, déposer sous un onglet de passage en fait un.
-    private func insert(_ tab: Tab, before neighbour: Tab) {
+    private func insert(_ tab: Tab, before neighbour: Tab, offset: Int) {
         if let index = pinned.firstIndex(where: { $0 === neighbour }) {
             tab.isPinned = true
-            pinned.insert(tab, at: index)
+            pinned.insert(tab, at: index + offset)
             return
         }
         for folder in folders {
             if let index = folder.tabs.firstIndex(where: { $0 === neighbour }) {
                 tab.isPinned = false
-                folder.tabs.insert(tab, at: index)
+                folder.tabs.insert(tab, at: index + offset)
                 return
             }
         }
         if let index = loose.firstIndex(where: { $0 === neighbour }) {
             tab.isPinned = false
-            loose.insert(tab, at: index)
+            loose.insert(tab, at: index + offset)
             return
         }
         tab.isPinned = false

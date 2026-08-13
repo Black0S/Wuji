@@ -2,7 +2,8 @@ import AppKit
 import WebKit
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate, OmniboxDelegate, FindBarDelegate, SpacesPanelDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate, OmniboxDelegate, FindBarDelegate, SpacesPanelDelegate,
+                       WKNavigationDelegate, WKUIDelegate {
 
     private var window: BrowserWindow!
     private var layout: BrowserLayout!
@@ -105,10 +106,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     }
 
     private func newTab(url: URL?) {
-        let tab = Tab(configuration: configuration)
+        let tab = makeTab()
         currentSpace.append(tab)
         activateCurrentTab()
         if let url { tab.webView.load(URLRequest(url: url)) }
+    }
+
+    private func makeTab(configuration override: WKWebViewConfiguration? = nil) -> Tab {
+        let tab = Tab(configuration: override ?? configuration)
+        tab.webView.navigationDelegate = self
+        tab.webView.uiDelegate = self
+        tab.webView.pageZoom = settings.pageZoom
+        tab.webView.isInspectable = settings.safariInspection
+        return tab
+    }
+
+    // MARK: - Ouverture en arrière-plan
+
+    /// `⌘clic` ouvre dans un nouvel onglet **sans y aller** ; `⌘⇧clic` y va. C'est la
+    /// convention de tous les navigateurs, et elle vaut d'être respectée : on ⌘-clique
+    /// justement pour ne pas quitter la page qu'on est en train de lire.
+    func webView(_ webView: WKWebView,
+                 decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+        guard navigationAction.navigationType == .linkActivated,
+              navigationAction.modifierFlags.contains(.command),
+              let url = navigationAction.request.url else { return .allow }
+        openInNewTab(url, activate: navigationAction.modifierFlags.contains(.shift))
+        return .cancel
+    }
+
+    /// `target="_blank"` et `window.open` : WebKit demande une nouvelle vue plutôt que de
+    /// naviguer. Rendre `nil` reviendrait à avaler le lien en silence — c'est le défaut le
+    /// plus courant des navigateurs maison.
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction,
+                 windowFeatures: WKWindowFeatures) -> WKWebView? {
+        let tab = makeTab(configuration: configuration)
+        currentSpace.append(tab)
+        activateCurrentTab()
+        return tab.webView
+    }
+
+    private func openInNewTab(_ url: URL, activate: Bool) {
+        let staying = currentSpace.current
+        let tab = makeTab()
+        currentSpace.append(tab)
+        tab.webView.load(URLRequest(url: url))
+        // L'onglet naît juste après celui d'où l'on vient : au bout de la liste, il
+        // faudrait aller le chercher.
+        if let staying { currentSpace.place(tab, at: .after(staying)) }
+        if !activate, let staying { currentSpace.current = staying }
+        activateCurrentTab()
     }
 
     private func select(tabID: UUID) {
@@ -262,95 +310,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private func showTabMenu(_ id: UUID, _ event: NSEvent) {
         let space = currentSpace
         guard let tab = space.tab(with: id) else { return }
-        let menu = NSMenu()
-        menu.autoenablesItems = false
 
-        let pin = NSMenuItem(title: tab.isPinned ? "Désépingler" : "Épingler",
-                             action: #selector(togglePinFromMenu(_:)), keyEquivalent: "")
-        pin.image = NSImage(systemSymbolName: tab.isPinned ? "pin.slash" : "pin",
-                            accessibilityDescription: nil)
-        pin.target = self
-        pin.representedObject = id
-        menu.addItem(pin)
-
-        // Le glisser-déposer reste le geste principal ; ce sous-menu est le chemin
-        // clavier-souris équivalent, pour qui ne veut pas viser.
-        let move = NSMenuItem(title: "Déplacer vers", action: nil, keyEquivalent: "")
-        let submenu = NSMenu()
-        submenu.autoenablesItems = false
-        for folder in space.folders {
-            let item = NSMenuItem(title: folder.name, action: #selector(moveToFolder(_:)), keyEquivalent: "")
-            item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
-            item.target = self
-            item.representedObject = [id, folder.id]
-            submenu.addItem(item)
+        // Le glisser-déposer reste le geste principal ; ce niveau est le chemin
+        // équivalent pour qui préfère ne pas viser.
+        var destinations = space.folders.map { folder in
+            ActionItem(title: folder.name, symbol: "folder",
+                       action: { [weak self] in
+                           guard let self, let tab = self.currentSpace.tab(with: id) else { return }
+                           self.currentSpace.place(tab, at: .into(folder))
+                           self.syncSidebar()
+                       })
         }
-        if !space.folders.isEmpty { submenu.addItem(.separator()) }
-        let out = NSMenuItem(title: "Hors dossier", action: #selector(moveToFolder(_:)), keyEquivalent: "")
-        out.target = self
-        out.representedObject = [id]
-        submenu.addItem(out)
-        move.submenu = submenu
-        menu.addItem(move)
+        if !destinations.isEmpty { destinations.append(.separator) }
+        destinations.append(ActionItem(title: "Hors dossier", symbol: "tray",
+                                       action: { [weak self] in
+                                           guard let self, let tab = self.currentSpace.tab(with: id) else { return }
+                                           self.currentSpace.place(tab, at: .looseEnd)
+                                           self.syncSidebar()
+                                       }))
 
-        menu.addItem(.separator())
-        let close = NSMenuItem(title: "Fermer l'onglet", action: #selector(closeFromMenu(_:)), keyEquivalent: "")
-        close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)
-        close.target = self
-        close.representedObject = id
-        menu.addItem(close)
-
-        NSMenu.popUpContextMenu(menu, with: event, for: layout.sidebar)
+        let items: [ActionItem] = [
+            ActionItem(title: tab.isPinned ? "Désépingler" : "Épingler",
+                       symbol: tab.isPinned ? "pin.slash" : "pin", shortcut: "⇧⌘P",
+                       action: { [weak self] in
+                           guard let self, let tab = self.currentSpace.tab(with: id) else { return }
+                           self.currentSpace.setPinned(!tab.isPinned, tab: tab)
+                           self.syncSidebar()
+                       }),
+            ActionItem(title: "Déplacer vers", symbol: "arrow.right.doc.on.clipboard",
+                       children: destinations),
+            .separator,
+            ActionItem(title: "Fermer l'onglet", symbol: "xmark", shortcut: "⌘W",
+                       isDestructive: true,
+                       action: { [weak self] in self?.close(tabID: id) })
+        ]
+        presentSheet(items, at: event)
     }
 
     private func showFolderMenu(_ id: UUID, _ event: NSEvent) {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-
-        let rename = NSMenuItem(title: "Renommer", action: #selector(renameFolder(_:)), keyEquivalent: "")
-        rename.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
-        rename.target = self
-        rename.representedObject = id
-        menu.addItem(rename)
-
-        let delete = NSMenuItem(title: "Supprimer le dossier", action: #selector(deleteFolder(_:)), keyEquivalent: "")
-        delete.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
-        delete.target = self
-        delete.representedObject = id
-        menu.addItem(delete)
-
-        NSMenu.popUpContextMenu(menu, with: event, for: layout.sidebar)
+        let items: [ActionItem] = [
+            ActionItem(title: "Renommer", symbol: "pencil",
+                       action: { [weak self] in self?.renameFolder(id) }),
+            ActionItem(title: "Supprimer le dossier", symbol: "trash", isDestructive: true,
+                       action: { [weak self] in self?.deleteFolder(id) })
+        ]
+        presentSheet(items, at: event)
     }
 
-    @objc private func togglePinFromMenu(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? UUID,
-              let tab = currentSpace.tab(with: id) else { return }
-        currentSpace.setPinned(!tab.isPinned, tab: tab)
-        syncSidebar()
-    }
-
-    @objc private func closeFromMenu(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? UUID else { return }
-        close(tabID: id)
-    }
-
-    @objc private func moveToFolder(_ sender: NSMenuItem) {
-        guard let ids = sender.representedObject as? [UUID], let tabID = ids.first,
-              let tab = currentSpace.tab(with: tabID) else { return }
-        if ids.count > 1, let folder = currentSpace.folder(with: ids[1]) {
-            currentSpace.place(tab, at: .into(folder))
-        } else {
-            currentSpace.place(tab, at: .looseEnd)
-        }
-        syncSidebar()
+    private func presentSheet(_ items: [ActionItem], at event: NSEvent) {
+        let point = layout.convert(event.locationInWindow, from: nil)
+        layout.actionSheet.present(items, at: point)
     }
 
     /// Renommer un dossier passe par une boîte de dialogue, faute d'une ligne qui puisse
     /// devenir éditable comme dans le panneau des espaces — la sidebar reconstruit ses
     /// lignes à chaque changement, l'édition en place n'y survivrait pas.
-    @objc private func renameFolder(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? UUID,
-              let folder = currentSpace.folder(with: id) else { return }
+    private func renameFolder(_ id: UUID) {
+        guard let folder = currentSpace.folder(with: id) else { return }
         let alert = NSAlert()
         alert.messageText = "Renommer le dossier"
         alert.addButton(withTitle: "Renommer")
@@ -368,9 +384,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     /// Supprimer un dossier ne ferme pas ses onglets : ils redeviennent des onglets de
     /// passage. Rien à confirmer, rien n'est perdu.
-    @objc private func deleteFolder(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? UUID,
-              let folder = currentSpace.folder(with: id) else { return }
+    private func deleteFolder(_ id: UUID) {
+        guard let folder = currentSpace.folder(with: id) else { return }
         currentSpace.removeFolder(folder)
         syncSidebar()
     }
@@ -396,7 +411,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         switch action {
         case .back:    currentTab?.webView.goBack()
         case .forward: currentTab?.webView.goForward()
+        case .menu:    layout.actionSheet.present(mainMenu(), below: bar.menuButton)
         }
+    }
+
+    /// Le menu principal ne contient que ce qui existe. La maquette en montrait onze
+    /// entrées ; les favoris, l'historique, les téléchargements et la session privée
+    /// n'existent pas encore, et les afficher grisés donnerait l'illusion d'un produit
+    /// plus avancé qu'il ne l'est.
+    private func mainMenu() -> [ActionItem] {
+        [
+            ActionItem(title: "Nouvel onglet", symbol: "plus", shortcut: "⌘T",
+                       action: { [weak self] in self?.newTab(nil) }),
+            ActionItem(title: "Nouveau dossier", symbol: "folder.badge.plus", shortcut: "⇧⌘N",
+                       action: { [weak self] in self?.newFolder(nil) }),
+            .separator,
+            ActionItem(title: "Rechercher dans la page…", symbol: "magnifyingglass", shortcut: "⌘F",
+                       action: { [weak self] in self?.findInPage(nil) }),
+            ActionItem(title: "Imprimer…", symbol: "printer", shortcut: "⌘P",
+                       action: { [weak self] in self?.printPage(nil) }),
+            .separator,
+            ActionItem(title: "Réglages…", symbol: "gearshape", shortcut: "⌘,",
+                       action: { [weak self] in self?.openSettings(nil) }),
+            ActionItem(title: "À propos de Wuji", symbol: "info.circle",
+                       action: { NSApp.orderFrontStandardAboutPanel(nil) })
+        ]
+    }
+
+    @objc func printPage(_ sender: Any?) {
+        guard let webView = currentTab?.webView else { return }
+        webView.printOperation(with: .shared).run()
     }
 
     // MARK: - Espaces

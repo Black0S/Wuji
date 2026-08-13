@@ -16,12 +16,13 @@ final class BrowserLayout: ThemedView {
     let findBar = FindBar()
     let spacesPanel = SpacesPanel()
     let omnibox = Omnibox()
+    let actionSheet = ActionSheet()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         // La palette passe au-dessus de tout le reste, y compris de la barre de recherche.
-        [content, topBar, sidebar, findBar, spacesPanel, omnibox].forEach { addSubview($0) }
+        [content, topBar, sidebar, findBar, spacesPanel, omnibox, actionSheet].forEach { addSubview($0) }
     }
 
     @available(*, unavailable)
@@ -45,5 +46,8 @@ final class BrowserLayout: ThemedView {
         findBar.frame = content.frame
         // Le panneau des espaces déborde sur la sidebar : il s'ancre sur elle.
         spacesPanel.frame = bounds
+        // La feuille d'action couvre toute la fenêtre : elle s'ouvre aussi bien sous un
+        // bouton de la barre que sous le curseur, au fond de la sidebar.
+        actionSheet.frame = bounds
     }
 }
