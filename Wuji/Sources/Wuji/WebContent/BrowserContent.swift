@@ -20,6 +20,16 @@ final class BrowserContent: ThemedView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+
+        // Seul l'angle haut-gauche est arrondi : c'est celui où la sidebar et la barre du
+        // haut se rejoignent. Les trois autres touchent les bords de la fenêtre, qui a
+        // déjà ses propres arrondis — les arrondir aussi creuserait un liseré de fond
+        // visible dans les coins.
+        layer?.cornerRadius = Tokens.Chrome.contentCorner
+        layer?.cornerCurve = .continuous
+        layer?.maskedCorners = [.layerMinXMaxYCorner]
+        layer?.masksToBounds = true
+
         progress.wantsLayer = true
         progress.layer?.opacity = 0
         addSubview(border)

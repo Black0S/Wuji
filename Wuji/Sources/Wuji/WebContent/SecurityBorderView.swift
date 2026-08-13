@@ -50,17 +50,32 @@ final class SecurityBorderView: ThemedView {
 
     override func layout() {
         super.layout()
-        let inset = Tokens.Security.width / 2
-        let rect = bounds.insetBy(dx: inset, dy: inset)
         // Pas d'animation implicite sur le redimensionnement de fenêtre, sinon le liseré traîne.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         stroke.frame = bounds
-        stroke.path = CGPath(roundedRect: rect,
-                             cornerWidth: Tokens.Radius.card,
-                             cornerHeight: Tokens.Radius.card,
-                             transform: nil)
+        stroke.path = borderPath()
         CATransaction.commit()
+    }
+
+    /// Le liseré épouse la forme réelle du contenu : arrondi au seul angle haut-gauche,
+    /// carré ailleurs. Un rectangle uniformément arrondi laisserait le trait décoller du
+    /// bord dans les trois autres coins.
+    private func borderPath() -> CGPath {
+        let inset = Tokens.Security.width / 2
+        let rect = bounds.insetBy(dx: inset, dy: inset)
+        let radius = Tokens.Chrome.contentCorner
+        let path = CGMutablePath()
+
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - radius))
+        path.addArc(tangent1End: CGPoint(x: rect.minX, y: rect.maxY),
+                    tangent2End: CGPoint(x: rect.minX + radius, y: rect.maxY),
+                    radius: radius)
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.closeSubpath()
+        return path
     }
 
     override func updateLayer() {

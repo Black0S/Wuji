@@ -13,28 +13,24 @@ protocol ContentTopBarDelegate: AnyObject {
 @MainActor
 final class ContentTopBar: ThemedView {
 
-    enum Action { case back, forward, newTab }
+    enum Action { case back, forward }
 
     weak var delegate: ContentTopBarDelegate?
 
     private let back = NSButton()
     private let forward = NSButton()
-    private let newTab = NSButton()
-    private let ring = NSButton()
     private let lock = NSImageView()
     private let address = NSTextField(labelWithString: "")
-    private let hairline = NSView()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
 
+        // Rien à droite : le « + » doublait « Nouvel onglet ⌘T » de la sidebar, et
+        // l'anneau doublait le clic sur l'adresse. Deux chemins vers la même action,
+        // c'est deux éléments à l'écran pour rien (principe 5).
         configure(back, symbol: "chevron.left", label: "Précédent")
         configure(forward, symbol: "chevron.right", label: "Suivant")
-        configure(newTab, symbol: "plus", label: "Nouvel onglet")
-        // L'anneau : le logo sert de point d'entrée à la palette. C'est la seule marque
-        // permanente de l'application dans l'interface — et elle fait quelque chose.
-        configure(ring, symbol: "circle", label: "Omnibox")
 
         lock.imageScaling = .scaleProportionallyDown
         addSubview(lock)
@@ -44,9 +40,6 @@ final class ContentTopBar: ThemedView {
         address.lineBreakMode = .byTruncatingTail
         addSubview(address)
         address.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(openOmnibox)))
-
-        hairline.wantsLayer = true
-        addSubview(hairline)
     }
 
     @available(*, unavailable)
@@ -64,24 +57,20 @@ final class ContentTopBar: ThemedView {
 
     override func layout() {
         super.layout()
-        layer?.backgroundColor = Tokens.chromeBackground.cgColor
-        hairline.layer?.backgroundColor = Tokens.separator.cgColor
-        [back, forward, newTab, ring].forEach { $0.contentTintColor = Tokens.textPrimary }
+        // Même fond que la sidebar : les deux forment un seul cadre, pas deux surfaces
+        // empilées. C'est la courbe du contenu qui fait la jonction, pas un filet.
+        layer?.backgroundColor = Tokens.sidebarBackground.cgColor
+        [back, forward].forEach { $0.contentTintColor = Tokens.textPrimary }
 
         let size: CGFloat = 28
         let y = (bounds.height - size) / 2
         back.frame = NSRect(x: Tokens.Space.l, y: y, width: size, height: size)
         forward.frame = NSRect(x: Tokens.Space.l + size + Tokens.Space.xs, y: y, width: size, height: size)
-        ring.frame = NSRect(x: bounds.width - Tokens.Space.l - size, y: y, width: size, height: size)
-        newTab.frame = NSRect(x: bounds.width - Tokens.Space.l - size * 2 - Tokens.Space.s, y: y,
-                              width: size, height: size)
 
         let addressWidth = min(360, bounds.width - 260)
         address.frame = NSRect(x: (bounds.width - addressWidth) / 2, y: (bounds.height - 16) / 2,
                                width: addressWidth, height: 16)
         lock.frame = NSRect(x: address.frame.minX - 20, y: (bounds.height - 12) / 2, width: 12, height: 12)
-
-        hairline.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 1)
     }
 
     func show(url: URL?, security: SecurityBorderView.State, canGoBack: Bool, canGoForward: Bool) {
@@ -107,8 +96,6 @@ final class ContentTopBar: ThemedView {
         switch sender {
         case back:    delegate?.topBar(self, didTrigger: .back)
         case forward: delegate?.topBar(self, didTrigger: .forward)
-        case newTab:  delegate?.topBar(self, didTrigger: .newTab)
-        case ring:    delegate?.topBarDidRequestOmnibox(self)
         default:      break
         }
     }

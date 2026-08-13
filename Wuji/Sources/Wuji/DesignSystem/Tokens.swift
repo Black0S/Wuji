@@ -71,6 +71,12 @@ enum Tokens {
         /// Hauteur réservée aux feux de circulation en haut de la sidebar. macOS les place
         /// lui-même : tout ce qui commence au-dessus passe dessous.
         static let trafficLights: CGFloat = 44
+
+        /// Le contenu s'arrondit à l'angle où la sidebar et la barre du haut se rejoignent.
+        /// Sidebar et barre partagent la même couleur : sans cette courbe, leur jonction
+        /// formerait un angle droit dur au milieu de la fenêtre. La courbe est ce qui les
+        /// fait lire comme un seul cadre continu plutôt que comme deux bandes collées.
+        static let contentCorner: CGFloat = 10
     }
 
     // MARK: - Élévation — 3 niveaux maximum

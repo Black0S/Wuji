@@ -181,7 +181,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         switch action {
         case .back:    currentTab?.webView.goBack()
         case .forward: currentTab?.webView.goForward()
-        case .newTab:  newTab(nil)
         }
     }
 
