@@ -68,6 +68,20 @@ final class Sidebar: ThemedView {
     private var gapIndex: Int?
     private var proxy: NSImageView?
 
+    /// Les emplacements figés au début du glissement, ligne glissée exclue.
+    ///
+    /// C'est **la** correction qui rend le geste précis : viser sur les cadres vivants
+    /// crée une boucle — ouvrir le trou déplace les voisines, donc la ligne survolée
+    /// change, donc le trou se redéplace, et la cible oscille. On mesure donc contre une
+    /// disposition qui ne bouge plus, pendant que l'affichage, lui, s'anime.
+    private struct Slot {
+        let itemIndex: Int
+        let minY: CGFloat
+        let maxY: CGFloat
+        let folderID: UUID?
+    }
+    private var slots: [Slot] = []
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
@@ -242,7 +256,7 @@ final class Sidebar: ThemedView {
 
             self.proxy?.frame.origin.y = point.y - grab
             let inList = self.list.convert(point, from: self)
-            drop = self.dropTarget(at: inList, dragging: id)
+            drop = self.dropTarget(at: inList)
             self.showDrop(drop)
         }
     }
@@ -273,7 +287,30 @@ final class Sidebar: ThemedView {
         addSubview(floating, positioned: .above, relativeTo: nil)
         proxy = floating
 
+        // Le survol reste allumé sous le curseur qui passe : pendant un glissement il
+        // ferait concurrence au trou, qui est le vrai repère.
+        setHoverEnabled(false)
+
         positionRows(animated: false)
+        captureSlots()
+    }
+
+    private func captureSlots() {
+        slots = items.enumerated().compactMap { index, item in
+            guard item.id != draggingID, rows.indices.contains(index) else { return nil }
+            if case .separator = item { return nil }
+            let frame = rows[index].frame
+            var folderID: UUID?
+            if case .folder(let id, _, _, _) = item { folderID = id }
+            return Slot(itemIndex: index, minY: frame.minY, maxY: frame.maxY, folderID: folderID)
+        }
+    }
+
+    private func setHoverEnabled(_ enabled: Bool) {
+        for row in rows {
+            (row as? TabRow)?.hoverEnabled = enabled
+            (row as? FolderRow)?.hoverEnabled = enabled
+        }
     }
 
     private func endDrag() {
@@ -281,43 +318,40 @@ final class Sidebar: ThemedView {
         proxy = nil
         draggingID = nil
         gapIndex = nil
+        slots = []
         dropHighlight.isHidden = true
         rows.forEach { $0.isHidden = false }
+        setHoverEnabled(true)
     }
 
-    private func dropTarget(at point: NSPoint, dragging id: UUID) -> SidebarDrop? {
-        for (index, item) in items.enumerated() {
-            guard rows.indices.contains(index) else { continue }
-            let frame = rows[index].frame
-            guard point.y >= frame.minY, point.y <= frame.maxY else { continue }
+    private func dropTarget(at point: NSPoint) -> SidebarDrop? {
+        guard let first = slots.first, let last = slots.last else { return .end }
+        if point.y > first.maxY { return insertion(from: first.itemIndex) }
+        if point.y < last.minY { return .end }
 
-            switch item {
-            case .folder(let folderID, _, _, _):
+        for slot in slots {
+            guard point.y >= slot.minY, point.y <= slot.maxY else { continue }
+            if let folderID = slot.folderID {
                 // La bande centrale fait entrer dans le dossier, les bords insèrent
                 // autour : sans cette distinction, on ne pourrait jamais déposer juste
                 // au-dessus d'un dossier.
-                let margin = frame.height * 0.3
-                if point.y > frame.minY + margin, point.y < frame.maxY - margin {
+                let margin = (slot.maxY - slot.minY) * 0.3
+                if point.y > slot.minY + margin, point.y < slot.maxY - margin {
                     return .into(folderID)
                 }
-                return insertion(from: point.y > frame.midY ? index : index + 1)
-
-            case .tab(let tabID, _, _, _, _, _):
-                guard tabID != id else { return nil }
-                return insertion(from: point.y > frame.midY ? index : index + 1)
-
-            case .separator:
-                return insertion(from: index + 1)
             }
+            let middle = (slot.minY + slot.maxY) / 2
+            return insertion(from: point.y > middle ? slot.itemIndex : slot.itemIndex + 1)
         }
-        return point.y > (rows.first?.frame.maxY ?? 0) ? insertion(from: 0) : .end
+        // Entre deux emplacements — l'espace d'un séparateur : on rattache au suivant.
+        return insertion(from: slots.first { $0.maxY < point.y }?.itemIndex ?? 0)
     }
 
-    /// Traduit « à partir de la ligne n » en cible, en sautant dossiers et séparateurs, et
-    /// en tombant sur la fin de liste quand il n'y a plus d'onglet après.
+    /// Traduit « à partir de la ligne n » en cible, en sautant dossiers, séparateurs et la
+    /// ligne glissée elle-même, et en tombant sur la fin de liste quand il n'y a plus rien.
     private func insertion(from index: Int) -> SidebarDrop {
         for item in items.dropFirst(index) {
-            if case .tab(let id, _, _, _, _, _) = item { return .before(id) }
+            if case .tab(let id, _, _, _, _, _) = item, id != draggingID { return .before(id) }
         }
         return .end
     }
@@ -359,6 +393,8 @@ private final class SpaceSwitcher: ThemedView {
 
     var onClick: ((NSView) -> Void)?
 
+    var hoverEnabled = true
+
     private let glyph = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private let chevron = NSImageView()
@@ -399,7 +435,11 @@ private final class SpaceSwitcher: ThemedView {
         trackingArea = area
     }
 
-    override func mouseEntered(with event: NSEvent) { isHovered = true; needsLayout = true }
+    override func mouseEntered(with event: NSEvent) {
+        guard hoverEnabled else { return }
+        isHovered = true
+        needsLayout = true
+    }
     override func mouseExited(with event: NSEvent) { isHovered = false; needsLayout = true }
 
     override func layout() {
@@ -433,6 +473,8 @@ private final class FolderRow: ThemedView {
 
     var onClick: (() -> Void)?
     var onContextMenu: ((NSEvent) -> Void)?
+
+    var hoverEnabled = true { didSet { if !hoverEnabled { isHovered = false; needsLayout = true } } }
 
     private let chevron = NSImageView()
     private let glyph = NSImageView()
@@ -471,7 +513,11 @@ private final class FolderRow: ThemedView {
         trackingArea = area
     }
 
-    override func mouseEntered(with event: NSEvent) { isHovered = true; needsLayout = true }
+    override func mouseEntered(with event: NSEvent) {
+        guard hoverEnabled else { return }
+        isHovered = true
+        needsLayout = true
+    }
     override func mouseExited(with event: NSEvent) { isHovered = false; needsLayout = true }
 
     override func layout() {
@@ -507,6 +553,8 @@ private final class TabRow: ThemedView {
     var onMouseDown: ((NSEvent) -> Void)?
     var onClose: (() -> Void)?
     var onContextMenu: ((NSEvent) -> Void)?
+
+    var hoverEnabled = true { didSet { if !hoverEnabled { isHovered = false; needsLayout = true } } }
 
     private let icon = NSImageView()
     private let label = NSTextField(labelWithString: "")
@@ -560,7 +608,11 @@ private final class TabRow: ThemedView {
         trackingArea = area
     }
 
-    override func mouseEntered(with event: NSEvent) { isHovered = true; needsLayout = true }
+    override func mouseEntered(with event: NSEvent) {
+        guard hoverEnabled else { return }
+        isHovered = true
+        needsLayout = true
+    }
     override func mouseExited(with event: NSEvent) { isHovered = false; needsLayout = true }
 
     override func layout() {
