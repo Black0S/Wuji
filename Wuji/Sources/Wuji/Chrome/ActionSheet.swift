@@ -40,6 +40,10 @@ final class ActionSheet: ThemedView {
     private var hasHeader = false
     private var isCentered = false
 
+    /// Champ de saisie, pour les feuilles qui demandent un mot plutôt qu'un choix.
+    private let field = NSTextField()
+    private var hasField = false
+
     /// Pile de navigation : la racine, puis chaque niveau ouvert.
     private var stack: [[ActionItem]] = []
     private var items: [ActionItem] { stack.last ?? [] }
@@ -71,6 +75,15 @@ final class ActionSheet: ThemedView {
         messageLabel.font = .systemFont(ofSize: 12, weight: .regular)
         card.addSubview(titleLabel)
         card.addSubview(messageLabel)
+
+        field.isBordered = false
+        field.drawsBackground = true
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 13, weight: .regular)
+        field.isHidden = true
+        field.target = self
+        field.action = #selector(commitField)
+        card.addSubview(field)
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             let keyCode = event.keyCode
@@ -104,6 +117,7 @@ final class ActionSheet: ThemedView {
     /// `point` est exprimé dans les coordonnées de cette vue.
     func present(_ items: [ActionItem], at point: NSPoint) {
         hasHeader = false
+        hasField = false
         isCentered = false
         stack = [items]
         anchor = point
@@ -128,6 +142,7 @@ final class ActionSheet: ThemedView {
         titleLabel.stringValue = title
         messageLabel.stringValue = message
         hasHeader = true
+        hasField = false
         isCentered = true
         stack = [[
             ActionItem(title: confirm, symbol: "trash", isDestructive: true, action: onConfirm),
@@ -136,6 +151,41 @@ final class ActionSheet: ThemedView {
         selection = 1
         isHidden = false
         rebuild()
+    }
+
+    /// Une saisie : la même carte, avec un champ à la place du message.
+    ///
+    /// Le renommage sur place serait plus direct, mais la sidebar reconstruit ses lignes
+    /// dès qu'un onglet de fond finit de charger — l'édition n'y survivrait pas.
+    func presentPrompt(title: String, value: String, confirm: String,
+                       onConfirm: @escaping @MainActor (String) -> Void) {
+        titleLabel.stringValue = title
+        messageLabel.stringValue = ""
+        field.stringValue = value
+        hasHeader = true
+        hasField = true
+        isCentered = true
+        promptAction = onConfirm
+        stack = [[
+            ActionItem(title: confirm, symbol: "checkmark",
+                       action: { [weak self] in self?.commitField() }),
+            ActionItem(title: "Annuler", symbol: "xmark")
+        ]]
+        selection = 0
+        isHidden = false
+        rebuild()
+        window?.makeFirstResponder(field)
+        field.currentEditor()?.selectAll(nil)
+    }
+
+    private var promptAction: (@MainActor (String) -> Void)?
+
+    @objc private func commitField() {
+        let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let action = promptAction
+        dismiss()
+        guard !value.isEmpty else { return }
+        action?(value)
     }
 
     func dismiss() {
@@ -184,14 +234,27 @@ final class ActionSheet: ThemedView {
         separators.forEach { $0.layer?.backgroundColor = Tokens.separator.cgColor }
 
         titleLabel.isHidden = !hasHeader
-        messageLabel.isHidden = !hasHeader
+        messageLabel.isHidden = !hasHeader || hasField
+        field.isHidden = !hasField
+        field.textColor = Tokens.textPrimary
+        field.backgroundColor = Tokens.rowSelected
+        field.wantsLayer = true
+        field.layer?.cornerRadius = Tokens.Radius.pill - 4
+        field.layer?.borderWidth = 1
+        field.layer?.borderColor = Tokens.chromeHairline.cgColor
         titleLabel.textColor = Tokens.textPrimary
         messageLabel.textColor = Tokens.textSecondary
 
         let textWidth = Self.cardWidth - Tokens.Space.l * 2
-        let messageHeight = hasHeader
-            ? messageLabel.sizeThatFits(NSSize(width: textWidth, height: .greatestFiniteMagnitude)).height
-            : 0
+        let messageHeight: CGFloat
+        if hasField {
+            messageHeight = 30
+        } else if hasHeader {
+            messageHeight = messageLabel.sizeThatFits(NSSize(width: textWidth,
+                                                            height: .greatestFiniteMagnitude)).height
+        } else {
+            messageHeight = 0
+        }
         let headerHeight = hasHeader ? Tokens.Space.l + 20 + Tokens.Space.xs + messageHeight + Tokens.Space.l : 0
 
         let height = items.reduce(Self.padding * 2 + headerHeight) { total, item in
@@ -212,8 +275,13 @@ final class ActionSheet: ThemedView {
         if hasHeader {
             cursor = height - Tokens.Space.l - 20
             titleLabel.frame = NSRect(x: Tokens.Space.l, y: cursor, width: textWidth, height: 20)
-            cursor -= Tokens.Space.xs + messageHeight
-            messageLabel.frame = NSRect(x: Tokens.Space.l, y: cursor, width: textWidth, height: messageHeight)
+            cursor -= Tokens.Space.s + messageHeight
+            let box = NSRect(x: Tokens.Space.l, y: cursor, width: textWidth, height: messageHeight)
+            if hasField {
+                field.frame = box
+            } else {
+                messageLabel.frame = box
+            }
             cursor -= Tokens.Space.l
         }
         var separatorIndex = 0

@@ -368,19 +368,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// lignes à chaque changement, l'édition en place n'y survivrait pas.
     private func renameFolder(_ id: UUID) {
         guard let folder = currentSpace.folder(with: id) else { return }
-        let alert = NSAlert()
-        alert.messageText = "Renommer le dossier"
-        alert.addButton(withTitle: "Renommer")
-        alert.addButton(withTitle: "Annuler")
-        let field = NSTextField(string: folder.name)
-        field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        folder.name = name
-        syncSidebar()
+        layout.actionSheet.presentPrompt(title: "Renommer le dossier",
+                                         value: folder.name,
+                                         confirm: "Renommer") { [weak self] name in
+            guard let self, let folder = self.currentSpace.folder(with: id) else { return }
+            folder.name = name
+            self.syncSidebar()
+        }
     }
 
     /// Supprimer un dossier ne ferme pas ses onglets : ils redeviennent des onglets de
