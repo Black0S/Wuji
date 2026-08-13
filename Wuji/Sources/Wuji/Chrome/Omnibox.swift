@@ -163,12 +163,17 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
         super.layout()
         applyColors()
 
-        let listHeight = entries.reduce(0) { total, entry in
+        // Marge identique en haut et en bas de la liste. Auparavant elle n'existait qu'en
+        // bas : la première ligne venait toucher le séparateur, et le déséquilibre se
+        // voyait d'autant plus qu'il n'y avait qu'un seul résultat.
+        let listPadding = Tokens.Space.s
+        let contentHeight = entries.reduce(0) { total, entry in
             switch entry {
             case .header: return total + Self.headerHeight
             case .result: return total + Self.rowHeight
             }
-        } + (entries.isEmpty ? 0 : Tokens.Space.s)
+        }
+        let listHeight = entries.isEmpty ? 0 : contentHeight + listPadding * 2
         let cardHeight = Self.fieldHeight + listHeight
 
         // La palette vit dans la zone de contenu : ses coordonnées commencent déjà après
@@ -184,13 +189,14 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
                              width: Self.cardWidth - Tokens.Space.l * 2,
                              height: 24)
 
+        // Le séparateur marque la frontière entre le champ et la liste : tout en haut de
+        // la zone de liste, et la marge vient après lui.
         separator.isHidden = entries.isEmpty
-        separator.frame = NSRect(x: 0, y: listHeight - Tokens.Space.xs,
-                                 width: Self.cardWidth, height: 1)
+        separator.frame = NSRect(x: 0, y: listHeight - 1, width: Self.cardWidth, height: 1)
 
         rowsContainer.frame = NSRect(x: 0, y: 0, width: Self.cardWidth, height: listHeight)
 
-        var cursor = listHeight - Tokens.Space.xs
+        var cursor = listHeight - listPadding
         var headerIndex = 0
         for entry in entries {
             switch entry {
