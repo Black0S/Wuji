@@ -8,12 +8,10 @@ import WebKit
 final class Tab {
     let webView: WKWebView
 
-    /// Un onglet épinglé est permanent : le fermer ne le retire pas de la liste, il le
-    /// ramène à `pinnedURL`. C'est le comportement d'Arc et de Zen, et c'est ce qui
-    /// distingue un onglet épinglé d'un onglet simplement placé en haut.
+    /// Épinglé : regroupé en tête de liste et tenu à l'écart des onglets de passage.
+    /// La fermeture reste celle de tous les autres — `⌘W` doit vouloir dire la même chose
+    /// partout dans l'application.
     var isPinned = false
-    /// L'adresse au moment de l'épinglage : le point de retour.
-    var pinnedURL: URL?
 
     init(configuration: WKWebViewConfiguration) {
         webView = WKWebView(frame: .zero, configuration: configuration)

@@ -95,10 +95,9 @@ final class Sidebar: ThemedView {
         pin.tag = index
         menu.addItem(pin)
 
-        let close = NSMenuItem(title: isPinned ? "Revenir à l'adresse épinglée" : "Fermer l'onglet",
+        let close = NSMenuItem(title: "Fermer l'onglet",
                                action: #selector(closeFromMenu(_:)), keyEquivalent: "")
-        close.image = NSImage(systemSymbolName: isPinned ? "arrow.uturn.backward" : "xmark",
-                              accessibilityDescription: nil)
+        close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)
         close.target = self
         close.tag = index
         menu.addItem(close)
@@ -234,7 +233,6 @@ private final class TabRow: ThemedView {
     var onClose: (() -> Void)?
     var onContextMenu: ((NSEvent) -> Void)?
 
-    private let isPinned: Bool
     private let icon = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private let close = NSButton()
@@ -244,7 +242,6 @@ private final class TabRow: ThemedView {
 
     init(snapshot: TabSnapshot, isSelected: Bool) {
         self.isSelected = isSelected
-        self.isPinned = snapshot.isPinned
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = Tokens.Radius.pill - 4
@@ -299,8 +296,7 @@ private final class TabRow: ThemedView {
         close.contentTintColor = Tokens.textSecondary
         // La croix n'apparaît qu'au survol : cinq croix alignées en permanence, c'est
         // cinq éléments de plus à l'écran pour une action rare (principe 5).
-        // Jamais sur un onglet épinglé : elle promettrait une fermeture qui n'arrive pas.
-        close.isHidden = !isHovered || isPinned
+        close.isHidden = !isHovered
 
         let iconSize: CGFloat = 16
         icon.frame = NSRect(x: Tokens.Space.s, y: (bounds.height - iconSize) / 2,

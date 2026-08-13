@@ -76,7 +76,6 @@ final class Space {
         let staying = currentTab
 
         tab.isPinned = pinned
-        tab.pinnedURL = pinned ? tab.url : nil
 
         tabs.remove(at: index)
         // Épinglé : à la fin du bloc épinglé. Désépinglé : juste après ce bloc, donc en

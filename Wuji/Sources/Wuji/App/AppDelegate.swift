@@ -91,6 +91,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// Le libellé du menu suit ce que la touche va réellement faire. « Fermer l'onglet »
+    /// affiché alors que ⌘W fermera les Réglages serait un mensonge, même bref.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(closeTab(_:)) {
+            let auxiliary = NSApp.keyWindow != nil && NSApp.keyWindow !== window
+            item.title = auxiliary ? "Fermer la fenêtre" : "Fermer l'onglet"
+        }
+        return true
+    }
+
 
     // MARK: - Onglets
 
@@ -107,20 +117,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         if let url { tab.webView.load(URLRequest(url: url)) }
     }
 
+    /// `⌘W` ferme ce qui est devant, et rien d'autre.
+    ///
+    /// Quand une fenêtre auxiliaire a le focus — les Réglages aujourd'hui, n'importe
+    /// laquelle demain — c'est elle qui se ferme. Un raccourci qui agit sur une fenêtre
+    /// qu'on ne regarde pas est un piège, surtout celui-là.
+    ///
+    /// Et sur le navigateur, il ferme l'onglet **y compris épinglé** : `⌘W` doit vouloir
+    /// dire la même chose partout. Contrepartie assumée — épingler ne protège plus d'une
+    /// fermeture, ça range et ça groupe.
     @objc func closeTab(_ sender: Any?) {
-        let space = currentSpace
-        guard let tab = space.currentTab else { return }
-
-        // Un onglet épinglé ne se ferme pas : il revient à son adresse d'origine. C'est
-        // ce qui le rend permanent, et c'est le comportement d'Arc et de Zen. Sans ça,
-        // « épinglé » ne voudrait dire que « placé en haut ».
-        if tab.isPinned {
-            if let url = tab.pinnedURL, tab.url != url {
-                tab.webView.load(URLRequest(url: url))
-            }
+        if let key = NSApp.keyWindow, key !== window {
+            key.performClose(nil)
             return
         }
 
+        let space = currentSpace
+        guard space.currentTab != nil else { return }
         space.tabs.remove(at: space.currentIndex)
         if space.tabs.isEmpty {
             newTab(url: nil)
