@@ -14,14 +14,14 @@ final class SettingsWindow: NSWindow {
     private var sectionButtons: [SectionButton] = []
     private var current: Section = .appearance
 
-    /// Pas de section « Avancé » : elle ne contenait que les seuils de révélation.
-    /// Une section vide est un contrôle mort à l'échelle d'une page.
+    /// Ni « Avancé » ni « Général » : la première ne contenait que les seuils de
+    /// révélation, la seconde que la page de démarrage. Une section vide est un contrôle
+    /// mort à l'échelle d'une page.
     enum Section: String, CaseIterable {
-        case general, appearance, privacy, search, websites
+        case appearance, privacy, search, websites
 
         var title: String {
             switch self {
-            case .general:    return "Général"
             case .appearance: return "Apparence"
             case .privacy:    return "Confidentialité"
             case .search:     return "Recherche"
@@ -31,7 +31,6 @@ final class SettingsWindow: NSWindow {
 
         var symbol: String {
             switch self {
-            case .general:    return "gearshape"
             case .appearance: return "circle.lefthalf.filled"
             case .privacy:    return "hand.raised"
             case .search:     return "magnifyingglass"
@@ -110,7 +109,6 @@ final class SettingsWindow: NSWindow {
 
         let builder = PaneBuilder(width: pane.bounds.width, title: section.title)
         switch section {
-        case .general:    buildGeneral(builder)
         case .appearance: buildAppearance(builder)
         case .privacy:    buildPrivacy(builder)
         case .search:     buildSearch(builder)
@@ -118,11 +116,6 @@ final class SettingsWindow: NSWindow {
         }
         let content = builder.finish(height: pane.bounds.height)
         pane.addSubview(content)
-    }
-
-    private func buildGeneral(_ pane: PaneBuilder) {
-        pane.text(title: "Page de démarrage",
-                  value: settings.homepage) { [weak self] in self?.settings.homepage = $0 }
     }
 
     private func buildAppearance(_ pane: PaneBuilder) {

@@ -84,7 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private func restoreSession() {
         guard let stored = session.load(), !stored.spaces.isEmpty else {
             spaces = [Space(name: "Personnel", symbol: Space.symbol(forIndex: 0))]
-            newTab(url: URL(string: settings.homepage))
+            newTab(url: nil)
             return
         }
 
@@ -108,7 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         currentSpaceIndex = min(max(0, stored.currentSpace), spaces.count - 1)
 
         if currentSpace.isEmpty {
-            newTab(url: URL(string: settings.homepage))
+            newTab(url: nil)
         } else {
             activateCurrentTab()
         }
@@ -148,6 +148,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         for tab in spaces.flatMap(\.allTabs) {
             tab.webView.pageZoom = settings.pageZoom
             tab.webView.isInspectable = settings.safariInspection
+            // Une couleur dynamique posée sur WebKit est résolue à l'affectation : il faut
+            // la réécrire quand le thème change.
+            tab.webView.underPageBackgroundColor = Tokens.chromeBackground
         }
     }
 
@@ -199,6 +202,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         tab.webView.uiDelegate = self
         tab.webView.pageZoom = settings.pageZoom
         tab.webView.isInspectable = settings.safariInspection
+        // Un onglet vierge ne montre plus le blanc par défaut de WebKit : il prend le fond
+        // du thème. Sans ça, ouvrir un onglet en thème sombre projette une page blanche
+        // pleine hauteur, et c'est le contraire d'une interface qui se fait oublier.
+        tab.webView.underPageBackgroundColor = Tokens.chromeBackground
 
         // Chaque onglet s'observe lui-même, pas seulement celui qui est affiché : sinon un
         // onglet ouvert en arrière-plan reste figé sur son titre provisoire et son marqueur
@@ -601,7 +608,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         currentSpaceIndex = index
         // Un espace vide n'existe pas : on y entre toujours sur un onglet.
         if currentSpace.isEmpty {
-            newTab(url: URL(string: settings.homepage))
+            newTab(url: nil)
         } else {
             activateCurrentTab()
         }
@@ -667,7 +674,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         spaces.remove(at: index)
         currentSpaceIndex = min(currentSpaceIndex, spaces.count - 1)
         if currentSpace.isEmpty {
-            newTab(url: URL(string: settings.homepage))
+            newTab(url: nil)
         } else {
             activateCurrentTab()
         }
@@ -686,7 +693,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         let index = spaces.count
         spaces.append(Space(name: "Espace \(index + 1)", symbol: Space.symbol(forIndex: index)))
         currentSpaceIndex = index
-        newTab(url: URL(string: settings.homepage))
+        newTab(url: nil)
     }
 
     // MARK: - Recherche dans la page

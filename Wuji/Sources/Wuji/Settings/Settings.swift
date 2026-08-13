@@ -65,7 +65,6 @@ final class Settings {
 
     // Recherche et contenu
     var searchEngine: SearchEngine = .duckduckgo { didSet { changed() } }
-    var homepage = "https://www.apple.com" { didSet { changed() } }
     var pageZoom: CGFloat = 1 { didSet { changed() } }
     var safariInspection = false { didSet { changed() } }
     /// Rétention de l'historique, en jours. La spec §4.1 la veut configurable : c'est ce
