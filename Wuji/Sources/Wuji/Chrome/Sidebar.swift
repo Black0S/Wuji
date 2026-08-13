@@ -11,15 +11,11 @@ struct SpaceSnapshot {
 enum SidebarItem {
     case tab(id: UUID, title: String, host: String, isLoading: Bool, favicon: NSImage?, depth: Int)
     case folder(id: UUID, name: String, isExpanded: Bool, count: Int)
-    /// Entre le bloc épinglé et le reste. Sans lui, deux listes de titres identiques se
-    /// lisent comme une seule.
-    case separator
 
     var id: UUID? {
         switch self {
         case .tab(let id, _, _, _, _, _): return id
         case .folder(let id, _, _, _):    return id
-        case .separator:                  return nil
         }
     }
 }
@@ -134,12 +130,6 @@ final class Sidebar: ThemedView {
                 row.onContextMenu = { [weak self] event in self?.onFolderMenu?(id, event) }
                 list.addSubview(row)
                 return row
-
-            case .separator:
-                let line = NSView()
-                line.wantsLayer = true
-                list.addSubview(line)
-                return line
             }
         }
         needsLayout = true
@@ -185,15 +175,6 @@ final class Sidebar: ThemedView {
 
         for (index, row) in rows.enumerated() {
             if gapIndex == index { cursor -= rowHeight }
-
-            if case .separator = items[index] {
-                cursor -= Tokens.Space.m
-                row.layer?.backgroundColor = Tokens.separator.cgColor
-                frames.append((row, NSRect(x: inset, y: cursor + Tokens.Space.m / 2,
-                                           width: width - inset * 2, height: 1)))
-                continue
-            }
-
             if items[index].id == draggingID {
                 row.isHidden = true
                 continue
@@ -308,7 +289,6 @@ final class Sidebar: ThemedView {
     private func captureSlots() {
         slots = items.enumerated().compactMap { index, item in
             guard item.id != draggingID, rows.indices.contains(index) else { return nil }
-            if case .separator = item { return nil }
             let frame = rows[index].frame
             var folderID: UUID?
             if case .folder(let id, _, _, _) = item { folderID = id }

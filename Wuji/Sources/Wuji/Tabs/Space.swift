@@ -11,15 +11,14 @@ final class TabFolder {
     init(name: String) { self.name = name }
 }
 
-/// Un espace : des onglets épinglés, des dossiers, et des onglets de passage.
+/// Un espace : des dossiers, et des onglets de passage.
 ///
-/// **Trois collections plutôt qu'une seule avec des invariants.** Un tableau unique où
-/// « les épinglés d'abord » tenait tant qu'il n'y avait qu'un niveau ; avec les dossiers,
-/// chaque action aurait demandé de recalculer des plages d'index. Trois listes nommées
-/// disent ce qu'elles contiennent et ne peuvent pas se désynchroniser.
+/// **Deux collections plutôt qu'une seule avec des invariants.** Un tableau unique aurait
+/// demandé de recalculer des plages d'index à chaque action dès l'apparition des dossiers.
+/// Deux listes nommées disent ce qu'elles contiennent et ne peuvent pas se désynchroniser.
 ///
 /// **L'onglet courant est une référence, pas un index.** Un index désigne une position, et
-/// une position change dès qu'on épingle, déplace ou ferme quelque chose ailleurs. C'est la
+/// une position change dès qu'on déplace ou ferme quelque chose ailleurs. C'est la
 /// source de bugs classique de ce genre d'interface : on croit désigner un onglet, on
 /// désigne un rang.
 ///
@@ -41,7 +40,6 @@ final class Space {
         case before(Tab)
         case after(Tab)
         case into(TabFolder)
-        case pinnedEnd
         case looseEnd
     }
 
@@ -49,7 +47,6 @@ final class Space {
     var name: String
     var symbol: String
 
-    private(set) var pinned: [Tab] = []
     private(set) var folders: [TabFolder] = []
     private(set) var loose: [Tab] = []
     var current: Tab?
@@ -61,8 +58,8 @@ final class Space {
 
     // MARK: - Lecture
 
-    /// L'ordre d'affichage : épinglés, puis dossiers, puis onglets de passage.
-    var allTabs: [Tab] { pinned + folders.flatMap(\.tabs) + loose }
+    /// L'ordre d'affichage : dossiers, puis onglets de passage.
+    var allTabs: [Tab] { folders.flatMap(\.tabs) + loose }
     var tabCount: Int { allTabs.count }
     var isEmpty: Bool { allTabs.isEmpty }
 
@@ -88,14 +85,6 @@ final class Space {
         current = remaining.indices.contains(position) ? remaining[position] : remaining.last
     }
 
-    func setPinned(_ shouldPin: Bool, tab: Tab) {
-        guard tab.isPinned != shouldPin else { return }
-        detach(tab)
-        tab.isPinned = shouldPin
-        // Désépinglé : en tête des onglets de passage, là où on vient de le manipuler.
-        if shouldPin { pinned.append(tab) } else { loose.insert(tab, at: 0) }
-    }
-
     func place(_ tab: Tab, at destination: Destination) {
         detach(tab)
         switch destination {
@@ -104,14 +93,9 @@ final class Space {
         case .after(let neighbour):
             insert(tab, before: neighbour, offset: 1)
         case .into(let folder):
-            tab.isPinned = false
             folder.tabs.append(tab)
             folder.isExpanded = true
-        case .pinnedEnd:
-            tab.isPinned = true
-            pinned.append(tab)
         case .looseEnd:
-            tab.isPinned = false
             loose.append(tab)
         }
     }
@@ -127,7 +111,6 @@ final class Space {
     /// passage. Ranger et fermer sont deux gestes différents.
     func removeFolder(_ folder: TabFolder) {
         guard let index = folders.firstIndex(where: { $0 === folder }) else { return }
-        folder.tabs.forEach { $0.isPinned = false }
         loose.insert(contentsOf: folder.tabs, at: 0)
         folders.remove(at: index)
     }
@@ -155,7 +138,6 @@ final class Space {
     /// Retire l'onglet de toutes les collections. Sans ce passage obligé, un déplacement
     /// pourrait le laisser à deux endroits de l'ordre d'affichage.
     private func detach(_ tab: Tab) {
-        pinned.removeAll { $0 === tab }
         loose.removeAll { $0 === tab }
         for folder in folders { folder.tabs.removeAll { $0 === tab } }
     }
@@ -163,24 +145,16 @@ final class Space {
     /// Le conteneur d'arrivée est celui du voisin : déposer sous le dernier onglet d'un
     /// dossier fait entrer dans ce dossier, déposer sous un onglet de passage en fait un.
     private func insert(_ tab: Tab, before neighbour: Tab, offset: Int) {
-        if let index = pinned.firstIndex(where: { $0 === neighbour }) {
-            tab.isPinned = true
-            pinned.insert(tab, at: index + offset)
-            return
-        }
         for folder in folders {
             if let index = folder.tabs.firstIndex(where: { $0 === neighbour }) {
-                tab.isPinned = false
                 folder.tabs.insert(tab, at: index + offset)
                 return
             }
         }
         if let index = loose.firstIndex(where: { $0 === neighbour }) {
-            tab.isPinned = false
             loose.insert(tab, at: index + offset)
             return
         }
-        tab.isPinned = false
         loose.append(tab)
     }
 }

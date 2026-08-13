@@ -196,9 +196,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// laquelle demain — c'est elle qui se ferme. Un raccourci qui agit sur une fenêtre
     /// qu'on ne regarde pas est un piège, surtout celui-là.
     ///
-    /// Et sur le navigateur, il ferme l'onglet **y compris épinglé** : `⌘W` doit vouloir
-    /// dire la même chose partout. Contrepartie assumée — épingler ne protège plus d'une
-    /// fermeture, ça range et ça groupe.
+    /// Et sur le navigateur, il ferme l'onglet, sans exception : `⌘W` doit vouloir dire
+    /// la même chose partout.
     @objc func closeTab(_ sender: Any?) {
         if let key = NSApp.keyWindow, key !== window {
             key.performClose(nil)
@@ -222,12 +221,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         activateCurrentTab()
     }
 
-    @objc func togglePinCurrent(_ sender: Any?) {
-        guard let tab = currentSpace.current else { return }
-        currentSpace.setPinned(!tab.isPinned, tab: tab)
-        syncSidebar()
-    }
-
     private func activateCurrentTab() {
         guard let tab = currentSpace.current ?? currentSpace.allTabs.first else { return }
         currentSpace.current = tab
@@ -248,16 +241,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         syncSidebar()
     }
 
-    /// Construit la liste affichée : épinglés, séparateur, dossiers avec leur contenu,
-    /// puis onglets de passage. La sidebar ne reçoit que des identités et de quoi dessiner.
+    /// Construit la liste affichée : les dossiers avec leur contenu, puis les onglets de
+    /// passage. La sidebar ne reçoit que des identités et de quoi dessiner.
     private func syncSidebar() {
         let space = currentSpace
         layout.sidebar.update(space: SpaceSnapshot(name: space.name, symbol: space.symbol))
 
-        var items: [SidebarItem] = space.pinned.map { item(for: $0, depth: 0) }
-        if !items.isEmpty, !space.folders.isEmpty || !space.loose.isEmpty {
-            items.append(.separator)
-        }
+        var items: [SidebarItem] = []
         for folder in space.folders {
             items.append(.folder(id: folder.id, name: folder.name,
                                  isExpanded: folder.isExpanded, count: folder.tabs.count))
@@ -327,7 +317,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private func showTabMenu(_ id: UUID, _ event: NSEvent) {
         let space = currentSpace
-        guard let tab = space.tab(with: id) else { return }
+        guard space.tab(with: id) != nil else { return }
 
         // Le glisser-déposer reste le geste principal ; ce niveau est le chemin
         // équivalent pour qui préfère ne pas viser.
@@ -348,13 +338,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                                        }))
 
         let items: [ActionItem] = [
-            ActionItem(title: tab.isPinned ? "Désépingler" : "Épingler",
-                       symbol: tab.isPinned ? "pin.slash" : "pin", shortcut: "⇧⌘P",
-                       action: { [weak self] in
-                           guard let self, let tab = self.currentSpace.tab(with: id) else { return }
-                           self.currentSpace.setPinned(!tab.isPinned, tab: tab)
-                           self.syncSidebar()
-                       }),
             ActionItem(title: "Déplacer vers", symbol: "arrow.right.doc.on.clipboard",
                        children: destinations),
             .separator,
@@ -728,10 +711,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         folderItem.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(folderItem)
         fileMenu.addItem(withTitle: "Fermer l'onglet", action: #selector(closeTab(_:)), keyEquivalent: "w")
-        let pinItem = NSMenuItem(title: "Épingler l'onglet",
-                                 action: #selector(togglePinCurrent(_:)), keyEquivalent: "P")
-        pinItem.keyEquivalentModifierMask = [.command, .shift]
-        fileMenu.addItem(pinItem)
         fileItem.submenu = fileMenu
         main.addItem(fileItem)
 
