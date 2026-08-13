@@ -90,7 +90,7 @@ final class Sidebar: ThemedView {
         addSubview(newTabButton)
 
         dropHighlight.wantsLayer = true
-        dropHighlight.layer?.cornerRadius = Tokens.Radius.pill - 4
+        dropHighlight.layer?.cornerRadius = Tokens.Row.radius
         dropHighlight.layer?.cornerCurve = .continuous
         dropHighlight.isHidden = true
         list.addSubview(dropHighlight)
@@ -141,7 +141,7 @@ final class Sidebar: ThemedView {
         dropHighlight.layer?.backgroundColor = Tokens.selectionFill.cgColor
 
         let width = bounds.width
-        let rowHeight = Tokens.Chrome.rowHeight
+        let rowHeight = Tokens.Row.height
         let inset = Tokens.Space.s
 
         // Sous les feux de circulation, que macOS place lui-même.
@@ -168,7 +168,7 @@ final class Sidebar: ThemedView {
     private func positionRows(animated: Bool) {
         let width = bounds.width
         let inset = Tokens.Space.s
-        let rowHeight = Tokens.Chrome.rowHeight
+        let rowHeight = Tokens.Row.height
 
         var cursor = list.bounds.height
         var frames: [(NSView, NSRect)] = []
@@ -416,7 +416,7 @@ private final class SpaceSwitcher: ThemedView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = Tokens.Radius.pill - 4
+        layer?.cornerRadius = Tokens.Row.radius
         layer?.cornerCurve = .continuous
 
         label.font = .systemFont(ofSize: 13, weight: .medium)
@@ -495,7 +495,7 @@ private final class FolderRow: ThemedView {
     init(name: String, isExpanded: Bool, count tabCount: Int) {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = Tokens.Radius.pill - 4
+        layer?.cornerRadius = Tokens.Row.radius
         layer?.cornerCurve = .continuous
 
         chevron.image = NSImage(systemSymbolName: isExpanded ? "chevron.down" : "chevron.right",
@@ -579,7 +579,7 @@ private final class TabRow: ThemedView {
         self.depth = depth
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = Tokens.Radius.pill - 4
+        layer?.cornerRadius = Tokens.Row.radius
         layer?.cornerCurve = .continuous
 
         if let favicon {
@@ -637,7 +637,7 @@ private final class TabRow: ThemedView {
         // cinq éléments de plus à l'écran pour une action rare (principe 5).
         close.isHidden = !isHovered
 
-        let indent = CGFloat(depth) * 16
+        let indent = CGFloat(depth) * Tokens.Row.indent
         let iconSize: CGFloat = 16
         icon.frame = NSRect(x: Tokens.Space.s + indent, y: (bounds.height - iconSize) / 2,
                             width: iconSize, height: iconSize)

@@ -51,8 +51,8 @@ final class ActionSheet: ThemedView {
     private var anchor: NSPoint = .zero
 
     private static let cardWidth: CGFloat = 264
-    private static let rowHeight: CGFloat = 32
-    private static let padding: CGFloat = 6
+    private static let rowHeight = Tokens.Row.compact
+    private static let padding = Tokens.Card.padding
 
     var isOpen: Bool { !isHidden }
 
@@ -242,13 +242,13 @@ final class ActionSheet: ThemedView {
         field.isHidden = !hasField
         field.textColor = Tokens.textPrimary
         field.wantsLayer = true
-        field.layer?.cornerRadius = Tokens.Radius.pill - 4
+        field.layer?.cornerRadius = Tokens.Row.radius
         field.layer?.borderWidth = 1
         field.layer?.borderColor = Tokens.chromeHairline.cgColor
         titleLabel.textColor = Tokens.textPrimary
         messageLabel.textColor = Tokens.textSecondary
 
-        let textWidth = Self.cardWidth - Tokens.Space.l * 2
+        let textWidth = Self.cardWidth - Tokens.Card.textInset * 2
         let messageHeight: CGFloat
         if hasField {
             messageHeight = 34
@@ -277,9 +277,9 @@ final class ActionSheet: ThemedView {
         var cursor = height - Self.padding
         if hasHeader {
             cursor = height - Tokens.Space.l - 20
-            titleLabel.frame = NSRect(x: Tokens.Space.l, y: cursor, width: textWidth, height: 20)
+            titleLabel.frame = NSRect(x: Tokens.Card.textInset, y: cursor, width: textWidth, height: 20)
             cursor -= Tokens.Space.s + messageHeight
-            let box = NSRect(x: Tokens.Space.l, y: cursor, width: textWidth, height: messageHeight)
+            let box = NSRect(x: Tokens.Card.textInset, y: cursor, width: textWidth, height: messageHeight)
             if hasField {
                 field.frame = box
             } else {
@@ -393,7 +393,7 @@ private final class ActionRow: ThemedView {
         isDestructive = item.isDestructive
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = Tokens.Radius.pill - 4
+        layer?.cornerRadius = Tokens.Row.radius
         layer?.cornerCurve = .continuous
 
         if let symbol = item.symbol {
@@ -448,10 +448,10 @@ private final class ActionRow: ThemedView {
         shortcut.textColor = Tokens.textSecondary
         chevron.contentTintColor = Tokens.textSecondary
 
-        let glyphSize: CGFloat = 15
+        let glyphSize = Tokens.Row.glyph
         glyph.frame = NSRect(x: Tokens.Space.s, y: (bounds.height - glyphSize) / 2,
                              width: glyphSize, height: glyphSize)
-        let left = Tokens.Space.s + glyphSize + Tokens.Space.m
+        let left = Tokens.Space.s + glyphSize + Tokens.Row.glyphGap
         let rightWidth: CGFloat = 56
         shortcut.frame = NSRect(x: bounds.width - rightWidth - Tokens.Space.s, y: 0,
                                 width: rightWidth, height: bounds.height)

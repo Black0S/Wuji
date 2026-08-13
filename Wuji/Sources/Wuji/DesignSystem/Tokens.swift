@@ -56,6 +56,41 @@ enum Tokens {
         static let width: CGFloat = 3
     }
 
+    // MARK: - Lignes de liste
+
+    /// Les mesures d'une ligne, partout : sidebar, panneau des espaces, feuille d'action.
+    ///
+    /// Elles existent pour qu'une surface ajoutée demain n'ait aucun nombre à inventer.
+    /// Deux hauteurs seulement, et la règle qui les sépare : **une liste qu'on parcourt
+    /// respire, un menu qu'on vise est dense.** Tout le reste est commun, sinon deux
+    /// listes côte à côte n'alignent ni leurs glyphes ni leurs textes.
+    enum Row {
+        /// Listes que l'on parcourt : onglets, dossiers, espaces.
+        static let height: CGFloat = 34
+        /// Menus et feuilles d'action, où l'on vise une entrée précise.
+        static let compact: CGFloat = 32
+        /// Écart vertical entre deux lignes. Sans lui, le contour de la ligne active vient
+        /// toucher le fond de la survolée, et deux surfaces collées se lisent comme une.
+        static let gap: CGFloat = 3
+        static let radius: CGFloat = 8
+        /// Marge horizontale à l'intérieur d'une ligne.
+        static let inset: CGFloat = 12
+        static let glyph: CGFloat = 15
+        /// Entre le glyphe et le texte.
+        static let glyphGap: CGFloat = 12
+        /// Décalage d'un niveau de profondeur.
+        static let indent: CGFloat = 16
+    }
+
+    /// Les mesures d'une carte flottante : palette, panneau, feuille, confirmation.
+    enum Card {
+        static let radius = Radius.card
+        /// Marge autour de la pile de lignes.
+        static let padding: CGFloat = 8
+        /// Marge des blocs de texte — titre, message, champ.
+        static let textInset: CGFloat = 16
+    }
+
     // MARK: - Métriques du chrome
 
     /// Une seule source de vérité pour la disposition du chrome. Chaque vue qui calculait
@@ -66,10 +101,6 @@ enum Tokens {
         /// Assez haute pour une cible de clic confortable, pas plus : la barre du haut
         /// est un cadre, pas un panneau. Chaque point de hauteur est pris à la page.
         static let topBarHeight: CGFloat = 38
-        static let rowHeight: CGFloat = 34
-        static let footerHeight: CGFloat = 44
-        static let inset: CGFloat = 8
-
         /// Hauteur réservée aux feux de circulation en haut de la sidebar. macOS les place
         /// lui-même : tout ce qui commence au-dessus passe dessous.
         static let trafficLights: CGFloat = 44

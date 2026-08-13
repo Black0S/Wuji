@@ -91,10 +91,10 @@ final class SettingsWindow: NSWindow {
 
         var y = root.bounds.height - Tokens.Chrome.trafficLights
         for button in sectionButtons {
-            y -= Tokens.Chrome.rowHeight
+            y -= Tokens.Row.height
             button.frame = NSRect(x: Tokens.Space.s, y: y,
                                   width: sidebarWidth - Tokens.Space.s * 2,
-                                  height: Tokens.Chrome.rowHeight)
+                                  height: Tokens.Row.height)
         }
 
         pane.frame = NSRect(x: sidebarWidth, y: 0,
@@ -327,7 +327,7 @@ private final class SectionButton: ThemedView {
         self.section = section
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = Tokens.Radius.pill - 4
+        layer?.cornerRadius = Tokens.Row.radius
         layer?.cornerCurve = .continuous
 
         glyph.image = NSImage(systemSymbolName: section.symbol, accessibilityDescription: nil)

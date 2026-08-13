@@ -41,11 +41,9 @@ final class SpacesPanel: ThemedView {
     private var canDelete = false
 
     private static let cardWidth: CGFloat = 248
-    private static let rowHeight: CGFloat = 34
+    private static let rowHeight = Tokens.Row.height
     private static let symbolStrip: CGFloat = 44
-    /// Écart vertical entre deux lignes. Sans lui, le contour de la ligne courante vient
-    /// toucher le fond de la ligne survolée : deux surfaces collées se lisent comme une.
-    private static let rowGap: CGFloat = 3
+    private static let rowGap = Tokens.Row.gap
 
     /// Ancrage : coin haut-gauche du panneau, en coordonnées de cette vue.
     private var anchorPoint: NSPoint = .zero
@@ -247,7 +245,7 @@ private final class SpaceRow: ThemedView, NSTextFieldDelegate {
         self.isCurrent = isCurrent
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = Tokens.Radius.pill - 4
+        layer?.cornerRadius = Tokens.Row.radius
         layer?.cornerCurve = .continuous
 
         glyph.image = NSImage(systemSymbolName: snapshot.symbol, accessibilityDescription: nil)
@@ -295,8 +293,9 @@ private final class SpaceRow: ThemedView, NSTextFieldDelegate {
         label.textColor = Tokens.textPrimary
         count.textColor = Tokens.textSecondary
 
-        glyph.frame = NSRect(x: Tokens.Space.m, y: (bounds.height - 15) / 2, width: 15, height: 15)
-        let left = Tokens.Space.m + 15 + Tokens.Space.m
+        glyph.frame = NSRect(x: Tokens.Row.inset, y: (bounds.height - Tokens.Row.glyph) / 2,
+                             width: Tokens.Row.glyph, height: Tokens.Row.glyph)
+        let left = Tokens.Row.inset + Tokens.Row.glyph + Tokens.Row.glyphGap
         // Cadres pleine hauteur : une étiquette sur une seule ligne se centre dans son
         // cadre, alors qu'un cadre à hauteur fixe la laisse flotter d'un point ou deux
         // au-dessus du glyphe. C'est peu et ça se voit.

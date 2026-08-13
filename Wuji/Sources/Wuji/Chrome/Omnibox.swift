@@ -82,6 +82,7 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
     private var selection = 0
 
     private static let cardWidth: CGFloat = 560
+    /// Plus haute que les lignes de liste : on lit un résultat, on ne le vise pas.
     private static let fieldHeight: CGFloat = 52
     private static let rowHeight: CGFloat = 40
     private static let headerHeight: CGFloat = 26
@@ -374,7 +375,7 @@ private final class OmniboxRow: ThemedView {
     init(result: OmniboxResult) {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = Tokens.Radius.pill - 2
+        layer?.cornerRadius = Tokens.Row.radius
         layer?.cornerCurve = .continuous
 
         if let favicon = result.icon {
