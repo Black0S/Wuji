@@ -55,7 +55,11 @@ enum DownloadsPage {
             detail = "\(size(item.received)) sur \(item.expected > 0 ? size(item.expected) : "?") · en cours"
             action = #"<button data-action="cancel" title="Annuler">✕</button>"#
         case .finished:
-            detail = "\(size(item.received)) · terminé"
+            // Une fois terminé, la taille du fichier sur le disque est la seule qui vaille.
+            let onDisk = item.destination.flatMap {
+                try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? Int64
+            } ?? item.received
+            detail = "\(size(onDisk ?? item.received)) · terminé"
             action = #"<button data-action="reveal" title="Afficher dans le Finder">⤴</button>"#
         case .failed(let reason):
             detail = "Échec · \(escape(reason))"

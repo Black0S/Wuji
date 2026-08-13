@@ -43,6 +43,7 @@ final class Sidebar: ThemedView {
     var onFolderMenu: ((UUID, NSEvent) -> Void)?
     var onDropTab: ((UUID, SidebarDrop) -> Void)?
     var onNew: (() -> Void)?
+    var onDownloads: (() -> Void)?
     /// La sidebar ne connaît pas la liste des espaces : elle signale le clic et rend la
     /// vue d'ancrage, c'est l'application qui déroule le panneau.
     var onSpaceClick: ((NSView) -> Void)?
@@ -50,6 +51,7 @@ final class Sidebar: ThemedView {
     private let spaceSwitcher = SpaceSwitcher()
     private let list = NSView()
     private let newTabButton = FooterButton(symbol: "plus", title: "Nouvel onglet", shortcut: "⌘T")
+    private let downloadsButton = DownloadButton()
 
     /// Le seul repère de dépôt restant : le fond qui s'allume sur un dossier. Entre deux
     /// lignes, c'est le **trou** ouvert par les voisins qui fait office de repère — un
@@ -95,6 +97,8 @@ final class Sidebar: ThemedView {
         dropHighlight.isHidden = true
         list.addSubview(dropHighlight)
 
+        addSubview(downloadsButton)
+        downloadsButton.onClick = { [weak self] in self?.onDownloads?() }
         newTabButton.onClick = { [weak self] in self?.onNew?() }
         spaceSwitcher.onClick = { [weak self] view in self?.onSpaceClick?(view) }
     }
@@ -104,6 +108,11 @@ final class Sidebar: ThemedView {
 
     func update(space: SpaceSnapshot) {
         spaceSwitcher.update(space)
+    }
+
+    /// `nil` quand rien ne se télécharge : le bouton redevient un simple accès à la page.
+    func updateDownloads(progress: Double?) {
+        downloadsButton.progress = progress
     }
 
     func update(items newItems: [SidebarItem], selected: UUID?) {
@@ -157,8 +166,15 @@ final class Sidebar: ThemedView {
                                     width: width - inset * 2, height: rowHeight)
         top -= rowHeight + Tokens.Space.m
 
-        list.frame = NSRect(x: 0, y: Tokens.Space.s, width: width,
-                            height: max(0, top - Tokens.Space.s))
+        // Le pied de la sidebar : l'accès aux téléchargements, seul et discret. C'est
+        // aussi là que l'avancement se montre — un fichier qui arrive ne doit pas exiger
+        // qu'on ouvre une page pour savoir où il en est.
+        let footer = Tokens.Row.height
+        downloadsButton.frame = NSRect(x: inset, y: Tokens.Space.s,
+                                       width: footer, height: footer)
+
+        let bottom = Tokens.Space.s + footer + Tokens.Space.s
+        list.frame = NSRect(x: 0, y: bottom, width: width, height: max(0, top - bottom))
         positionRows(animated: false)
     }
 
@@ -394,6 +410,74 @@ final class Sidebar: ThemedView {
         guard newGap != gapIndex else { return }
         gapIndex = newGap
         positionRows(animated: true)
+    }
+}
+
+/// Le bouton des téléchargements, avec son avancement.
+///
+/// Il ne double pas l'entrée du menu : celle-ci ouvre la page, celui-ci **montre l'état**.
+/// Un anneau qui se remplit dit qu'un fichier arrive sans qu'on ait à aller le vérifier.
+@MainActor
+private final class DownloadButton: ThemedView {
+
+    var onClick: (() -> Void)?
+    var progress: Double? { didSet { needsDisplay = true } }
+
+    private var trackingArea: NSTrackingArea?
+    private var isHovered = false
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow],
+                                  owner: self)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false; needsDisplay = true }
+    override func mouseUp(with event: NSEvent) { onClick?() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if isHovered {
+            Tokens.selectionFill.setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: Tokens.Row.radius,
+                         yRadius: Tokens.Row.radius).fill()
+        }
+
+        let centre = NSPoint(x: bounds.midX, y: bounds.midY)
+        let radius: CGFloat = 9
+
+        if let progress {
+            // L'anneau d'avancement remplace le cercle du glyphe : deux cercles concentriques
+            // se liraient comme un chargement indéterminé.
+            let track = NSBezierPath()
+            track.appendArc(withCenter: centre, radius: radius, startAngle: 0, endAngle: 360)
+            track.lineWidth = 1.5
+            Tokens.separator.setStroke()
+            track.stroke()
+
+            let arc = NSBezierPath()
+            arc.appendArc(withCenter: centre, radius: radius,
+                          startAngle: 90, endAngle: 90 - 360 * CGFloat(progress), clockwise: true)
+            arc.lineWidth = 1.5
+            arc.lineCapStyle = .round
+            Tokens.textPrimary.setStroke()
+            arc.stroke()
+        }
+
+        let glyph = NSImage(systemSymbolName: progress == nil ? "arrow.down.circle" : "arrow.down",
+                            accessibilityDescription: "Téléchargements")?
+            .withSymbolConfiguration(.init(pointSize: progress == nil ? 15 : 9, weight: .regular))
+        guard let glyph else { return }
+        let size = glyph.size
+        let box = NSRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2,
+                         width: size.width, height: size.height)
+        (isHovered || progress != nil ? Tokens.textPrimary : Tokens.textSecondary).set()
+        glyph.draw(in: box)
     }
 }
 

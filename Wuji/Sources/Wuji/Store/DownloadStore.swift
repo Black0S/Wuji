@@ -13,9 +13,11 @@ final class DownloadItem {
     var filename: String
     var destination: URL?
     var state: State = .running
-    var received: Int64 = 0
-    var expected: Int64 = 0
     let started = Date()
+
+    /// L'avancement vient de l'objet `Progress` du téléchargement, pas d'un compteur qu'on
+    /// tiendrait soi-même : `WKDownloadDelegate` n'a aucun rappel par paquet reçu.
+    var observation: NSKeyValueObservation?
 
     /// Retenu pour pouvoir suivre l'avancement et annuler.
     let download: WKDownload
@@ -26,10 +28,9 @@ final class DownloadItem {
         self.filename = filename
     }
 
-    var fraction: Double {
-        guard expected > 0 else { return 0 }
-        return min(1, Double(received) / Double(expected))
-    }
+    var fraction: Double { download.progress.fractionCompleted }
+    var received: Int64 { download.progress.completedUnitCount }
+    var expected: Int64 { download.progress.totalUnitCount }
 
     var isRunning: Bool {
         if case .running = state { return true }

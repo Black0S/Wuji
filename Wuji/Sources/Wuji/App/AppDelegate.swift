@@ -62,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         layout.sidebar.onFolderMenu = { [weak self] id, event in self?.showFolderMenu(id, event) }
         layout.sidebar.onDropTab = { [weak self] id, drop in self?.drop(tabID: id, on: drop) }
         layout.sidebar.onNew = { [weak self] in self?.newTab(nil) }
+        layout.sidebar.onDownloads = { [weak self] in self?.showDownloads(nil) }
         layout.sidebar.onSpaceClick = { [weak self] anchor in self?.showSpacesPanel(from: anchor) }
 
         favicons.onUpdate = { [weak self] in self?.syncSidebar() }
@@ -281,6 +282,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         let item = DownloadItem(download: download,
                                 source: source ?? URL(string: "about:blank")!,
                                 filename: source?.lastPathComponent ?? "fichier")
+        item.observation = download.progress.observe(\.fractionCompleted) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.refreshDownloads() }
+        }
         downloads.add(item)
         refreshDownloads()
     }
@@ -294,24 +298,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         guard let item = downloads.item(for: download) else { return destination }
         item.filename = destination.lastPathComponent
         item.destination = destination
-        item.expected = response.expectedContentLength
         refreshDownloads()
         return destination
-    }
-
-    func download(_ download: WKDownload, didReceiveData length: Int64) {
-        guard let item = downloads.item(for: download) else { return }
-        item.received += length
-        refreshDownloads()
     }
 
     func downloadDidFinish(_ download: WKDownload) {
         guard let item = downloads.item(for: download) else { return }
         item.state = .finished
-        if let destination = item.destination,
-           let size = try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? Int64 {
-            item.received = size
-        }
+        item.observation = nil
         refreshDownloads()
         // Sans signal, un téléchargement terminé est invisible : le fichier est arrivé
         // quelque part et rien ne le dit.
@@ -328,6 +322,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// recharge. Une barre figée laisserait croire à un blocage.
     private func refreshDownloads() {
         downloads.changed()
+        let running = downloads.items.filter(\.isRunning)
+        // Un seul anneau pour tous : la moyenne dit « ça avance », ce qui est la seule
+        // question qu'on se pose sans ouvrir la page.
+        let fraction = running.isEmpty ? nil : running.reduce(0) { $0 + $1.fraction } / Double(running.count)
+        layout.sidebar.updateDownloads(progress: fraction)
         for tab in spaces.flatMap(\.allTabs) where tab.url == Self.downloadsPage {
             tab.webView.reload()
         }
