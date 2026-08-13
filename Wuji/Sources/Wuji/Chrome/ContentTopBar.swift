@@ -11,7 +11,7 @@ protocol ContentTopBarDelegate: AnyObject {
 /// L'adresse n'est pas éditable : cliquer dessus ouvre la palette. Deux surfaces d'édition
 /// pour la même chose, c'est le doublon que le principe 5 interdit.
 @MainActor
-final class ContentTopBar: NSView {
+final class ContentTopBar: ThemedView {
 
     enum Action { case back, forward, newTab }
 

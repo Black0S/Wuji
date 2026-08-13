@@ -9,7 +9,7 @@ import AppKit
 /// commence après elle. Quand le chrome s'escamote, la sidebar sort par la gauche et le
 /// contenu reprend toute la fenêtre.
 @MainActor
-final class BrowserLayout: NSView {
+final class BrowserLayout: ThemedView {
 
     let sidebar = Sidebar()
     let topBar = ContentTopBar()

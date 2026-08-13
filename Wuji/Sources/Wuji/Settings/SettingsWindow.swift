@@ -54,9 +54,12 @@ final class SettingsWindow: NSWindow {
         isReleasedWhenClosed = false
         center()
 
-        let root = NSView(frame: contentLayoutRect)
+        // Une vue qui redemande sa mise en page : au redimensionnement, mais surtout au
+        // changement de thème, où les fonds posés en CGColor doivent être réécrits.
+        let root = SettingsRoot(frame: contentLayoutRect)
         root.autoresizingMask = [.width, .height]
         root.wantsLayer = true
+        root.onLayout = { [weak self] in self?.layoutSelf() }
 
         sidebar.wantsLayer = true
         root.addSubview(sidebar)
@@ -77,11 +80,6 @@ final class SettingsWindow: NSWindow {
     }
 
     override var canBecomeKey: Bool { true }
-
-    override func layoutIfNeeded() {
-        super.layoutIfNeeded()
-        layoutSelf()
-    }
 
     private func layoutSelf() {
         guard let root = contentView else { return }
@@ -328,9 +326,21 @@ private final class Handler: NSObject {
     @objc private func fire() { block() }
 }
 
+/// La vue racine des réglages : elle ne fait que rendre la main à la fenêtre pour la mise
+/// en page, y compris quand le thème change.
+@MainActor
+private final class SettingsRoot: ThemedView {
+    var onLayout: (() -> Void)?
+
+    override func layout() {
+        super.layout()
+        onLayout?()
+    }
+}
+
 /// Une section dans la sidebar des réglages.
 @MainActor
-private final class SectionButton: NSView {
+private final class SectionButton: ThemedView {
 
     let section: SettingsWindow.Section
     var onClick: (() -> Void)?

@@ -10,7 +10,7 @@ import AppKit
 /// Le liseré est **par vue de contenu, jamais par fenêtre** (spec §4.3) : le jour du
 /// Split View, deux volets dont un seul est chiffré rendent un liseré de fenêtre absurde.
 /// D'où une instance par conteneur de contenu, dès maintenant.
-final class SecurityBorderView: NSView {
+final class SecurityBorderView: ThemedView {
 
     /// Un seul signal pour l'instant, parce qu'un seul est réellement branché.
     ///

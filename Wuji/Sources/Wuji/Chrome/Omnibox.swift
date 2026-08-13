@@ -45,7 +45,7 @@ protocol OmniboxDelegate: AnyObject {
 /// vue du prototype qui a le droit d'être soignée : tout le reste est jetable, celle-ci est
 /// la maquette exécutable de ce que J2 doit livrer.
 @MainActor
-final class Omnibox: NSView, NSTextFieldDelegate {
+final class Omnibox: ThemedView, NSTextFieldDelegate {
 
     weak var delegate: OmniboxDelegate?
 
@@ -264,7 +264,7 @@ final class Omnibox: NSView, NSTextFieldDelegate {
 
 /// Une ligne de résultat. Hauteur 40, glyphe, titre, sous-titre en gris secondaire.
 @MainActor
-private final class OmniboxRow: NSView {
+private final class OmniboxRow: ThemedView {
 
     var onClick: (() -> Void)?
 

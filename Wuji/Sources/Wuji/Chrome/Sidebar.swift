@@ -20,7 +20,7 @@ struct TabSnapshot {
 /// Contrepartie assumée : révéler la sidebar redimensionne la vue web, donc la page se
 /// remet en page. À juger à l'usage — c'est le principal risque de ce layout.
 @MainActor
-final class Sidebar: NSView {
+final class Sidebar: ThemedView {
 
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
@@ -84,7 +84,7 @@ final class Sidebar: NSView {
 /// Un onglet. La favicon est la seule couleur admise dans le chrome — et c'est cohérent :
 /// elle appartient au site, pas à l'interface (spec §4.6).
 @MainActor
-private final class TabRow: NSView {
+private final class TabRow: ThemedView {
 
     var onSelect: (() -> Void)?
     var onClose: (() -> Void)?
@@ -169,7 +169,7 @@ private final class TabRow: NSView {
 
 /// Bouton plein-largeur du bas de liste, avec son raccourci à droite.
 @MainActor
-private final class FooterButton: NSView {
+private final class FooterButton: ThemedView {
     var onClick: (() -> Void)?
 
     private let glyph = NSImageView()

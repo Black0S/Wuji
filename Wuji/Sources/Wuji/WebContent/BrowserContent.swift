@@ -7,7 +7,7 @@ import WebKit
 /// donc ça ne se voit pas — mais le jour du Split View, deux volets dont un seul est
 /// chiffré rendent un liseré de fenêtre absurde. Deux heures maintenant, deux semaines plus tard.
 @MainActor
-final class BrowserContent: NSView {
+final class BrowserContent: ThemedView {
 
     let border = SecurityBorderView()
     private(set) var webView: WKWebView?
