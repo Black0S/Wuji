@@ -62,22 +62,20 @@ enum DownloadsPage {
         switch item.state {
         case .running:
             detail = "\(size(item.received)) sur \(item.expected > 0 ? size(item.expected) : "?") · en cours"
-            action = #"<button data-action="pause" title="Mettre en pause">⏸</button>"#
-                + #"<button data-action="cancel" title="Annuler">✕</button>"#
+            action = button("pause", "Mettre en pause") + button("cancel", "Annuler")
         case .paused:
             detail = "\(size(item.received)) sur \(item.expected > 0 ? size(item.expected) : "?") · en pause"
-            action = #"<button data-action="resume" title="Reprendre">▶</button>"#
-                + #"<button data-action="cancel" title="Annuler">✕</button>"#
+            action = button("resume", "Reprendre") + button("cancel", "Annuler")
         case .finished:
             // Une fois terminé, la taille du fichier sur le disque est la seule qui vaille.
             let onDisk = item.destination.flatMap {
                 try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? Int64
             } ?? item.received
             detail = "\(size(onDisk ?? item.received)) · terminé"
-            action = #"<button data-action="reveal" title="Afficher dans le Finder">⤴</button>"#
+            action = button("reveal", "Afficher dans le Finder")
         case .failed(let reason):
             detail = "Échec · \(escape(reason))"
-            action = #"<button data-action="retry" title="Réessayer">↻</button>"#
+            action = button("retry", "Réessayer")
         }
 
         let bar = item.isActive ? """
@@ -94,6 +92,29 @@ enum DownloadsPage {
           </div>
           \(action)
         </li>
+        """
+    }
+
+    private static func button(_ action: String, _ title: String) -> String {
+        """
+        <button data-action="\(action)" title="\(title)" aria-label="\(title)">\(icon(action))</button>
+        """
+    }
+
+    /// Des icônes dessinées plutôt que des caractères. « ⏸ », « ✕ » et « ▶ » ont chacun
+    /// leur métrique et leur taille optique : côte à côte, ils ne s'alignent jamais et
+    /// n'ont pas le même poids. Un même gabarit et un même trait règlent les deux.
+    private static func icon(_ name: String) -> String {
+        let path: String
+        switch name {
+        case "pause":  path = #"<path d="M6 3.5v9M10 3.5v9"/>"#
+        case "resume": path = #"<path d="M5.5 3.6l6.5 4.4-6.5 4.4z"/>"#
+        case "cancel": path = #"<path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/>"#
+        case "retry":  path = #"<path d="M12.8 8a4.8 4.8 0 1 1-1.5-3.5"/><path d="M12.8 2.9v3.3H9.5"/>"#
+        default:       path = #"<path d="M6 3.5H3.5v9h9V10"/><path d="M9.2 3.5h3.3v3.3"/><path d="M12.2 3.8L7.4 8.6"/>"#
+        }
+        return """
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"         stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">\(path)</svg>
         """
     }
 
@@ -126,7 +147,10 @@ enum DownloadsPage {
     .bar i { display: block; height: 100%; background: var(--muted); transition: width .2s ease-out; }
     li > button {
       width: 26px; height: 26px; flex: none; border: 0; border-radius: 8px;
-      background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; opacity: 0;
+      background: transparent; color: var(--muted); cursor: pointer; opacity: 0;
+      /* Centrage par le conteneur, pas par la métrique du glyphe : c'est ce qui garantit
+         que deux icônes côte à côte tombent sur le même axe. */
+      display: flex; align-items: center; justify-content: center; padding: 0;
     }
     li:hover > button { opacity: 1; }
     li > button:hover { background: var(--hover); color: var(--text); }
