@@ -19,6 +19,10 @@ final class BrowserLayout: ThemedView {
     let omnibox = Omnibox()
     let actionSheet = ActionSheet()
 
+    /// Prévient l'application d'un basculement de thème — celui des réglages comme celui
+    /// du système quand le thème est sur « Auto ».
+    var onAppearanceChange: (() -> Void)?
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
@@ -29,6 +33,11 @@ final class BrowserLayout: ThemedView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        onAppearanceChange?()
+    }
 
     override func layout() {
         super.layout()

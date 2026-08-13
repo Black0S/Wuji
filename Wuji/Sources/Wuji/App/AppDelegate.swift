@@ -67,6 +67,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
         favicons.onUpdate = { [weak self] in self?.syncSidebar() }
 
+        // Le thème du système peut basculer sans passer par les réglages : les pages
+        // internes doivent suivre dans ce cas aussi.
+        layout.onAppearanceChange = { [weak self] in self?.refreshInternalPages() }
         window.contentView = layout
 
         settings.onChange = { [weak self] in self?.applySettings() }
@@ -164,24 +167,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             }
         }
 
-        guard themeChanged else { return }
-        // Après le prochain tour de boucle : l'apparence effective des vues n'a pas encore
-        // basculé au moment où l'on change celle de l'application.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.spaces.flatMap(\.allTabs).forEach(self.applyPageBackground)
-        }
+        spaces.flatMap(\.allTabs).forEach(applyPageBackground)
     }
 
-    /// Le fond hors page — celui qu'on découvre au rebond du défilement. Résolu contre
-    /// l'apparence de la vue, sinon il reste sur la teinte du thème précédent : c'est ce
-    /// qui laissait un fond noir en haut et en bas d'une page interne en thème clair.
+    /// Le fond hors page — celui qu'on découvre au rebond du défilement.
+    ///
+    /// Résolu contre l'apparence **déduite du réglage**, et non contre celle de la vue :
+    /// au moment où l'on applique un thème, les vues n'ont pas encore basculé, et lire
+    /// leur apparence rendait toujours la précédente. Le réglage, lui, est déjà à jour.
     private func applyPageBackground(to tab: Tab) {
+        let appearance = settings.theme.appearance ?? NSApp.effectiveAppearance
         tab.webView.underPageBackgroundColor =
-            Tokens.resolve(Tokens.sidebarBackground, for: tab.webView.effectiveAppearance)
+            Tokens.resolve(Tokens.sidebarBackground, for: appearance)
     }
 
     private var appliedTheme: Settings.Theme?
+
+    private func refreshInternalPages() {
+        for tab in spaces.flatMap(\.allTabs) {
+            applyPageBackground(to: tab)
+            if tab.url?.scheme == InternalPageHandler.scheme { tab.webView.reload() }
+        }
+    }
 
     @objc func openSettings(_ sender: Any?) {
         if settingsWindow == nil {
