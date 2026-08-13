@@ -16,6 +16,13 @@ final class Tab {
     /// partout dans l'application.
     var isPinned = false
 
+    /// Les observations vivent avec l'onglet, pas avec la vue active.
+    ///
+    /// N'observer que l'onglet courant laissait les autres figés sur leur dernier état
+    /// connu : un onglet ouvert en arrière-plan gardait son marqueur de chargement et son
+    /// titre provisoire jusqu'à ce qu'un autre événement rafraîchisse la liste.
+    var observations: [NSKeyValueObservation] = []
+
     init(configuration: WKWebViewConfiguration) {
         webView = WKWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true

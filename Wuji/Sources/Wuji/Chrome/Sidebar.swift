@@ -4,7 +4,6 @@ import AppKit
 struct SpaceSnapshot {
     let name: String
     let symbol: String
-    let color: NSColor?
 }
 
 /// Une ligne de la sidebar. Volontairement pauvre : ni `Tab`, ni `TabFolder`, ni index —
@@ -30,6 +29,10 @@ enum SidebarDrop {
     case before(UUID)
     case into(UUID)
     case end
+    /// Les dossiers se réordonnent entre eux : ils ne peuvent ni entrer dans un autre
+    /// dossier ni se glisser parmi les onglets, qui vivent dans une autre collection.
+    case folderBefore(UUID)
+    case folderEnd
 }
 
 /// La sidebar **ancrée**. Le contenu commence après elle, il ne passe pas dessous —
@@ -115,7 +118,9 @@ final class Sidebar: ThemedView {
             case .tab(let id, let title, let host, let isLoading, let favicon, let depth):
                 let row = TabRow(title: title, host: host, isLoading: isLoading,
                                  favicon: favicon, depth: depth, isSelected: id == selected)
-                row.onMouseDown = { [weak self] event in self?.beginTracking(id: id, event: event) }
+                row.onMouseDown = { [weak self] event in
+                    self?.beginTracking(id: id, isFolder: false, event: event)
+                }
                 row.onClose = { [weak self] in self?.onCloseTab?(id) }
                 row.onContextMenu = { [weak self] event in self?.onTabMenu?(id, event) }
                 list.addSubview(row)
@@ -123,7 +128,9 @@ final class Sidebar: ThemedView {
 
             case .folder(let id, let name, let isExpanded, let count):
                 let row = FolderRow(name: name, isExpanded: isExpanded, count: count)
-                row.onClick = { [weak self] in self?.onToggleFolder?(id) }
+                row.onMouseDown = { [weak self] event in
+                    self?.beginTracking(id: id, isFolder: true, event: event)
+                }
                 row.onContextMenu = { [weak self] event in self?.onFolderMenu?(id, event) }
                 list.addSubview(row)
                 return row
@@ -216,7 +223,7 @@ final class Sidebar: ThemedView {
     /// La boucle de suivi vit ici et non dans la ligne : déposer reconstruit toute la
     /// liste, donc une ligne qui suivrait son propre glissement disparaîtrait en cours de
     /// route, avec les événements qu'elle attendait encore.
-    private func beginTracking(id: UUID, event: NSEvent) {
+    private func beginTracking(id: UUID, isFolder: Bool, event: NSEvent) {
         guard let window,
               let index = items.firstIndex(where: { $0.id == id }),
               rows.indices.contains(index) else { return }
@@ -240,6 +247,8 @@ final class Sidebar: ThemedView {
                 if moved {
                     self.endDrag()
                     if let drop { self.onDropTab?(id, drop) }
+                } else if isFolder {
+                    self.onToggleFolder?(id)
                 } else {
                     self.onSelectTab?(id)
                 }
@@ -256,7 +265,8 @@ final class Sidebar: ThemedView {
 
             self.proxy?.frame.origin.y = point.y - grab
             let inList = self.list.convert(point, from: self)
-            drop = self.dropTarget(at: inList)
+            drop = isFolder ? self.folderTarget(at: inList, dragging: id)
+                            : self.dropTarget(at: inList)
             self.showDrop(drop)
         }
     }
@@ -356,6 +366,22 @@ final class Sidebar: ThemedView {
         return .end
     }
 
+    /// Les dossiers ne visent que d'autres dossiers : on cherche celui sous le curseur,
+    /// et à défaut on tombe en fin de liste des dossiers.
+    private func folderTarget(at point: NSPoint, dragging id: UUID) -> SidebarDrop? {
+        let folderSlots = slots.filter { $0.folderID != nil }
+        guard let first = folderSlots.first else { return .folderEnd }
+        if point.y > first.maxY { return .folderBefore(first.folderID!) }
+        for slot in folderSlots {
+            guard point.y >= slot.minY, point.y <= slot.maxY else { continue }
+            let middle = (slot.minY + slot.maxY) / 2
+            if point.y > middle { return .folderBefore(slot.folderID!) }
+            let next = folderSlots.first { $0.minY < slot.minY }
+            return next.map { .folderBefore($0.folderID!) } ?? .folderEnd
+        }
+        return .folderEnd
+    }
+
     private func showDrop(_ drop: SidebarDrop?) {
         var newGap: Int?
         var highlight: Int?
@@ -367,6 +393,13 @@ final class Sidebar: ThemedView {
             newGap = items.firstIndex { $0.id == tabID }
         case .end:
             newGap = rows.count
+        case .folderBefore(let folderID):
+            newGap = items.firstIndex { $0.id == folderID }
+        case .folderEnd:
+            // Juste après le dernier dossier, pas en bas de la liste : c'est là que le
+            // dossier atterrira réellement.
+            newGap = items.lastIndex { if case .folder = $0 { return true } else { return false } }
+                .map { $0 + 1 } ?? rows.count
         case nil:
             break
         }
@@ -400,8 +433,6 @@ private final class SpaceSwitcher: ThemedView {
     private let chevron = NSImageView()
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
-    private var tint: NSColor?
-
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
@@ -422,7 +453,6 @@ private final class SpaceSwitcher: ThemedView {
     func update(_ space: SpaceSnapshot) {
         glyph.image = NSImage(systemSymbolName: space.symbol, accessibilityDescription: nil)
         label.stringValue = space.name
-        tint = space.color
         needsLayout = true
     }
 
@@ -445,9 +475,7 @@ private final class SpaceSwitcher: ThemedView {
     override func layout() {
         super.layout()
         layer?.backgroundColor = isHovered ? Tokens.selectionFill.cgColor : NSColor.clear.cgColor
-        // La couleur ne touche que le symbole : le nom reste monochrome, sa lisibilité
-        // ne doit pas dépendre d'une teinte choisie par l'utilisateur.
-        glyph.contentTintColor = tint ?? Tokens.textPrimary
+        glyph.contentTintColor = Tokens.textPrimary
         label.textColor = Tokens.textPrimary
         chevron.contentTintColor = Tokens.textSecondary
 
@@ -471,7 +499,7 @@ private final class SpaceSwitcher: ThemedView {
 @MainActor
 private final class FolderRow: ThemedView {
 
-    var onClick: (() -> Void)?
+    var onMouseDown: ((NSEvent) -> Void)?
     var onContextMenu: ((NSEvent) -> Void)?
 
     var hoverEnabled = true { didSet { if !hoverEnabled { isHovered = false; needsLayout = true } } }
@@ -541,7 +569,7 @@ private final class FolderRow: ThemedView {
     /// la sidebar — mais désastreux sur une ligne : le glissement déplacerait la fenêtre
     /// au lieu de l'onglet. Chaque ligne interactive doit donc s'en défendre.
     override var mouseDownCanMoveWindow: Bool { false }
-    override func mouseDown(with event: NSEvent) { onClick?() }
+    override func mouseDown(with event: NSEvent) { onMouseDown?(event) }
     override func rightMouseDown(with event: NSEvent) { onContextMenu?(event) }
 }
 

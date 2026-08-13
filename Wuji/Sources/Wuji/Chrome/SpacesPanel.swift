@@ -4,14 +4,12 @@ import AppKit
 struct SpaceRowSnapshot {
     let name: String
     let symbol: String
-    let color: NSColor?
     let tabCount: Int
 }
 
 @MainActor
 protocol SpacesPanelDelegate: AnyObject {
     func spacesPanel(_ panel: SpacesPanel, didSelect index: Int)
-    func spacesPanel(_ panel: SpacesPanel, didPick tint: Space.Tint)
     func spacesPanel(_ panel: SpacesPanel, didPick symbol: String)
     func spacesPanel(_ panel: SpacesPanel, didRename index: Int, to name: String)
     func spacesPanel(_ panel: SpacesPanel, didMove index: Int, to destination: Int)
@@ -33,18 +31,18 @@ final class SpacesPanel: ThemedView {
     private let separator = NSView()
     private let newSpaceRow = SpaceRow(snapshot: SpaceRowSnapshot(name: "Nouvel espace",
                                                                  symbol: "plus",
-                                                                 color: nil,
                                                                  tabCount: -1),
                                        isCurrent: false)
     private var rows: [SpaceRow] = []
-    private var swatches: [Swatch] = []
     private var symbolButtons: [SymbolButton] = []
     private var canDelete = false
 
     private static let cardWidth: CGFloat = 248
     private static let rowHeight: CGFloat = 34
-    private static let swatchStrip: CGFloat = 44
-    private static let symbolStrip: CGFloat = 40
+    private static let symbolStrip: CGFloat = 44
+    /// Écart vertical entre deux lignes. Sans lui, le contour de la ligne courante vient
+    /// toucher le fond de la ligne survolée : deux surfaces collées se lisent comme une.
+    private static let rowGap: CGFloat = 3
 
     /// Ancrage : coin haut-gauche du panneau, en coordonnées de cette vue.
     private var anchorPoint: NSPoint = .zero
@@ -83,15 +81,6 @@ final class SpacesPanel: ThemedView {
             symbolButtons.append(button)
         }
 
-        for tint in Space.Tint.allCases {
-            let swatch = Swatch(tint: tint)
-            swatch.onClick = { [weak self] in
-                guard let self else { return }
-                self.delegate?.spacesPanel(self, didPick: tint)
-            }
-            card.addSubview(swatch)
-            swatches.append(swatch)
-        }
     }
 
     @available(*, unavailable)
@@ -109,19 +98,18 @@ final class SpacesPanel: ThemedView {
 
     // MARK: - Contenu
 
-    func present(spaces: [SpaceRowSnapshot], current: Int, tint: Space.Tint,
-                 symbol: String, anchor: NSView) {
+    func present(spaces: [SpaceRowSnapshot], current: Int, symbol: String, anchor: NSView) {
         // Sous le sélecteur qui l'a ouvert, aligné sur son bord gauche.
         let originInSelf = convert(NSPoint(x: 0, y: 0), from: anchor)
         anchorPoint = NSPoint(x: originInSelf.x, y: originInSelf.y - Tokens.Space.xs)
         isHidden = false
-        reload(spaces: spaces, current: current, tint: tint, symbol: symbol)
+        reload(spaces: spaces, current: current, symbol: symbol)
     }
 
     /// Recharge le contenu sans déplacer le panneau : indispensable après un choix de
     /// couleur ou un déplacement, sinon l'état change dans la sidebar et pas dans le
     /// panneau qui vient de servir à le changer.
-    func reload(spaces: [SpaceRowSnapshot], current: Int, tint: Space.Tint, symbol: String) {
+    func reload(spaces: [SpaceRowSnapshot], current: Int, symbol: String) {
         // Un espace ne peut pas être supprimé s'il est le dernier : il faut bien que les
         // onglets vivent quelque part.
         canDelete = spaces.count > 1
@@ -137,7 +125,6 @@ final class SpacesPanel: ThemedView {
             card.addSubview(row)
             return row
         }
-        swatches.forEach { $0.isSelected = $0.tint == tint }
         symbolButtons.forEach { $0.isSelected = $0.symbol == symbol }
         needsLayout = true
         layoutSubtreeIfNeeded()
@@ -154,29 +141,24 @@ final class SpacesPanel: ThemedView {
         card.layer?.borderColor = Tokens.chromeHairline.cgColor
         separator.layer?.backgroundColor = Tokens.separator.cgColor
 
-        let listHeight = CGFloat(rows.count + 1) * Self.rowHeight + Tokens.Space.s * 2
-        let cardHeight = listHeight + Self.symbolStrip + Self.swatchStrip
+        let listHeight = CGFloat(rows.count + 1) * (Self.rowHeight + Self.rowGap) + Tokens.Space.s * 2
+        let cardHeight = listHeight + Self.symbolStrip
         card.frame = NSRect(x: anchorPoint.x, y: anchorPoint.y - cardHeight,
                             width: Self.cardWidth, height: cardHeight)
 
         var cursor = cardHeight - Tokens.Space.s
+        let inset = Tokens.Space.s
         for row in rows {
-            cursor -= Self.rowHeight
-            row.frame = NSRect(x: Tokens.Space.xs, y: cursor,
-                               width: Self.cardWidth - Tokens.Space.s, height: Self.rowHeight)
+            cursor -= Self.rowHeight + Self.rowGap
+            row.frame = NSRect(x: inset, y: cursor + Self.rowGap,
+                               width: Self.cardWidth - inset * 2, height: Self.rowHeight)
         }
-        cursor -= Self.rowHeight
-        newSpaceRow.frame = NSRect(x: Tokens.Space.xs, y: cursor,
-                                   width: Self.cardWidth - Tokens.Space.s, height: Self.rowHeight)
+        cursor -= Self.rowHeight + Self.rowGap
+        newSpaceRow.frame = NSRect(x: inset, y: cursor + Self.rowGap,
+                                   width: Self.cardWidth - inset * 2, height: Self.rowHeight)
 
-        separator.frame = NSRect(x: 0, y: Self.swatchStrip + Self.symbolStrip,
-                                 width: Self.cardWidth, height: 1)
-
-        // Deux bandes : la forme puis la couleur. La forme vient d'abord parce qu'elle
-        // porte le sens — la couleur ne fait que l'accélérer.
-        layoutStrip(symbolButtons, height: Self.symbolStrip,
-                    bottom: Self.swatchStrip, diameter: 22, gap: 8)
-        layoutStrip(swatches, height: Self.swatchStrip, bottom: 0, diameter: 18, gap: 10)
+        separator.frame = NSRect(x: 0, y: Self.symbolStrip, width: Self.cardWidth, height: 1)
+        layoutStrip(symbolButtons, height: Self.symbolStrip, bottom: 0, diameter: 22, gap: 8)
     }
 
     private func layoutStrip(_ views: [NSView], height: CGFloat, bottom: CGFloat,
@@ -276,14 +258,12 @@ private final class SpaceRow: ThemedView, NSTextFieldDelegate {
     private let glyph = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private let count = NSTextField(labelWithString: "")
-    private let tint: NSColor?
     private let isCurrent: Bool
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
     private var isRenaming = false
 
     init(snapshot: SpaceRowSnapshot, isCurrent: Bool) {
-        self.tint = snapshot.color
         self.isCurrent = isCurrent
         super.init(frame: .zero)
         wantsLayer = true
@@ -326,9 +306,7 @@ private final class SpaceRow: ThemedView, NSTextFieldDelegate {
     override func layout() {
         super.layout()
         layer?.backgroundColor = (isCurrent || isHovered) ? Tokens.selectionFill.cgColor : NSColor.clear.cgColor
-        // La couleur ne touche que le symbole. Le texte reste monochrome, sinon la
-        // lisibilité dépendrait d'un choix de teinte fait par l'utilisateur.
-        glyph.contentTintColor = tint ?? Tokens.textPrimary
+        glyph.contentTintColor = Tokens.textPrimary
         label.textColor = Tokens.textPrimary
         count.textColor = Tokens.textSecondary
 
@@ -413,49 +391,6 @@ private final class SymbolButton: ThemedView {
         layer?.backgroundColor = isSelected ? Tokens.selectionFill.cgColor : NSColor.clear.cgColor
         glyph.contentTintColor = isSelected ? Tokens.textPrimary : Tokens.textSecondary
         glyph.frame = bounds.insetBy(dx: 4, dy: 4)
-    }
-
-    override func mouseDown(with event: NSEvent) { onClick?() }
-}
-
-/// Une pastille de la palette. « Sans couleur » est un cercle vide, pas une absence de
-/// bouton : ne rien afficher rendrait le retour en arrière impossible.
-@MainActor
-private final class Swatch: ThemedView {
-
-    let tint: Space.Tint
-    var onClick: (() -> Void)?
-    var isSelected = false { didSet { needsDisplay = true } }
-
-    init(tint: Space.Tint) {
-        self.tint = tint
-        super.init(frame: .zero)
-        setAccessibilityLabel(tint.label)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let inset: CGFloat = 2
-        let circle = NSBezierPath(ovalIn: bounds.insetBy(dx: inset, dy: inset))
-
-        if let color = tint.color {
-            color.setFill()
-            circle.fill()
-        } else {
-            Tokens.chromeHairline.setStroke()
-            circle.lineWidth = 1
-            circle.stroke()
-        }
-
-        guard isSelected else { return }
-        // Anneau de sélection en dehors de la pastille : posé dessus, il masquerait la
-        // couleur qu'on est en train de choisir.
-        let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5))
-        Tokens.textPrimary.setStroke()
-        ring.lineWidth = 1.5
-        ring.stroke()
     }
 
     override func mouseDown(with event: NSEvent) { onClick?() }

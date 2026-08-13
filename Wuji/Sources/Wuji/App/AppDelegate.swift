@@ -17,7 +17,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// d'« onglet courant » qui se désynchronisent.
     private var spaces: [Space] = [Space(name: "Personnel", symbol: Space.symbol(forIndex: 0))]
     private var currentSpaceIndex = 0
-    private var observations: [NSKeyValueObservation] = []
 
     /// Position et total de la recherche dans la page, tenus à la main — voir `countMatches`.
     private var findPosition = 1
@@ -118,6 +117,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         tab.webView.uiDelegate = self
         tab.webView.pageZoom = settings.pageZoom
         tab.webView.isInspectable = settings.safariInspection
+
+        // Chaque onglet s'observe lui-même, pas seulement celui qui est affiché : sinon un
+        // onglet ouvert en arrière-plan reste figé sur son titre provisoire et son marqueur
+        // de chargement jusqu'au prochain événement venu d'ailleurs.
+        let sync: @Sendable (WKWebView, Any) -> Void = { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.syncChrome() }
+        }
+        tab.observations = [
+            tab.webView.observe(\.url, options: [.initial, .new], changeHandler: sync),
+            tab.webView.observe(\.title, options: [.initial, .new], changeHandler: sync),
+            tab.webView.observe(\.isLoading, options: [.initial, .new], changeHandler: sync),
+            tab.webView.observe(\.estimatedProgress, options: [.initial, .new], changeHandler: sync),
+            tab.webView.observe(\.canGoBack, options: [.initial, .new], changeHandler: sync),
+            tab.webView.observe(\.canGoForward, options: [.initial, .new], changeHandler: sync)
+        ]
         return tab
     }
 
@@ -218,18 +232,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         guard let tab = currentSpace.current ?? currentSpace.allTabs.first else { return }
         currentSpace.current = tab
         layout.content.attach(tab.webView)
-
-        let sync: @Sendable (WKWebView, Any) -> Void = { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.syncChrome() }
-        }
-        observations = [
-            tab.webView.observe(\.url, options: [.initial, .new], changeHandler: sync),
-            tab.webView.observe(\.title, options: [.initial, .new], changeHandler: sync),
-            tab.webView.observe(\.canGoBack, options: [.initial, .new], changeHandler: sync),
-            tab.webView.observe(\.canGoForward, options: [.initial, .new], changeHandler: sync),
-            tab.webView.observe(\.isLoading, options: [.initial, .new], changeHandler: sync),
-            tab.webView.observe(\.estimatedProgress, options: [.initial, .new], changeHandler: sync)
-        ]
         syncChrome()
     }
 
@@ -250,9 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// puis onglets de passage. La sidebar ne reçoit que des identités et de quoi dessiner.
     private func syncSidebar() {
         let space = currentSpace
-        layout.sidebar.update(space: SpaceSnapshot(name: space.name,
-                                                   symbol: space.symbol,
-                                                   color: space.tint.color))
+        layout.sidebar.update(space: SpaceSnapshot(name: space.name, symbol: space.symbol))
 
         var items: [SidebarItem] = space.pinned.map { item(for: $0, depth: 0) }
         if !items.isEmpty, !space.folders.isEmpty || !space.loose.isEmpty {
@@ -293,6 +293,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private func drop(tabID: UUID, on drop: SidebarDrop) {
         let space = currentSpace
+
+        // Un dossier glissé ne porte pas d'onglet : c'est le même geste et le même
+        // rappel, mais une autre collection.
+        if let folder = space.folder(with: tabID) {
+            switch drop {
+            case .folderBefore(let otherID):
+                if let other = space.folder(with: otherID) { space.moveFolder(folder, before: other) }
+            case .folderEnd:
+                space.moveFolderToEnd(folder)
+            default:
+                break
+            }
+            syncSidebar()
+            return
+        }
+
         guard let tab = space.tab(with: tabID) else { return }
         switch drop {
         case .before(let otherID):
@@ -303,6 +319,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             space.place(tab, at: .into(folder))
         case .end:
             space.place(tab, at: .looseEnd)
+        case .folderBefore, .folderEnd:
+            break
         }
         syncSidebar()
     }
@@ -447,15 +465,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private var spaceSnapshots: [SpaceRowSnapshot] {
         spaces.map {
-            SpaceRowSnapshot(name: $0.name, symbol: $0.symbol,
-                             color: $0.tint.color, tabCount: $0.tabCount)
+            SpaceRowSnapshot(name: $0.name, symbol: $0.symbol, tabCount: $0.tabCount)
         }
     }
 
     private func showSpacesPanel(from anchor: NSView) {
         layout.spacesPanel.present(spaces: spaceSnapshots,
                                    current: currentSpaceIndex,
-                                   tint: currentSpace.tint,
                                    symbol: currentSpace.symbol,
                                    anchor: anchor)
     }
@@ -469,11 +485,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         } else {
             activateCurrentTab()
         }
-    }
-
-    func spacesPanel(_ panel: SpacesPanel, didPick tint: Space.Tint) {
-        currentSpace.tint = tint
-        refreshSpaces(panel)
     }
 
     func spacesPanel(_ panel: SpacesPanel, didPick symbol: String) {
@@ -533,7 +544,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         syncSidebar()
         panel.reload(spaces: spaceSnapshots,
                      current: currentSpaceIndex,
-                     tint: currentSpace.tint,
                      symbol: currentSpace.symbol)
     }
 
