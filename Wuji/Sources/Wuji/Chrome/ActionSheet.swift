@@ -77,7 +77,10 @@ final class ActionSheet: ThemedView {
         card.addSubview(messageLabel)
 
         field.isBordered = false
-        field.drawsBackground = true
+        // Pas de fond propre : le champ se pose sur celui de la carte et ne se signale
+        // que par son filet. Deux valeurs de fond empilées faisaient lire deux surfaces
+        // là où il n'y en a qu'une.
+        field.drawsBackground = false
         field.contentInset = Tokens.Space.m
         field.focusRingType = .none
         field.font = .systemFont(ofSize: 13, weight: .regular)
@@ -238,7 +241,6 @@ final class ActionSheet: ThemedView {
         messageLabel.isHidden = !hasHeader || hasField
         field.isHidden = !hasField
         field.textColor = Tokens.textPrimary
-        field.backgroundColor = Tokens.rowSelected
         field.wantsLayer = true
         field.layer?.cornerRadius = Tokens.Radius.pill - 4
         field.layer?.borderWidth = 1
