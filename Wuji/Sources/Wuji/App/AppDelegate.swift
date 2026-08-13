@@ -3,7 +3,7 @@ import WebKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate, OmniboxDelegate, FindBarDelegate, SpacesPanelDelegate,
-                       WKNavigationDelegate, WKUIDelegate {
+                       WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
 
     private var window: BrowserWindow!
     private var layout: BrowserLayout!
@@ -27,6 +27,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private lazy var configuration: WKWebViewConfiguration = {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
+        // Le gestionnaire doit être posé avant la création de la moindre vue web : une
+        // configuration déjà utilisée ne l'accepte plus.
+        config.setURLSchemeHandler(InternalPageHandler(history: history),
+                                   forURLScheme: InternalPageHandler.scheme)
+        config.userContentController.add(self, name: "wujiHistory")
         return config
     }()
 
@@ -508,6 +513,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             ActionItem(title: "Nouveau dossier", symbol: "folder.badge.plus", shortcut: "⇧⌘N",
                        action: { [weak self] in self?.newFolder(nil) }),
             .separator,
+            ActionItem(title: "Historique", symbol: "clock", shortcut: "⌘Y",
+                       action: { [weak self] in self?.showHistory(nil) }),
             ActionItem(title: "Rechercher dans la page…", symbol: "magnifyingglass", shortcut: "⌘F",
                        action: { [weak self] in self?.findInPage(nil) }),
             ActionItem(title: "Imprimer…", symbol: "printer", shortcut: "⌘P",
@@ -518,6 +525,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             ActionItem(title: "À propos de Wuji", symbol: "info.circle",
                        action: { NSApp.orderFrontStandardAboutPanel(nil) })
         ]
+    }
+
+    @objc func showHistory(_ sender: Any?) {
+        guard let url = URL(string: "wuji://history") else { return }
+        // Dans l'onglet courant s'il est vierge, dans un nouveau sinon : ouvrir un onglet
+        // par consultation de l'historique en laisserait une traînée.
+        if let tab = currentTab, tab.url == nil {
+            tab.webView.load(URLRequest(url: url))
+        } else {
+            newTab(url: url)
+        }
+    }
+
+    /// Les actions de la page d'historique. Elle ne touche pas la base elle-même : elle
+    /// demande, l'application décide.
+    nonisolated func userContentController(_ controller: WKUserContentController,
+                                           didReceive message: WKScriptMessage) {
+        MainActor.assumeIsolated {
+            guard let payload = message.body as? [String: Any],
+                  let action = payload["action"] as? String else { return }
+            switch action {
+            case "delete":
+                if let url = payload["url"] as? String { history.delete(url: url) }
+            case "clear":
+                history.clear()
+                currentTab?.webView.reload()
+            default:
+                break
+            }
+        }
     }
 
     @objc func printPage(_ sender: Any?) {
@@ -836,6 +873,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         viewMenu.addItem(withTitle: "Omnibox", action: #selector(focusOmnibox(_:)), keyEquivalent: "l")
         viewMenu.addItem(withTitle: "Recharger", action: #selector(reload(_:)), keyEquivalent: "r")
         viewMenu.addItem(.separator())
+        viewMenu.addItem(withTitle: "Historique", action: #selector(showHistory(_:)), keyEquivalent: "y")
         viewMenu.addItem(withTitle: "Rechercher dans la page…", action: #selector(findInPage(_:)), keyEquivalent: "f")
         viewMenu.addItem(withTitle: "Résultat suivant", action: #selector(findNext(_:)), keyEquivalent: "g")
         let previousMatch = NSMenuItem(title: "Résultat précédent",
