@@ -13,12 +13,14 @@ final class BrowserLayout: ThemedView {
     let sidebar = Sidebar()
     let topBar = ContentTopBar()
     let content = BrowserContent()
+    let findBar = FindBar()
     let omnibox = Omnibox()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        [content, topBar, sidebar, omnibox].forEach { addSubview($0) }
+        // La palette passe au-dessus de tout le reste, y compris de la barre de recherche.
+        [content, topBar, sidebar, findBar, omnibox].forEach { addSubview($0) }
     }
 
     @available(*, unavailable)
@@ -36,6 +38,9 @@ final class BrowserLayout: ThemedView {
         sidebar.frame = NSRect(x: 0, y: 0, width: sidebarWidth, height: bounds.height)
         content.frame = NSRect(x: sidebarWidth, y: 0, width: contentWidth, height: contentHeight)
         topBar.frame = NSRect(x: sidebarWidth, y: contentHeight, width: contentWidth, height: barHeight)
+        // Palette et recherche vivent dans la zone de contenu : elles ne peuvent jamais
+        // recouvrir la sidebar ni la barre du haut.
         omnibox.frame = content.frame
+        findBar.frame = content.frame
     }
 }

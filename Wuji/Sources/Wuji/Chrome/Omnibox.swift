@@ -232,9 +232,12 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
         isHidden = false
         isSeeded = !seed.isEmpty
         field.stringValue = seed
+        refresh()
+        // Une vue masquée ne reçoit pas de passe de mise en page : sans ça, le champ a
+        // encore un cadre vide au moment où on lui donne le focus, et il le refuse.
+        layoutSubtreeIfNeeded()
         window?.makeFirstResponder(field)
         field.currentEditor()?.selectAll(nil)
-        refresh()
     }
 
     func dismiss() {

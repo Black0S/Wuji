@@ -46,6 +46,7 @@ Sources/Wuji/
 | | |
 |---|---|
 | `⌘L` | Palette — adresse, recherche, onglets ouverts |
+| `⌘F` | Rechercher dans la page · `⌘G` / `⇧⌘G` résultat suivant / précédent |
 | `⌘T` / `⌘W` | Nouvel onglet / fermer |
 | `⌘]` / `⌘[` | Onglet suivant / précédent |
 | `⌘R` | Recharger |
@@ -55,6 +56,7 @@ Sources/Wuji/
 
 - **Layout vertical ancré.** Sidebar à gauche, contenu après elle.
 - **Palette omnibox** — adresse, recherche, et les onglets ouverts en tête des résultats.
+- **Recherche dans la page** (`⌘F`), en pilule flottante sur le contenu.
 - **Liseré de sécurité** pour les connexions non chiffrées, posé au-dessus du web view
   et non autour : la page ne se remet jamais en page.
 - **Favicons**, récupérées depuis le site lui-même et jamais d'un service tiers de
@@ -71,6 +73,18 @@ d'adblock, pas de session privée, pas de profils, pas de permissions par site.
 **Rien n'est affiché pour ces fonctionnalités.** Pas de rangée grisée, pas d'interrupteur
 inerte, pas de liseré simulé, pas de section vide. Un contrôle qui ne fait rien donne
 l'illusion d'un produit plus avancé qu'il ne l'est.
+
+## Approximation assumée : le compteur de la recherche
+
+`WKFindResult` ne dit que « trouvé ou non » — **ni total, ni position**. La navigation et
+le surlignage viennent bien de WebKit, mais le « 2/6 » est reconstitué par un balayage
+`innerText` de notre côté.
+
+Ce balayage ignore les iframes et compte différemment un mot coupé entre deux nœuds : sur
+une page ordinaire il tombe juste, sur une page composite il peut diverger de ce que la
+navigation surligne réellement. Le seul moyen d'un compteur exact serait de refaire la
+recherche entièrement en JS, donc de renoncer au moteur de WebKit — ce n'est pas un bon
+échange pour un chiffre.
 
 ## Ce que l'usage a déjà corrigé
 

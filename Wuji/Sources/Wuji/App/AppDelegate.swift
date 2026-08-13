@@ -2,7 +2,7 @@ import AppKit
 import WebKit
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate, OmniboxDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate, OmniboxDelegate, FindBarDelegate {
 
     private var window: BrowserWindow!
     private var layout: BrowserLayout!
@@ -14,6 +14,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private var tabs: [Tab] = []
     private var currentIndex = 0
     private var observations: [NSKeyValueObservation] = []
+
+    /// Position et total de la recherche dans la page, tenus à la main — voir `countMatches`.
+    private var findPosition = 1
+    private var findTotal: Int?
 
     private lazy var configuration: WKWebViewConfiguration = {
         let config = WKWebViewConfiguration()
@@ -33,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         layout.autoresizingMask = [.width, .height]
         layout.topBar.delegate = self
         layout.omnibox.delegate = self
+        layout.findBar.delegate = self
 
         layout.sidebar.onSelect = { [weak self] index in
             guard let self, self.tabs.indices.contains(index) else { return }
@@ -184,6 +189,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         }
     }
 
+    // MARK: - Recherche dans la page
+
+    @objc func findInPage(_ sender: Any?) {
+        layout.findBar.present(in: window)
+    }
+
+    @objc func findNext(_ sender: Any?) {
+        guard layout.findBar.isOpen else { return }
+        findBarDidRequestNext(layout.findBar)
+    }
+
+    @objc func findPrevious(_ sender: Any?) {
+        guard layout.findBar.isOpen else { return }
+        findBarDidRequestPrevious(layout.findBar)
+    }
+
+    func findBar(_ bar: FindBar, didChange query: String) {
+        findPosition = 1
+        search(query, backwards: false)
+        countMatches(of: query)
+    }
+
+    func findBarDidRequestNext(_ bar: FindBar) {
+        findPosition = findTotal.map { $0 > 0 ? (findPosition % $0) + 1 : 1 } ?? findPosition + 1
+        search(bar.query, backwards: false)
+    }
+
+    func findBarDidRequestPrevious(_ bar: FindBar) {
+        findPosition = findTotal.map { $0 > 0 ? (findPosition - 2 + $0) % $0 + 1 : 1 } ?? max(1, findPosition - 1)
+        search(bar.query, backwards: true)
+    }
+
+    func findBarDidClose(_ bar: FindBar) {
+        findTotal = nil
+        findPosition = 1
+        // Aucune API publique ne « décoche » une recherche : on retire la sélection,
+        // ce qui efface le surlignage laissé par WebKit.
+        currentTab?.webView.evaluateJavaScript("window.getSelection().removeAllRanges()")
+    }
+
+    private func search(_ query: String, backwards: Bool) {
+        guard let webView = currentTab?.webView, !query.isEmpty else {
+            layout.findBar.show(position: 0, total: nil)
+            return
+        }
+        let configuration = WKFindConfiguration()
+        configuration.backwards = backwards
+        configuration.caseSensitive = false
+        configuration.wraps = true
+
+        webView.find(query, configuration: configuration) { [weak self] result in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.layout.findBar.show(position: self.findPosition,
+                                         total: result.matchFound ? self.findTotal : 0)
+            }
+        }
+    }
+
+    /// `WKFindResult` ne dit que « trouvé ou non » : ni total, ni position. Le compteur
+    /// est donc reconstitué ici, par un balayage du texte de la page.
+    ///
+    /// **C'est une approximation du moteur de recherche de WebKit, pas sa vérité** : ce
+    /// balayage lit `innerText`, donc il ignore les iframes et compte différemment un mot
+    /// coupé entre deux nœuds. Sur une page ordinaire il tombe juste ; sur une page
+    /// composite il peut diverger de ce que la navigation surligne réellement.
+    private func countMatches(of query: String) {
+        guard let webView = currentTab?.webView,
+              !query.isEmpty,
+              let encoded = try? JSONSerialization.data(withJSONObject: [query]),
+              let literal = String(data: encoded, encoding: .utf8) else {
+            findTotal = nil
+            return
+        }
+        let script = """
+        (function (needle) {
+            if (!needle || !document.body) { return 0; }
+            var haystack = document.body.innerText.toLowerCase();
+            needle = needle.toLowerCase();
+            var count = 0, at = 0;
+            while ((at = haystack.indexOf(needle, at)) !== -1) { count++; at += needle.length; }
+            return count;
+        })(\(literal)[0]);
+        """
+        webView.evaluateJavaScript(script) { [weak self] value, _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.findTotal = value as? Int
+                self.layout.findBar.show(position: self.findPosition, total: self.findTotal)
+            }
+        }
+    }
+
     // MARK: - OmniboxDelegate
 
     /// Les onglets ouverts passent avant tout le reste : même avec une sidebar, chercher
@@ -271,6 +369,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         let viewMenu = NSMenu(title: "Présentation")
         viewMenu.addItem(withTitle: "Omnibox", action: #selector(focusOmnibox(_:)), keyEquivalent: "l")
         viewMenu.addItem(withTitle: "Recharger", action: #selector(reload(_:)), keyEquivalent: "r")
+        viewMenu.addItem(.separator())
+        viewMenu.addItem(withTitle: "Rechercher dans la page…", action: #selector(findInPage(_:)), keyEquivalent: "f")
+        viewMenu.addItem(withTitle: "Résultat suivant", action: #selector(findNext(_:)), keyEquivalent: "g")
+        let previousMatch = NSMenuItem(title: "Résultat précédent",
+                                       action: #selector(findPrevious(_:)), keyEquivalent: "G")
+        previousMatch.keyEquivalentModifierMask = [.command, .shift]
+        viewMenu.addItem(previousMatch)
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Onglet suivant", action: #selector(nextTab(_:)), keyEquivalent: "]")
         viewMenu.addItem(withTitle: "Onglet précédent", action: #selector(previousTab(_:)), keyEquivalent: "[")
