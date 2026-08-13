@@ -14,6 +14,9 @@ protocol SpacesPanelDelegate: AnyObject {
     func spacesPanel(_ panel: SpacesPanel, didRename index: Int, to name: String)
     func spacesPanel(_ panel: SpacesPanel, didMove index: Int, to destination: Int)
     func spacesPanel(_ panel: SpacesPanel, didDelete index: Int)
+    /// Le panneau ne construit pas le menu : il signale le clic droit et laisse
+    /// l'application ouvrir la feuille d'action, la même que partout ailleurs.
+    func spacesPanel(_ panel: SpacesPanel, menuFor index: Int, canDelete: Bool, at event: NSEvent)
     func spacesPanelDidRequestNew(_ panel: SpacesPanel)
 }
 
@@ -117,7 +120,10 @@ final class SpacesPanel: ThemedView {
         rows = spaces.enumerated().map { index, snapshot in
             let row = SpaceRow(snapshot: snapshot, isCurrent: index == current)
             row.onMouseDown = { [weak self] _, event in self?.beginTracking(at: index, event: event) }
-            row.onContextMenu = { [weak self] event in self?.showRowMenu(for: index, event: event) }
+            row.onContextMenu = { [weak self] event in
+                guard let self else { return }
+                self.delegate?.spacesPanel(self, menuFor: index, canDelete: self.canDelete, at: event)
+            }
             row.onRename = { [weak self] name in
                 guard let self else { return }
                 self.delegate?.spacesPanel(self, didRename: index, to: name)
@@ -211,37 +217,11 @@ final class SpacesPanel: ThemedView {
         return min(max(offset, 0), max(rows.count - 1, 0))
     }
 
-    private func showRowMenu(for index: Int, event: NSEvent) {
-        let menu = NSMenu()
-        // Sans ça, AppKit valide les entrées lui-même à partir de la cible : « Supprimer »
-        // serait proposé même sur le dernier espace, où il ne peut rien faire.
-        menu.autoenablesItems = false
-
-        let rename = NSMenuItem(title: "Renommer", action: #selector(renameRow(_:)), keyEquivalent: "")
-        rename.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
-        rename.target = self
-        rename.tag = index
-        menu.addItem(rename)
-
-        let delete = NSMenuItem(title: "Supprimer", action: #selector(deleteRow(_:)), keyEquivalent: "")
-        delete.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
-        delete.target = self
-        delete.tag = index
-        delete.isEnabled = canDelete
-        menu.addItem(delete)
-
-        NSMenu.popUpContextMenu(menu, with: event, for: rows[index])
-    }
-
-    @objc private func renameRow(_ sender: NSMenuItem) {
-        guard rows.indices.contains(sender.tag) else { return }
-        rows[sender.tag].beginRename(in: window)
-    }
-
-    @objc private func deleteRow(_ sender: NSMenuItem) {
-        guard canDelete, rows.indices.contains(sender.tag) else { return }
-        dismiss()
-        delegate?.spacesPanel(self, didDelete: sender.tag)
+    /// Le renommage se fait sur place, donc le panneau doit rester ouvert : c'est lui qui
+    /// détient la ligne à transformer en champ.
+    func beginRename(at index: Int) {
+        guard rows.indices.contains(index) else { return }
+        rows[index].beginRename(in: window)
     }
 }
 
@@ -305,7 +285,12 @@ private final class SpaceRow: ThemedView, NSTextFieldDelegate {
 
     override func layout() {
         super.layout()
-        layer?.backgroundColor = (isCurrent || isHovered) ? Tokens.selectionFill.cgColor : NSColor.clear.cgColor
+        // En édition, la ligne devient le champ : fond relevé et filet, comme n'importe
+        // quelle surface saisissable du reste de l'interface.
+        layer?.backgroundColor = isRenaming ? Tokens.rowSelected.cgColor
+            : ((isCurrent || isHovered) ? Tokens.selectionFill.cgColor : NSColor.clear.cgColor)
+        layer?.borderWidth = isRenaming ? 1 : 0
+        layer?.borderColor = Tokens.chromeHairline.cgColor
         glyph.contentTintColor = Tokens.textPrimary
         label.textColor = Tokens.textPrimary
         count.textColor = Tokens.textSecondary
@@ -335,9 +320,12 @@ private final class SpaceRow: ThemedView, NSTextFieldDelegate {
         isRenaming = true
         label.isEditable = true
         label.isSelectable = true
-        label.isBordered = true
-        label.bezelStyle = .roundedBezel
-        label.drawsBackground = true
+        // Ni bordure ni fond du système : le cadre d'édition, c'est la ligne elle-même,
+        // qui prend un filet. Le champ bezelé apportait son dégradé et son arrondi, deux
+        // héritages d'un vocabulaire qu'on n'utilise nulle part ailleurs.
+        label.isBordered = false
+        label.drawsBackground = false
+        label.focusRingType = .none
         needsLayout = true
         window?.makeFirstResponder(label)
         label.currentEditor()?.selectAll(nil)
@@ -348,8 +336,6 @@ private final class SpaceRow: ThemedView, NSTextFieldDelegate {
         isRenaming = false
         label.isEditable = false
         label.isSelectable = false
-        label.isBordered = false
-        label.drawsBackground = false
         needsLayout = true
     }
 

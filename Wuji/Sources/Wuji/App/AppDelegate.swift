@@ -494,24 +494,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         refreshSpaces(panel)
     }
 
+    func spacesPanel(_ panel: SpacesPanel, menuFor index: Int, canDelete: Bool, at event: NSEvent) {
+        let items: [ActionItem] = [
+            ActionItem(title: "Renommer", symbol: "pencil",
+                       action: { [weak panel] in panel?.beginRename(at: index) }),
+            ActionItem(title: "Supprimer", symbol: "trash", isEnabled: canDelete,
+                       isDestructive: true,
+                       action: { [weak self, weak panel] in
+                           panel?.dismiss()
+                           guard let self else { return }
+                           self.spacesPanel(panel ?? self.layout.spacesPanel, didDelete: index)
+                       })
+        ]
+        presentSheet(items, at: event)
+    }
+
     func spacesPanel(_ panel: SpacesPanel, didDelete index: Int) {
         guard spaces.indices.contains(index), spaces.count > 1 else { return }
         let doomed = spaces[index]
 
         // Supprimer un espace ferme ses onglets, et rien ne les rouvrira tant qu'il n'y a
         // pas d'historique : c'est une perte, donc on demande.
-        if !doomed.isEmpty {
-            let alert = NSAlert()
-            alert.messageText = "Supprimer « \(doomed.name) » ?"
-            alert.informativeText = doomed.tabCount == 1
-                ? "Son onglet sera fermé."
-                : "Ses \(doomed.tabCount) onglets seront fermés."
-            alert.addButton(withTitle: "Supprimer")
-            alert.addButton(withTitle: "Annuler")
-            alert.alertStyle = .warning
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
+        guard !doomed.isEmpty else { return removeSpace(at: index) }
+        layout.actionSheet.presentConfirmation(
+            title: "Supprimer « \(doomed.name) » ?",
+            message: doomed.tabCount == 1
+                ? "Son onglet sera fermé, et rien ne le rouvrira."
+                : "Ses \(doomed.tabCount) onglets seront fermés, et rien ne les rouvrira.",
+            confirm: "Supprimer",
+            onConfirm: { [weak self] in self?.removeSpace(at: index) })
+    }
 
+    private func removeSpace(at index: Int) {
+        guard spaces.indices.contains(index), spaces.count > 1 else { return }
         spaces.remove(at: index)
         currentSpaceIndex = min(currentSpaceIndex, spaces.count - 1)
         if currentSpace.isEmpty {

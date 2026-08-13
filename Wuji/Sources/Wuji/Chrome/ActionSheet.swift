@@ -31,6 +31,15 @@ final class ActionSheet: ThemedView {
     private var rows: [ActionRow] = []
     private var separators: [NSView] = []
 
+    /// En-tête facultatif : une question et sa conséquence. Il transforme la même carte en
+    /// demande de confirmation, plutôt que d'appeler `NSAlert` — l'alerte système arrive
+    /// avec son matériau translucide, son icône d'application et ses boutons, trois
+    /// vocabulaires étrangers d'un coup.
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let messageLabel = NSTextField(wrappingLabelWithString: "")
+    private var hasHeader = false
+    private var isCentered = false
+
     /// Pile de navigation : la racine, puis chaque niveau ouvert.
     private var stack: [[ActionItem]] = []
     private var items: [ActionItem] { stack.last ?? [] }
@@ -56,6 +65,12 @@ final class ActionSheet: ThemedView {
         card.layer?.borderWidth = 1
         Tokens.applyChromeShadow(to: card)
         addSubview(card)
+
+        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        messageLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        card.addSubview(titleLabel)
+        card.addSubview(messageLabel)
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             let keyCode = event.keyCode
@@ -88,6 +103,8 @@ final class ActionSheet: ThemedView {
 
     /// `point` est exprimé dans les coordonnées de cette vue.
     func present(_ items: [ActionItem], at point: NSPoint) {
+        hasHeader = false
+        isCentered = false
         stack = [items]
         anchor = point
         selection = firstSelectable(from: 0, step: 1) ?? 0
@@ -100,6 +117,25 @@ final class ActionSheet: ThemedView {
     func present(_ items: [ActionItem], below view: NSView) {
         let origin = convert(NSPoint(x: view.bounds.maxX, y: 0), from: view)
         present(items, at: NSPoint(x: origin.x - Self.cardWidth, y: origin.y - Tokens.Space.xs))
+    }
+
+    /// Une confirmation : la question, sa conséquence, puis les deux issues.
+    ///
+    /// L'action destructrice est **en premier et nommée par son verbe** — « Supprimer »,
+    /// pas « OK ». On lit ce qu'on est en train de faire, pas un acquiescement.
+    func presentConfirmation(title: String, message: String, confirm: String,
+                             onConfirm: @escaping @MainActor () -> Void) {
+        titleLabel.stringValue = title
+        messageLabel.stringValue = message
+        hasHeader = true
+        isCentered = true
+        stack = [[
+            ActionItem(title: confirm, symbol: "trash", isDestructive: true, action: onConfirm),
+            ActionItem(title: "Annuler", symbol: "xmark")
+        ]]
+        selection = 1
+        isHidden = false
+        rebuild()
     }
 
     func dismiss() {
@@ -147,17 +183,39 @@ final class ActionSheet: ThemedView {
         card.layer?.borderColor = Tokens.chromeHairline.cgColor
         separators.forEach { $0.layer?.backgroundColor = Tokens.separator.cgColor }
 
-        let height = items.reduce(Self.padding * 2) { total, item in
+        titleLabel.isHidden = !hasHeader
+        messageLabel.isHidden = !hasHeader
+        titleLabel.textColor = Tokens.textPrimary
+        messageLabel.textColor = Tokens.textSecondary
+
+        let textWidth = Self.cardWidth - Tokens.Space.l * 2
+        let messageHeight = hasHeader
+            ? messageLabel.sizeThatFits(NSSize(width: textWidth, height: .greatestFiniteMagnitude)).height
+            : 0
+        let headerHeight = hasHeader ? Tokens.Space.l + 20 + Tokens.Space.xs + messageHeight + Tokens.Space.l : 0
+
+        let height = items.reduce(Self.padding * 2 + headerHeight) { total, item in
             total + (item.isSeparator ? Tokens.Space.m : Self.rowHeight)
         }
 
         // Rabattue dans la fenêtre : une feuille qui déborde par le bas est une feuille
         // qu'on ne peut pas lire jusqu'au bout.
-        let x = min(max(Tokens.Space.s, anchor.x), max(Tokens.Space.s, bounds.width - Self.cardWidth - Tokens.Space.s))
-        let y = max(Tokens.Space.s, min(anchor.y - height, bounds.height - height - Tokens.Space.s))
+        let x = isCentered
+            ? (bounds.width - Self.cardWidth) / 2
+            : min(max(Tokens.Space.s, anchor.x), max(Tokens.Space.s, bounds.width - Self.cardWidth - Tokens.Space.s))
+        let y = isCentered
+            ? (bounds.height - height) / 2
+            : max(Tokens.Space.s, min(anchor.y - height, bounds.height - height - Tokens.Space.s))
         card.frame = NSRect(x: x, y: y, width: Self.cardWidth, height: height)
 
         var cursor = height - Self.padding
+        if hasHeader {
+            cursor = height - Tokens.Space.l - 20
+            titleLabel.frame = NSRect(x: Tokens.Space.l, y: cursor, width: textWidth, height: 20)
+            cursor -= Tokens.Space.xs + messageHeight
+            messageLabel.frame = NSRect(x: Tokens.Space.l, y: cursor, width: textWidth, height: messageHeight)
+            cursor -= Tokens.Space.l
+        }
         var separatorIndex = 0
         for (index, item) in items.enumerated() {
             if item.isSeparator {
