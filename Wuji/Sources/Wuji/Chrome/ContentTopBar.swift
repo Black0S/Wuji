@@ -62,7 +62,7 @@ final class ContentTopBar: ThemedView {
         layer?.backgroundColor = Tokens.sidebarBackground.cgColor
         [back, forward].forEach { $0.contentTintColor = Tokens.textPrimary }
 
-        let size: CGFloat = 28
+        let size: CGFloat = 24
         let y = (bounds.height - size) / 2
         back.frame = NSRect(x: Tokens.Space.l, y: y, width: size, height: size)
         forward.frame = NSRect(x: Tokens.Space.l + size + Tokens.Space.xs, y: y, width: size, height: size)
