@@ -1,6 +1,6 @@
 import AppKit
 
-/// Les réglages du spike.
+/// Les réglages du prototype.
 ///
 /// Règle tenue ici : **aucun contrôle mort.** Chaque interrupteur de cette fenêtre pilote
 /// quelque chose de réel. Un réglage qui ne fait rien est pire qu'un réglage absent — il

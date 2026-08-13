@@ -1,6 +1,6 @@
 import AppKit
 
-/// **Question 2 du spike** : peut-on dessiner un liseré fin autour du contenu, animable,
+/// **Question 2 du prototype** : peut-on dessiner un liseré fin autour du contenu, animable,
 /// sans décaler la mise en page de la page ?
 ///
 /// Réponse testée ici : oui, en le posant **au-dessus** du web view plutôt qu'autour.
@@ -12,27 +12,20 @@ import AppKit
 /// D'où une instance par conteneur de contenu, dès maintenant.
 final class SecurityBorderView: NSView {
 
+    /// Un seul signal pour l'instant, parce qu'un seul est réellement branché.
+    ///
+    /// « Permission active » et « session privée » sont dans la spec (§4.3) mais ni les
+    /// permissions par site ni la session privée n'existent encore : les afficher
+    /// reviendrait à simuler un produit qu'on n'a pas. Ils reviendront avec les
+    /// fonctionnalités qu'ils signalent, pas avant.
     enum State: Equatable {
         case none
         case insecure          // connexion non chiffrée
-        case permission        // caméra / micro / position actifs en ce moment
-        case privateSession
 
         var color: NSColor? {
             switch self {
-            case .none:            return nil
-            case .insecure:        return Tokens.Security.insecure
-            case .permission:      return Tokens.Security.permission
-            case .privateSession:  return Tokens.Security.privateSession
-            }
-        }
-
-        var label: String {
-            switch self {
-            case .none:            return "aucun"
-            case .insecure:        return "non chiffré"
-            case .permission:      return "permission active"
-            case .privateSession:  return "session privée"
+            case .none:     return nil
+            case .insecure: return Tokens.Security.insecure
             }
         }
     }

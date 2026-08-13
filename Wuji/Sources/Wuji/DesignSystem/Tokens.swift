@@ -1,6 +1,6 @@
 import AppKit
 
-/// Les tokens du design system (spec §5), juste ce qu'il faut pour le spike.
+/// Les tokens du design system (spec §5), juste ce qu'il faut pour le prototype.
 /// Tout en flat : aucune surface translucide, la profondeur vient de la valeur et de l'ombre.
 enum Tokens {
 
@@ -49,10 +49,10 @@ enum Tokens {
     // MARK: - Couleur sémantique de sécurité (spec §4.3)
 
     /// Une seule famille, réservée exclusivement à la sécurité, jamais utilisée ailleurs.
+    /// Les teintes « permission active » et « session privée » de la spec §4.3 arriveront
+    /// avec les fonctionnalités qu'elles signalent.
     enum Security {
         static let insecure = dynamic(light: hex(0xC7302B), dark: hex(0xE0554F))
-        static let permission = dynamic(light: hex(0xB2761B), dark: hex(0xD99A3A))
-        static let privateSession = dynamic(light: hex(0x6B4FA8), dark: hex(0x9A7FD1))
         static let width: CGFloat = 3
     }
 

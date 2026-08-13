@@ -1,12 +1,12 @@
 import AppKit
 
-/// **Question 1 du spike** : un `WKWebView` bord à bord, sans barre de titre,
+/// **Question 1 du prototype** : un `WKWebView` bord à bord, sans barre de titre,
 /// avec des feux de circulation qui s'escamotent proprement.
 ///
 /// Les feux ne peuvent pas être décolorés (spec §4.6, macOS impose sa couleur) —
 /// ils ne peuvent qu'apparaître et disparaître. C'est exactement ce que veut Zero Interface.
 @MainActor
-final class SpikeWindow: NSWindow {
+final class BrowserWindow: NSWindow {
 
     init() {
         super.init(

@@ -39,7 +39,7 @@ final class RevealController: RevealGestureDelegate {
     private var hideWorkItem: DispatchWorkItem?
     nonisolated(unsafe) private var monitor: Any?
 
-    private unowned let window: SpikeWindow
+    private unowned let window: BrowserWindow
 
     /// Ce qui apparaît et disparaît. La sidebar et la barre du haut bougent **ensemble** :
     /// ce n'est pas un second système d'auto-masquage pour la sidebar, c'est le même
@@ -54,7 +54,7 @@ final class RevealController: RevealGestureDelegate {
     /// Instrumentation pour le journal de frictions de la semaine 3.
     private(set) var revealCounts: [RevealSource: Int] = [:]
 
-    init(window: SpikeWindow) {
+    init(window: BrowserWindow) {
         self.window = window
         // On démarre chrome visible, et non en immersif : au premier lancement, une page
         // nue sans le moindre repère est le scénario qui fait désinstaller en trente
@@ -154,6 +154,6 @@ final class RevealController: RevealGestureDelegate {
         let lines = RevealSource.allCases.map { source in
             "  \(source.rawValue.padding(toLength: 18, withPad: " ", startingAt: 0)) \(revealCounts[source] ?? 0)"
         }
-        return (["[spike] révélations par source :"] + lines).joined(separator: "\n")
+        return (["[wuji] révélations par source :"] + lines).joined(separator: "\n")
     }
 }

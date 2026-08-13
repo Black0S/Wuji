@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>WujiSpike</string>
+	<string>Wuji</string>
 	<key>CFBundleDisplayName</key>
-	<string>Wuji Spike</string>
+	<string>Wuji</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.wuji.spike</string>
+	<string>com.wuji.browser</string>
 	<key>CFBundleExecutable</key>
-	<string>WujiSpike</string>
+	<string>Wuji</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleIconFile</key>

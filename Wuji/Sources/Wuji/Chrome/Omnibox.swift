@@ -42,7 +42,7 @@ protocol OmniboxDelegate: AnyObject {
 }
 
 /// La palette modale. Point d'entrée unique quand l'interface est masquée — donc la seule
-/// vue du spike qui a le droit d'être soignée : tout le reste est jetable, celle-ci est
+/// vue du prototype qui a le droit d'être soignée : tout le reste est jetable, celle-ci est
 /// la maquette exécutable de ce que J2 doit livrer.
 @MainActor
 final class Omnibox: NSView, NSTextFieldDelegate {

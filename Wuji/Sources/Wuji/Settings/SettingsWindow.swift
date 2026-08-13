@@ -148,7 +148,6 @@ final class SettingsWindow: NSWindow {
         pane.toggle(title: "Autoriser l'inspection Safari",
                     subtitle: "Ouvre l'inspecteur web d'Apple sur les pages de Wuji. Aucun inspecteur maison n'est prévu.",
                     isOn: settings.safariInspection) { [weak self] in self?.settings.safariInspection = $0 }
-        pane.note("Adblock, session privée et anti-pistage arrivent en J3. Rien n'est affiché ici tant que rien ne fonctionne.")
     }
 
     private func buildSearch(_ pane: PaneBuilder) {
@@ -168,7 +167,6 @@ final class SettingsWindow: NSWindow {
     }
 
     private func buildAdvanced(_ pane: PaneBuilder) {
-        pane.note("Les seuils de révélation, réglables sans recompiler — c'est le sujet de la semaine 2 du spike.")
         pane.toggle(title: "Bord haut et bord gauche", subtitle: "Candidat C. Marche aussi à la souris.",
                     isOn: settings.edgeEnabled) { [weak self] in self?.settings.edgeEnabled = $0 }
         pane.toggle(title: "Overscroll", subtitle: "Candidat A. Sans effet sur une page non défilable.",
@@ -219,15 +217,6 @@ private final class PaneBuilder {
     }
 
     // MARK: Rangées
-
-    func note(_ text: String) {
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.font = .systemFont(ofSize: 11, weight: .regular)
-        label.textColor = Tokens.textSecondary
-        label.frame = NSRect(x: Tokens.Space.xl, y: cursor, width: width - Tokens.Space.xl * 2, height: 32)
-        container.addSubview(label)
-        cursor += 32 + Tokens.Space.m
-    }
 
     func toggle(title: String, subtitle: String?, isOn: Bool, action: @escaping (Bool) -> Void) {
         let height = row(title: title, subtitle: subtitle)

@@ -4,7 +4,7 @@ import WebKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate, OmniboxDelegate {
 
-    private var window: SpikeWindow!
+    private var window: BrowserWindow!
     private var layout: BrowserLayout!
     private var reveal: RevealController!
 
@@ -17,10 +17,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private var tabs: [Tab] = []
     private var currentIndex = 0
     private var observations: [NSKeyValueObservation] = []
-
-    /// Prévisualisation manuelle du liseré (⌥1/⌥2/⌥3), pour juger le vocabulaire
-    /// visuel de la sécurité avant que les vrais signaux existent.
-    private var borderPreview: SecurityBorderView.State?
 
     private lazy var configuration: WKWebViewConfiguration = {
         let config = WKWebViewConfiguration()
@@ -39,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu()
 
-        window = SpikeWindow()
+        window = BrowserWindow()
         layout = BrowserLayout(frame: window.contentLayoutRect)
         layout.autoresizingMask = [.width, .height]
         layout.topBar.delegate = self
@@ -110,7 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // Journal de frictions, semaine 3 : c'est ce tableau qui tranche le geste,
         // pas une opinion en fin de semaine.
         print(reveal.summary())
-        print("[spike] onglets ouverts en fin de session : \(tabs.count)")
+        print("[wuji] onglets ouverts en fin de session : \(tabs.count)")
     }
 
     // MARK: - Onglets
@@ -172,7 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private func syncChrome() {
         guard let tab = currentTab else { return }
-        let state = borderPreview ?? tab.security
+        let state = tab.security
         layout.content.border.set(state)
         layout.content.setProgress(tab.webView.estimatedProgress, isLoading: tab.webView.isLoading)
         layout.topBar.show(url: tab.url,
@@ -272,19 +268,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         print(reveal.summary())
     }
 
-    // MARK: - Prévisualisation du liseré
-
-    @objc func previewInsecure(_ sender: Any?) { setPreview(.insecure) }
-    @objc func previewPermission(_ sender: Any?) { setPreview(.permission) }
-    @objc func previewPrivate(_ sender: Any?) { setPreview(.privateSession) }
-    @objc func previewOff(_ sender: Any?) { setPreview(nil) }
-
-    private func setPreview(_ state: SecurityBorderView.State?) {
-        borderPreview = state
-        syncChrome()
-        print("[spike] liseré : \(state?.label ?? "réel")")
-    }
-
     // MARK: - Menus
 
     private func buildMenu() {
@@ -294,9 +277,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "Réglages…", action: #selector(openSettings(_:)), keyEquivalent: ",")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Masquer Wuji Spike", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Masquer Wuji", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quitter Wuji Spike", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quitter Wuji", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         main.addItem(appItem)
 
@@ -328,27 +311,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         viewMenu.addItem(withTitle: "Onglet précédent", action: #selector(previousTab(_:)), keyEquivalent: "[")
         viewMenu.addItem(.separator())
 
-        let previews: [(String, Selector, String)] = [
-            ("Liseré — réel", #selector(previewOff(_:)), "0"),
-            ("Liseré — non chiffré", #selector(previewInsecure(_:)), "1"),
-            ("Liseré — permission active", #selector(previewPermission(_:)), "2"),
-            ("Liseré — session privée", #selector(previewPrivate(_:)), "3")
-        ]
-        for (title, action, key) in previews {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-            item.keyEquivalentModifierMask = [.option]
-            viewMenu.addItem(item)
-        }
-        viewItem.submenu = viewMenu
-        main.addItem(viewItem)
-
-        // Les candidats de révélation ont quitté le menu pour les Réglages › Avancé :
-        // ils s'y règlent avec leurs seuils, au même endroit, plutôt qu'en deux moitiés.
+        // Les candidats de révélation vivent dans les Réglages › Avancé, avec leurs
+        // seuils, plutôt que d'être réglés en deux moitiés.
         let summaryItem = NSMenuItem(title: "Compteurs de révélation",
                                      action: #selector(printSummary(_:)), keyEquivalent: "s")
         summaryItem.keyEquivalentModifierMask = [.control]
-        viewMenu.addItem(.separator())
         viewMenu.addItem(summaryItem)
+
+        viewItem.submenu = viewMenu
+        main.addItem(viewItem)
 
         NSApp.mainMenu = main
     }

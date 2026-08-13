@@ -1,5 +1,5 @@
 #!/bin/bash
-# Compile le spike et l'assemble en bundle .app.
+# Compile le prototype et l'assemble en bundle .app.
 #
 # Un exécutable SPM nu n'est pas une application pour macOS : pas d'Info.plist, donc pas
 # de permissions système (caméra, micro, position) et pas d'identité au niveau du Dock.
@@ -11,11 +11,11 @@ cd "$(dirname "$0")"
 CONFIG="${1:-debug}"
 swift build -c "$CONFIG"
 
-APP=".build/WujiSpike.app"
+APP=".build/Wuji.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
-cp ".build/$CONFIG/WujiSpike" "$APP/Contents/MacOS/WujiSpike"
+cp ".build/$CONFIG/Wuji" "$APP/Contents/MacOS/Wuji"
 
 # L'icône est redessinée, pas redimensionnée : le halo de l'anneau devient une bouillie
 # grise en dessous de 128 px. `swift Resources/Icon/make-icon.swift` la régénère.

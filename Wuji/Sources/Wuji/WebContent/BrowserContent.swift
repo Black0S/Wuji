@@ -59,7 +59,7 @@ final class BrowserContent: NSView {
     }
 }
 
-/// Un onglet. Pas de barre d'onglets dans le spike, et c'est délibéré : la thèse à
+/// Un onglet. Pas de barre d'onglets dans le prototype, et c'est délibéré : la thèse à
 /// éprouver est que **l'omnibox devient le vrai sélecteur d'onglets** quand l'interface
 /// disparaît. Une barre d'onglets rendrait le test caduc.
 @MainActor

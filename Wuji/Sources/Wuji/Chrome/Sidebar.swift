@@ -26,36 +26,17 @@ final class Sidebar: NSView {
     var onClose: ((Int) -> Void)?
     var onNew: (() -> Void)?
 
-    private let spaceRow = SpaceRow()
-    private let newTabShortcut = ShortcutRow(title: "New Tab", shortcut: "⌘T")
     private let list = NSView()
-    private let newTabButton = FooterButton(symbol: "plus", title: "New Tab")
-    private let footer = NSView()
-    private var footerButtons: [NSButton] = []
+    private let newTabButton = FooterButton(symbol: "plus", title: "Nouvel onglet", shortcut: "⌘T")
     private var rows: [TabRow] = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
 
-        addSubview(spaceRow)
-        addSubview(newTabShortcut)
         addSubview(list)
         addSubview(newTabButton)
-        addSubview(footer)
-
         newTabButton.onClick = { [weak self] in self?.onNew?() }
-
-        for symbol in ["arrow.down.circle", "plus", "ellipsis"] {
-            let button = NSButton()
-            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-            button.isBordered = false
-            button.imagePosition = .imageOnly
-            button.target = self
-            button.action = #selector(footerAction(_:))
-            footer.addSubview(button)
-            footerButtons.append(button)
-        }
     }
 
     @available(*, unavailable)
@@ -76,33 +57,19 @@ final class Sidebar: NSView {
     override func layout() {
         super.layout()
         layer?.backgroundColor = Tokens.sidebarBackground.cgColor
-        footerButtons.forEach { $0.contentTintColor = Tokens.textSecondary }
 
         let width = bounds.width
         let rowHeight = Tokens.Chrome.rowHeight
         let inset = Tokens.Space.s
 
-        // Sous les feux de circulation.
-        var cursor = bounds.height - Tokens.Chrome.trafficLights
-        spaceRow.frame = NSRect(x: inset, y: cursor - rowHeight, width: width - inset * 2, height: rowHeight)
-        cursor -= rowHeight + Tokens.Space.m
+        // Sous les feux de circulation, que macOS place lui-même.
+        let top = bounds.height - Tokens.Chrome.trafficLights
+        let bottom = Tokens.Space.s + rowHeight + Tokens.Space.s
 
-        newTabShortcut.frame = NSRect(x: inset, y: cursor - rowHeight, width: width - inset * 2, height: rowHeight)
-        cursor -= rowHeight + Tokens.Space.s
-
-        let footerTop = Tokens.Chrome.footerHeight
-        footer.frame = NSRect(x: 0, y: 0, width: width, height: footerTop)
-        let buttonWidth = width / 4
-        for (index, button) in footerButtons.enumerated() {
-            button.frame = NSRect(x: inset + CGFloat(index) * buttonWidth, y: 0,
-                                  width: buttonWidth, height: footerTop)
-        }
-
-        newTabButton.frame = NSRect(x: inset, y: footerTop + Tokens.Space.s,
+        newTabButton.frame = NSRect(x: inset, y: Tokens.Space.s,
                                     width: width - inset * 2, height: rowHeight)
 
-        let listBottom = footerTop + Tokens.Space.s + rowHeight + Tokens.Space.s
-        list.frame = NSRect(x: 0, y: listBottom, width: width, height: max(0, cursor - listBottom))
+        list.frame = NSRect(x: 0, y: bottom, width: width, height: max(0, top - bottom))
         for (index, row) in rows.enumerated() {
             row.frame = NSRect(x: inset,
                                y: list.bounds.height - CGFloat(index + 1) * rowHeight,
@@ -110,80 +77,9 @@ final class Sidebar: NSView {
                                height: rowHeight - 2)
         }
     }
-
-    @objc private func footerAction(_ sender: NSButton) {
-        guard footerButtons.firstIndex(of: sender) == 1 else { return }
-        onNew?()
-    }
 }
 
 // MARK: - Lignes
-
-/// Le sélecteur d'espace. Statique dans le spike : les Spaces sont un sujet de v1.1,
-/// la ligne n'est là que pour éprouver la densité verticale de la sidebar.
-@MainActor
-private final class SpaceRow: NSView {
-    private let glyph = NSImageView()
-    private let label = NSTextField(labelWithString: "Personal")
-    private let chevron = NSImageView()
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        glyph.image = NSImage(systemSymbolName: "square.stack", accessibilityDescription: nil)
-        label.font = .systemFont(ofSize: 13, weight: .medium)
-        chevron.image = NSImage(systemSymbolName: "chevron.up.chevron.down", accessibilityDescription: nil)
-        [glyph, label, chevron].forEach { addSubview($0) }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func layout() {
-        super.layout()
-        glyph.contentTintColor = Tokens.textPrimary
-        label.textColor = Tokens.textPrimary
-        chevron.contentTintColor = Tokens.textSecondary
-
-        glyph.frame = NSRect(x: Tokens.Space.s, y: (bounds.height - 14) / 2, width: 14, height: 14)
-        label.frame = NSRect(x: Tokens.Space.s + 14 + Tokens.Space.s, y: (bounds.height - 16) / 2,
-                             width: bounds.width - 80, height: 16)
-        chevron.frame = NSRect(x: bounds.width - 24, y: (bounds.height - 12) / 2, width: 12, height: 12)
-    }
-}
-
-/// Ligne « action + raccourci », comme le `New Tab ⌘T` de la maquette.
-@MainActor
-private final class ShortcutRow: NSView {
-    private let glyph = NSImageView()
-    private let label = NSTextField(labelWithString: "")
-    private let shortcut = NSTextField(labelWithString: "")
-
-    init(title: String, shortcut key: String) {
-        super.init(frame: .zero)
-        glyph.image = NSImage(systemSymbolName: "circle", accessibilityDescription: nil)
-        label.stringValue = title
-        label.font = .systemFont(ofSize: 13, weight: .regular)
-        shortcut.stringValue = key
-        shortcut.font = .systemFont(ofSize: 12, weight: .regular)
-        shortcut.alignment = .right
-        [glyph, label, shortcut].forEach { addSubview($0) }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func layout() {
-        super.layout()
-        glyph.contentTintColor = Tokens.textSecondary
-        label.textColor = Tokens.textPrimary
-        shortcut.textColor = Tokens.textSecondary
-
-        glyph.frame = NSRect(x: Tokens.Space.s, y: (bounds.height - 14) / 2, width: 14, height: 14)
-        label.frame = NSRect(x: Tokens.Space.s + 14 + Tokens.Space.s, y: (bounds.height - 16) / 2,
-                             width: bounds.width - 100, height: 16)
-        shortcut.frame = NSRect(x: bounds.width - 44, y: (bounds.height - 15) / 2, width: 36, height: 15)
-    }
-}
 
 /// Un onglet. La favicon est la seule couleur admise dans le chrome — et c'est cohérent :
 /// elle appartient au site, pas à l'interface (spec §4.6).
@@ -271,20 +167,24 @@ private final class TabRow: NSView {
     @objc private func closeTab() { onClose?() }
 }
 
-/// Bouton plein-largeur du bas de liste.
+/// Bouton plein-largeur du bas de liste, avec son raccourci à droite.
 @MainActor
 private final class FooterButton: NSView {
     var onClick: (() -> Void)?
 
     private let glyph = NSImageView()
     private let label = NSTextField(labelWithString: "")
+    private let shortcut = NSTextField(labelWithString: "")
 
-    init(symbol: String, title: String) {
+    init(symbol: String, title: String, shortcut key: String) {
         super.init(frame: .zero)
         glyph.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         label.stringValue = title
         label.font = .systemFont(ofSize: 13, weight: .regular)
-        [glyph, label].forEach { addSubview($0) }
+        shortcut.stringValue = key
+        shortcut.font = .systemFont(ofSize: 12, weight: .regular)
+        shortcut.alignment = .right
+        [glyph, label, shortcut].forEach { addSubview($0) }
     }
 
     @available(*, unavailable)
@@ -294,9 +194,11 @@ private final class FooterButton: NSView {
         super.layout()
         glyph.contentTintColor = Tokens.textSecondary
         label.textColor = Tokens.textSecondary
+        shortcut.textColor = Tokens.textSecondary
         glyph.frame = NSRect(x: Tokens.Space.s, y: (bounds.height - 14) / 2, width: 14, height: 14)
         label.frame = NSRect(x: Tokens.Space.s + 14 + Tokens.Space.s, y: (bounds.height - 16) / 2,
-                             width: bounds.width - 40, height: 16)
+                             width: bounds.width - 90, height: 16)
+        shortcut.frame = NSRect(x: bounds.width - 44, y: (bounds.height - 15) / 2, width: 36, height: 15)
     }
 
     override func mouseDown(with event: NSEvent) { onClick?() }
