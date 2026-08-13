@@ -14,13 +14,14 @@ final class BrowserLayout: ThemedView {
     let topBar = ContentTopBar()
     let content = BrowserContent()
     let findBar = FindBar()
+    let spacesPanel = SpacesPanel()
     let omnibox = Omnibox()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         // La palette passe au-dessus de tout le reste, y compris de la barre de recherche.
-        [content, topBar, sidebar, findBar, omnibox].forEach { addSubview($0) }
+        [content, topBar, sidebar, findBar, spacesPanel, omnibox].forEach { addSubview($0) }
     }
 
     @available(*, unavailable)
@@ -42,5 +43,7 @@ final class BrowserLayout: ThemedView {
         // recouvrir la sidebar ni la barre du haut.
         omnibox.frame = content.frame
         findBar.frame = content.frame
+        // Le panneau des espaces déborde sur la sidebar : il s'ancre sur elle.
+        spacesPanel.frame = bounds
     }
 }

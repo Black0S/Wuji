@@ -17,6 +17,7 @@ struct TabSnapshot {
 struct SpaceSnapshot {
     let name: String
     let symbol: String
+    let color: NSColor?
 }
 
 /// La sidebar **ancrée**. Le contenu commence après elle, il ne passe pas dessous —
@@ -131,9 +132,12 @@ private final class SpaceSwitcher: ThemedView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    private var tint: NSColor?
+
     func update(_ space: SpaceSnapshot) {
         glyph.image = NSImage(systemSymbolName: space.symbol, accessibilityDescription: nil)
         label.stringValue = space.name
+        tint = space.color
         needsLayout = true
     }
 
@@ -152,7 +156,9 @@ private final class SpaceSwitcher: ThemedView {
     override func layout() {
         super.layout()
         layer?.backgroundColor = isHovered ? Tokens.selectionFill.cgColor : NSColor.clear.cgColor
-        glyph.contentTintColor = Tokens.textPrimary
+        // La couleur ne touche que le symbole : le nom reste monochrome, sa lisibilité
+        // ne doit pas dépendre d'une teinte choisie par l'utilisateur.
+        glyph.contentTintColor = tint ?? Tokens.textPrimary
         label.textColor = Tokens.textPrimary
         chevron.contentTintColor = Tokens.textSecondary
 

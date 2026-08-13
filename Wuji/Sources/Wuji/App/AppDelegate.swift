@@ -2,7 +2,7 @@ import AppKit
 import WebKit
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate, OmniboxDelegate, FindBarDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate, OmniboxDelegate, FindBarDelegate, SpacesPanelDelegate {
 
     private var window: BrowserWindow!
     private var layout: BrowserLayout!
@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         layout.topBar.delegate = self
         layout.omnibox.delegate = self
         layout.findBar.delegate = self
+        layout.spacesPanel.delegate = self
 
         layout.sidebar.onSelect = { [weak self] index in
             guard let self, self.currentSpace.tabs.indices.contains(index) else { return }
@@ -54,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             self.closeTab(nil)
         }
         layout.sidebar.onNew = { [weak self] in self?.newTab(nil) }
-        layout.sidebar.onSpaceClick = { [weak self] anchor in self?.showSpaceMenu(from: anchor) }
+        layout.sidebar.onSpaceClick = { [weak self] anchor in self?.showSpacesPanel(from: anchor) }
 
         favicons.onUpdate = { [weak self] in self?.syncSidebar() }
 
@@ -165,7 +166,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private func syncSidebar() {
         let space = currentSpace
-        layout.sidebar.update(space: SpaceSnapshot(name: space.name, symbol: space.symbol))
+        layout.sidebar.update(space: SpaceSnapshot(name: space.name,
+                                                   symbol: space.symbol,
+                                                   color: space.tint.color))
         let snapshots = space.tabs.map {
             TabSnapshot(title: $0.title,
                         host: $0.url?.host() ?? "",
@@ -201,29 +204,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     // MARK: - Espaces
 
-    private func showSpaceMenu(from anchor: NSView) {
-        let menu = NSMenu()
-        for (index, space) in spaces.enumerated() {
-            let item = NSMenuItem(title: space.name, action: #selector(selectSpace(_:)), keyEquivalent: "")
-            item.image = NSImage(systemSymbolName: space.symbol, accessibilityDescription: nil)
-            item.target = self
-            item.tag = index
-            // La coche dit lequel est actif : en monochrome, c'est le seul marqueur
-            // disponible, la teinte étant réservée à la sécurité.
-            item.state = index == currentSpaceIndex ? .on : .off
-            menu.addItem(item)
+    private var spaceSnapshots: [SpaceRowSnapshot] {
+        spaces.map {
+            SpaceRowSnapshot(name: $0.name, symbol: $0.symbol,
+                             color: $0.tint.color, tabCount: $0.tabs.count)
         }
-        menu.addItem(.separator())
-        let add = NSMenuItem(title: "Nouvel espace", action: #selector(newSpace(_:)), keyEquivalent: "")
-        add.target = self
-        menu.addItem(add)
-
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height), in: anchor)
     }
 
-    @objc private func selectSpace(_ sender: NSMenuItem) {
-        guard spaces.indices.contains(sender.tag), sender.tag != currentSpaceIndex else { return }
-        currentSpaceIndex = sender.tag
+    private func showSpacesPanel(from anchor: NSView) {
+        layout.spacesPanel.present(spaces: spaceSnapshots,
+                                   current: currentSpaceIndex,
+                                   tint: currentSpace.tint,
+                                   anchor: anchor)
+    }
+
+    func spacesPanel(_ panel: SpacesPanel, didSelect index: Int) {
+        guard spaces.indices.contains(index), index != currentSpaceIndex else { return }
+        currentSpaceIndex = index
         // Un espace vide n'existe pas : on y entre toujours sur un onglet.
         if currentSpace.tabs.isEmpty {
             newTab(url: URL(string: settings.homepage))
@@ -232,7 +229,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         }
     }
 
-    @objc private func newSpace(_ sender: Any?) {
+    func spacesPanel(_ panel: SpacesPanel, didPick tint: Space.Tint) {
+        currentSpace.tint = tint
+        syncSidebar()
+        panel.reload(spaces: spaceSnapshots, current: currentSpaceIndex, tint: tint)
+    }
+
+    func spacesPanelDidRequestNew(_ panel: SpacesPanel) {
         let index = spaces.count
         spaces.append(Space(name: "Espace \(index + 1)", symbol: Space.symbol(forIndex: index)))
         currentSpaceIndex = index
