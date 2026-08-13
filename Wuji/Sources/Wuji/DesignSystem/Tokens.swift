@@ -126,6 +126,21 @@ enum Tokens {
         }()
     }
 
+    /// Résout une couleur dynamique contre une apparence précise.
+    ///
+    /// Nécessaire dès qu'une couleur quitte AppKit — `underPageBackgroundColor` de WebKit,
+    /// par exemple. Une couleur dynamique posée hors d'un contexte de dessin se résout
+    /// contre l'apparence courante du moment, qui n'est pas encore celle qu'on vient de
+    /// choisir : elle reste alors figée sur la valeur précédente.
+    @MainActor
+    static func resolve(_ color: NSColor, for appearance: NSAppearance) -> NSColor {
+        var resolved = color
+        appearance.performAsCurrentDrawingAppearance {
+            resolved = color.usingColorSpace(.sRGB) ?? color
+        }
+        return resolved
+    }
+
     // MARK: - Outils
 
     private static func hex(_ value: UInt32, alpha: CGFloat = 1) -> NSColor {

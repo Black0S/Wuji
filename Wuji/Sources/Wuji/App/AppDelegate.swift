@@ -156,7 +156,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             tab.webView.isInspectable = settings.safariInspection
             // Une couleur dynamique posée sur WebKit est résolue à l'affectation : il faut
             // la réécrire quand le thème change.
-            tab.webView.underPageBackgroundColor = Tokens.sidebarBackground
             // Une page interne suit le thème par `prefers-color-scheme`, qui reflète
             // l'apparence de la vue. Le basculement est instantané pour le CSS, mais le
             // HTML a pu être produit avec des couleurs figées : on le régénère.
@@ -164,6 +163,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                 tab.webView.reload()
             }
         }
+
+        guard themeChanged else { return }
+        // Après le prochain tour de boucle : l'apparence effective des vues n'a pas encore
+        // basculé au moment où l'on change celle de l'application.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.spaces.flatMap(\.allTabs).forEach(self.applyPageBackground)
+        }
+    }
+
+    /// Le fond hors page — celui qu'on découvre au rebond du défilement. Résolu contre
+    /// l'apparence de la vue, sinon il reste sur la teinte du thème précédent : c'est ce
+    /// qui laissait un fond noir en haut et en bas d'une page interne en thème clair.
+    private func applyPageBackground(to tab: Tab) {
+        tab.webView.underPageBackgroundColor =
+            Tokens.resolve(Tokens.sidebarBackground, for: tab.webView.effectiveAppearance)
     }
 
     private var appliedTheme: Settings.Theme?
@@ -233,7 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // pleine hauteur, et c'est le contraire d'une interface qui se fait oublier.
         // Le fond des pages internes est celui de la sidebar : la fenêtre reste une seule
         // surface, sans cadre autour d'une page qui appartient à l'application.
-        tab.webView.underPageBackgroundColor = Tokens.sidebarBackground
+        applyPageBackground(to: tab)
 
         // Chaque onglet s'observe lui-même, pas seulement celui qui est affiché : sinon un
         // onglet ouvert en arrière-plan reste figé sur son titre provisoire et son marqueur
