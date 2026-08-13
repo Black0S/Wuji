@@ -127,9 +127,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                     symbol: space.symbol,
                     folders: space.folders.map { folder in
                         StoredFolder(name: folder.name, isExpanded: folder.isExpanded,
-                                     tabs: folder.tabs.map(store))
+                                     tabs: folder.tabs.filter { !isBlank($0) }.map(store))
                     },
-                    loose: space.loose.map(store),
+                    loose: space.loose.filter { !isBlank($0) }.map(store),
                     currentTab: order.firstIndex { $0 === space.current })
             },
             currentSpace: currentSpaceIndex)
@@ -191,6 +191,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// elle porte le fond de la sidebar, donc la fenêtre reste une seule surface tant
     /// qu'il n'y a rien à afficher.
     static let blankPage = URL(string: "wuji://")!
+
+    /// Un onglet vierge n'est pas encore un onglet : il n'a ni adresse ni titre à montrer.
+    /// Il reste donc hors de la liste, hors de la palette et hors de la session — sinon on
+    /// listerait une ligne qui ne désigne rien, et on la restaurerait au lancement suivant.
+    private func isBlank(_ tab: Tab) -> Bool {
+        tab.url == nil || tab.url == Self.blankPage
+    }
 
     private func newTab(url: URL?) {
         let tab = makeTab()
@@ -357,13 +364,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
         var items: [SidebarItem] = []
         for folder in space.folders {
+            let visible = folder.tabs.filter { !isBlank($0) }
             items.append(.folder(id: folder.id, name: folder.name,
-                                 isExpanded: folder.isExpanded, count: folder.tabs.count))
+                                 isExpanded: folder.isExpanded, count: visible.count))
             if folder.isExpanded {
-                items.append(contentsOf: folder.tabs.map { item(for: $0, depth: 1) })
+                items.append(contentsOf: visible.map { item(for: $0, depth: 1) })
             }
         }
-        items.append(contentsOf: space.loose.map { item(for: $0, depth: 0) })
+        items.append(contentsOf: space.loose.filter { !isBlank($0) }.map { item(for: $0, depth: 0) })
 
         layout.sidebar.update(items: items, selected: space.current?.id)
         session.scheduleSave(self.snapshot())
@@ -804,6 +812,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         var matchingTabs: [OmniboxResult] = []
         for (spaceIndex, space) in spaces.enumerated() {
             for tab in space.allTabs {
+                guard !isBlank(tab) else { continue }
                 guard !(spaceIndex == currentSpaceIndex && tab === space.current) else { continue }
                 let haystack = "\(tab.title) \(tab.url?.absoluteString ?? "")".lowercased()
                 guard trimmed.isEmpty || haystack.contains(trimmed.lowercased()) else { continue }
