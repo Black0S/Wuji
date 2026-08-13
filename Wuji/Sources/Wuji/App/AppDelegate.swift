@@ -282,11 +282,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         let item = DownloadItem(download: download,
                                 source: source ?? URL(string: "about:blank")!,
                                 filename: source?.lastPathComponent ?? "fichier")
-        item.observation = download.progress.observe(\.fractionCompleted) { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.refreshDownloads() }
-        }
         downloads.add(item)
-        refreshDownloads(reload: true)
+        attach(download, to: item)
     }
 
     // MARK: - WKDownloadDelegate
@@ -323,7 +320,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// clignoter et remontait le défilement.
     private func refreshDownloads(reload: Bool = false) {
         downloads.changed()
-        let running = downloads.items.filter(\.isRunning)
+        downloads.items.forEach { $0.sample() }
+        let running = downloads.items.filter(\.isActive)
         // Un seul anneau pour tous : la moyenne dit « ça avance », ce qui est la seule
         // question qu'on se pose sans ouvrir la page.
         let fraction = running.isEmpty ? nil : running.reduce(0) { $0 + $1.fraction } / Double(running.count)
@@ -344,6 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         for item in downloads.items where item.isRunning {
+            item.sample()
             let detail = "\(formatter.string(fromByteCount: item.received)) sur "
                 + (item.expected > 0 ? formatter.string(fromByteCount: item.expected) : "?")
                 + " · en cours"
@@ -714,18 +713,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         case "clear":
             downloads.clearFinished()
             currentTab?.webView.reload()
+
         case "reveal":
-            guard let item = downloads.items.first(where: { $0.id.uuidString == id }),
-                  let destination = item.destination else { return }
+            guard let destination = downloads.item(id: id)?.destination else { return }
             NSWorkspace.shared.activateFileViewerSelecting([destination])
+
+        case "pause":
+            guard let item = downloads.item(id: id), let download = item.download else { return }
+            item.sample()
+            item.state = .paused
+            item.observation = nil
+            // Mettre en pause, c'est annuler en gardant de quoi reprendre : WebKit n'a pas
+            // d'autre mécanisme, et sans ces données la reprise repartirait de zéro.
+            download.cancel { [weak self] data in
+                MainActor.assumeIsolated {
+                    item.resumeData = data
+                    item.download = nil
+                    self?.refreshDownloads(reload: true)
+                }
+            }
+
+        case "resume":
+            guard let item = downloads.item(id: id), let data = item.resumeData,
+                  let webView = currentTab?.webView else { return }
+            item.state = .running
+            item.resumeData = nil
+            webView.resumeDownload(fromResumeData: data) { [weak self] download in
+                MainActor.assumeIsolated { self?.attach(download, to: item) }
+            }
+
         case "cancel":
-            guard let item = downloads.items.first(where: { $0.id.uuidString == id }) else { return }
-            item.download.cancel()
+            guard let item = downloads.item(id: id) else { return }
+            item.download?.cancel { _ in }
             item.state = .failed("Annulé")
+            item.observation = nil
+            item.download = nil
+            // Le fichier partiel n'a plus d'usage : le laisser dans Téléchargements
+            // ferait croire à un fichier complet.
+            if let destination = item.destination { try? FileManager.default.removeItem(at: destination) }
             refreshDownloads(reload: true)
+
+        case "retry":
+            guard let item = downloads.item(id: id), let webView = currentTab?.webView else { return }
+            downloads.remove(item)
+            // `startDownload` plutôt qu'une navigation : réessayer ne doit pas déplacer la
+            // page qu'on est en train de regarder.
+            webView.startDownload(using: URLRequest(url: item.source)) { [weak self] download in
+                MainActor.assumeIsolated { self?.register(download, source: item.source) }
+            }
+
         default:
             break
         }
+    }
+
+    /// Rebranche un téléchargement repris sur l'élément existant : c'est un nouvel objet
+    /// WebKit, mais la même ligne pour l'utilisateur.
+    private func attach(_ download: WKDownload, to item: DownloadItem) {
+        download.delegate = self
+        item.download = download
+        item.observation = download.progress.observe(\.fractionCompleted) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.refreshDownloads() }
+        }
+        refreshDownloads(reload: true)
     }
 
     @objc func printPage(_ sender: Any?) {

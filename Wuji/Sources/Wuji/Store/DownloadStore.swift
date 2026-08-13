@@ -5,7 +5,7 @@ import WebKit
 @MainActor
 final class DownloadItem {
     enum State {
-        case running, finished, failed(String)
+        case running, paused, finished, failed(String)
     }
 
     let id = UUID()
@@ -19,8 +19,16 @@ final class DownloadItem {
     /// tiendrait soi-même : `WKDownloadDelegate` n'a aucun rappel par paquet reçu.
     var observation: NSKeyValueObservation?
 
-    /// Retenu pour pouvoir suivre l'avancement et annuler.
-    let download: WKDownload
+    /// Nul pendant une pause : mettre en pause, c'est annuler en gardant de quoi
+    /// reprendre. WebKit n'a pas d'autre mécanisme.
+    var download: WKDownload?
+    /// Ce que WebKit rend à l'annulation, et sans quoi une reprise repartirait de zéro.
+    var resumeData: Data?
+
+    /// Derniers chiffres connus. Ils survivent à la pause, où l'objet d'avancement
+    /// disparaît avec le téléchargement.
+    private(set) var received: Int64 = 0
+    private(set) var expected: Int64 = 0
 
     init(download: WKDownload, source: URL, filename: String) {
         self.download = download
@@ -28,14 +36,30 @@ final class DownloadItem {
         self.filename = filename
     }
 
-    var fraction: Double { download.progress.fractionCompleted }
-    var received: Int64 { download.progress.completedUnitCount }
-    var expected: Int64 { download.progress.totalUnitCount }
+    func sample() {
+        guard let progress = download?.progress else { return }
+        received = progress.completedUnitCount
+        if progress.totalUnitCount > 0 { expected = progress.totalUnitCount }
+    }
+
+    var fraction: Double {
+        guard expected > 0 else { return 0 }
+        return min(1, Double(received) / Double(expected))
+    }
 
     var isRunning: Bool {
         if case .running = state { return true }
         return false
     }
+
+    var isPaused: Bool {
+        if case .paused = state { return true }
+        return false
+    }
+
+    /// Une pause n'est pas une fin : la ligne reste active, et l'anneau de la sidebar
+    /// continue de la compter.
+    var isActive: Bool { isRunning || isPaused }
 }
 
 /// La liste des téléchargements de la session.
@@ -61,10 +85,19 @@ final class DownloadStore {
         items.first { $0.download === download }
     }
 
+    func item(id: String?) -> DownloadItem? {
+        items.first { $0.id.uuidString == id }
+    }
+
+    func remove(_ item: DownloadItem) {
+        items.removeAll { $0 === item }
+        onChange?()
+    }
+
     func changed() { onChange?() }
 
     func clearFinished() {
-        items.removeAll { !$0.isRunning }
+        items.removeAll { !$0.isActive }
         onChange?()
     }
 

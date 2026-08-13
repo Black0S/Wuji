@@ -62,7 +62,12 @@ enum DownloadsPage {
         switch item.state {
         case .running:
             detail = "\(size(item.received)) sur \(item.expected > 0 ? size(item.expected) : "?") · en cours"
-            action = #"<button data-action="cancel" title="Annuler">✕</button>"#
+            action = #"<button data-action="pause" title="Mettre en pause">⏸</button>"#
+                + #"<button data-action="cancel" title="Annuler">✕</button>"#
+        case .paused:
+            detail = "\(size(item.received)) sur \(item.expected > 0 ? size(item.expected) : "?") · en pause"
+            action = #"<button data-action="resume" title="Reprendre">▶</button>"#
+                + #"<button data-action="cancel" title="Annuler">✕</button>"#
         case .finished:
             // Une fois terminé, la taille du fichier sur le disque est la seule qui vaille.
             let onDisk = item.destination.flatMap {
@@ -75,12 +80,12 @@ enum DownloadsPage {
             action = #"<button data-action="retry" title="Réessayer">↻</button>"#
         }
 
-        let bar = item.isRunning ? """
+        let bar = item.isActive ? """
             <div class="bar"><i style="width: \(Int(item.fraction * 100))%"></i></div>
             """ : ""
 
         return """
-        <li data-id="\(item.id.uuidString)" class="\(item.isRunning ? "running" : "")">
+        <li data-id="\(item.id.uuidString)" class="\(item.isActive ? "running" : "")">
           <span class="glyph">\(escape(String(item.filename.suffix(4).uppercased().filter(\.isLetter).prefix(3))))</span>
           <div class="body">
             <span class="name">\(escape(item.filename))</span>
@@ -125,6 +130,12 @@ enum DownloadsPage {
     }
     li:hover > button { opacity: 1; }
     li > button:hover { background: var(--hover); color: var(--text); }
+    /* Les actions d'un téléchargement en cours restent visibles : les chercher au survol
+       pendant que la barre avance serait une chasse. */
+    li.running > button { opacity: 1; }
+    /* Une barre en pause s'arrête franchement, sans transition qui suggérerait qu'elle
+       bouge encore. */
+    li:not(.running) .bar i { transition: none; }
     """
 }
 
