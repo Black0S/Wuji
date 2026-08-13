@@ -55,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             self.closeTab(nil)
         }
         layout.sidebar.onNew = { [weak self] in self?.newTab(nil) }
+        layout.sidebar.onTogglePin = { [weak self] index in self?.togglePin(at: index) }
         layout.sidebar.onSpaceClick = { [weak self] anchor in self?.showSpacesPanel(from: anchor) }
 
         favicons.onUpdate = { [weak self] in self?.syncSidebar() }
@@ -108,7 +109,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     @objc func closeTab(_ sender: Any?) {
         let space = currentSpace
-        guard !space.tabs.isEmpty else { return }
+        guard let tab = space.currentTab else { return }
+
+        // Un onglet épinglé ne se ferme pas : il revient à son adresse d'origine. C'est
+        // ce qui le rend permanent, et c'est le comportement d'Arc et de Zen. Sans ça,
+        // « épinglé » ne voudrait dire que « placé en haut ».
+        if tab.isPinned {
+            if let url = tab.pinnedURL, tab.url != url {
+                tab.webView.load(URLRequest(url: url))
+            }
+            return
+        }
+
         space.tabs.remove(at: space.currentIndex)
         if space.tabs.isEmpty {
             newTab(url: nil)
@@ -131,6 +143,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         guard space.tabs.count > 1 else { return }
         space.currentIndex = (space.currentIndex - 1 + space.tabs.count) % space.tabs.count
         activateCurrentTab()
+    }
+
+    /// Épingler prend l'adresse courante comme point de retour : c'est celle qu'on avait
+    /// sous les yeux au moment de décider que cet onglet devait rester.
+    private func togglePin(at index: Int) {
+        let space = currentSpace
+        guard space.tabs.indices.contains(index) else { return }
+        space.setPinned(!space.tabs[index].isPinned, at: index)
+        syncSidebar()
+    }
+
+    @objc func togglePinCurrent(_ sender: Any?) {
+        togglePin(at: currentSpace.currentIndex)
     }
 
     private func activateCurrentTab() {
@@ -173,7 +198,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             TabSnapshot(title: $0.title,
                         host: $0.url?.host() ?? "",
                         isLoading: $0.webView.isLoading,
-                        favicon: favicons.icon(for: $0.url))
+                        favicon: favicons.icon(for: $0.url),
+                        isPinned: $0.isPinned)
         }
         layout.sidebar.update(tabs: snapshots, selected: space.currentIndex)
     }
@@ -473,6 +499,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         let fileMenu = NSMenu(title: "Fichier")
         fileMenu.addItem(withTitle: "Nouvel onglet", action: #selector(newTab(_:)), keyEquivalent: "t")
         fileMenu.addItem(withTitle: "Fermer l'onglet", action: #selector(closeTab(_:)), keyEquivalent: "w")
+        let pinItem = NSMenuItem(title: "Épingler l'onglet",
+                                 action: #selector(togglePinCurrent(_:)), keyEquivalent: "P")
+        pinItem.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(pinItem)
         fileItem.submenu = fileMenu
         main.addItem(fileItem)
 

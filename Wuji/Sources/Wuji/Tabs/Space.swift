@@ -64,6 +64,30 @@ final class Space {
         tabs.indices.contains(currentIndex) ? tabs[currentIndex] : nil
     }
 
+    /// Invariant tenu par cette classe : **les onglets épinglés occupent toujours le
+    /// début du tableau**. Deux listes séparées obligeraient à traduire les index dans
+    /// les deux sens à chaque action ; une seule liste ordonnée évite toute cette
+    /// arithmétique, au prix d'un déplacement à l'épinglage.
+    var pinnedCount: Int { tabs.prefix { $0.isPinned }.count }
+
+    func setPinned(_ pinned: Bool, at index: Int) {
+        guard tabs.indices.contains(index), tabs[index].isPinned != pinned else { return }
+        let tab = tabs[index]
+        let staying = currentTab
+
+        tab.isPinned = pinned
+        tab.pinnedURL = pinned ? tab.url : nil
+
+        tabs.remove(at: index)
+        // Épinglé : à la fin du bloc épinglé. Désépinglé : juste après ce bloc, donc en
+        // tête des onglets ordinaires — il reste sous les yeux, là où on l'a laissé.
+        tabs.insert(tab, at: pinnedCount)
+
+        if let staying, let position = tabs.firstIndex(where: { $0 === staying }) {
+            currentIndex = position
+        }
+    }
+
     static func symbol(forIndex index: Int) -> String {
         symbols[index % symbols.count]
     }

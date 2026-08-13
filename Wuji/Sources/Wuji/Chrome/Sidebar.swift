@@ -11,6 +11,7 @@ struct TabSnapshot {
     let host: String
     let isLoading: Bool
     let favicon: NSImage?
+    let isPinned: Bool
 }
 
 /// L'espace courant, tel que la sidebar a besoin de le connaître : un nom et une forme.
@@ -32,12 +33,17 @@ final class Sidebar: ThemedView {
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
     var onNew: (() -> Void)?
+    var onTogglePin: ((Int) -> Void)?
     /// La sidebar ne connaît pas la liste des espaces : elle signale le clic et rend la
     /// vue d'ancrage, c'est l'application qui déroule le menu.
     var onSpaceClick: ((NSView) -> Void)?
 
     private let spaceSwitcher = SpaceSwitcher()
     private let list = NSView()
+    /// Filet entre le bloc épinglé et les onglets ordinaires. Ce n'est pas décoratif :
+    /// sans lui, deux listes de titres identiques se lisent comme une seule.
+    private let pinnedSeparator = NSView()
+    private var pinnedCount = 0
     private let newTabButton = FooterButton(symbol: "plus", title: "Nouvel onglet", shortcut: "⌘T")
     private var rows: [TabRow] = []
 
@@ -46,6 +52,8 @@ final class Sidebar: ThemedView {
         wantsLayer = true
 
         addSubview(spaceSwitcher)
+        pinnedSeparator.wantsLayer = true
+        list.addSubview(pinnedSeparator)
         addSubview(list)
         addSubview(newTabButton)
         newTabButton.onClick = { [weak self] in self?.onNew?() }
@@ -61,15 +69,45 @@ final class Sidebar: ThemedView {
 
     func update(tabs: [TabSnapshot], selected: Int) {
         rows.forEach { $0.removeFromSuperview() }
+        pinnedCount = tabs.prefix { $0.isPinned }.count
         rows = tabs.enumerated().map { index, snapshot in
             let row = TabRow(snapshot: snapshot, isSelected: index == selected)
             row.onSelect = { [weak self] in self?.onSelect?(index) }
             row.onClose = { [weak self] in self?.onClose?(index) }
+            row.onContextMenu = { [weak self] event in self?.showTabMenu(for: index, event: event) }
             list.addSubview(row)
             return row
         }
         needsLayout = true
     }
+
+    private func showTabMenu(for index: Int, event: NSEvent) {
+        guard rows.indices.contains(index) else { return }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let isPinned = index < pinnedCount
+        let pin = NSMenuItem(title: isPinned ? "Désépingler" : "Épingler",
+                             action: #selector(togglePin(_:)), keyEquivalent: "")
+        pin.image = NSImage(systemSymbolName: isPinned ? "pin.slash" : "pin",
+                            accessibilityDescription: nil)
+        pin.target = self
+        pin.tag = index
+        menu.addItem(pin)
+
+        let close = NSMenuItem(title: isPinned ? "Revenir à l'adresse épinglée" : "Fermer l'onglet",
+                               action: #selector(closeFromMenu(_:)), keyEquivalent: "")
+        close.image = NSImage(systemSymbolName: isPinned ? "arrow.uturn.backward" : "xmark",
+                              accessibilityDescription: nil)
+        close.target = self
+        close.tag = index
+        menu.addItem(close)
+
+        NSMenu.popUpContextMenu(menu, with: event, for: rows[index])
+    }
+
+    @objc private func togglePin(_ sender: NSMenuItem) { onTogglePin?(sender.tag) }
+    @objc private func closeFromMenu(_ sender: NSMenuItem) { onClose?(sender.tag) }
 
     override func layout() {
         super.layout()
@@ -95,11 +133,22 @@ final class Sidebar: ThemedView {
 
         list.frame = NSRect(x: 0, y: Tokens.Space.s, width: width,
                             height: max(0, top - Tokens.Space.s))
+
+        // Un cran d'espace après le bloc épinglé, et le filet au milieu de ce cran.
+        let gap = Tokens.Space.m
+        var cursor = list.bounds.height
         for (index, row) in rows.enumerated() {
-            row.frame = NSRect(x: inset,
-                               y: list.bounds.height - CGFloat(index + 1) * rowHeight,
-                               width: width - inset * 2,
-                               height: rowHeight - 2)
+            if index == pinnedCount, pinnedCount > 0 { cursor -= gap }
+            cursor -= rowHeight
+            row.frame = NSRect(x: inset, y: cursor, width: width - inset * 2, height: rowHeight - 2)
+        }
+
+        let hasBoth = pinnedCount > 0 && rows.count > pinnedCount
+        pinnedSeparator.isHidden = !hasBoth
+        pinnedSeparator.layer?.backgroundColor = Tokens.separator.cgColor
+        if hasBoth {
+            let y = list.bounds.height - CGFloat(pinnedCount) * rowHeight - gap / 2
+            pinnedSeparator.frame = NSRect(x: inset, y: y, width: width - inset * 2, height: 1)
         }
     }
 }
@@ -183,7 +232,9 @@ private final class TabRow: ThemedView {
 
     var onSelect: (() -> Void)?
     var onClose: (() -> Void)?
+    var onContextMenu: ((NSEvent) -> Void)?
 
+    private let isPinned: Bool
     private let icon = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private let close = NSButton()
@@ -193,6 +244,7 @@ private final class TabRow: ThemedView {
 
     init(snapshot: TabSnapshot, isSelected: Bool) {
         self.isSelected = isSelected
+        self.isPinned = snapshot.isPinned
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = Tokens.Radius.pill - 4
@@ -247,7 +299,8 @@ private final class TabRow: ThemedView {
         close.contentTintColor = Tokens.textSecondary
         // La croix n'apparaît qu'au survol : cinq croix alignées en permanence, c'est
         // cinq éléments de plus à l'écran pour une action rare (principe 5).
-        close.isHidden = !isHovered
+        // Jamais sur un onglet épinglé : elle promettrait une fermeture qui n'arrive pas.
+        close.isHidden = !isHovered || isPinned
 
         let iconSize: CGFloat = 16
         icon.frame = NSRect(x: Tokens.Space.s, y: (bounds.height - iconSize) / 2,
@@ -259,6 +312,7 @@ private final class TabRow: ThemedView {
     }
 
     override func mouseDown(with event: NSEvent) { onSelect?() }
+    override func rightMouseDown(with event: NSEvent) { onContextMenu?(event) }
     @objc private func closeTab() { onClose?() }
 }
 
