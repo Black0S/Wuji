@@ -62,7 +62,7 @@ enum Tokens {
     /// sa propre position finissait par se superposer à une autre — c'est exactement ce
     /// qui est arrivé entre la barre d'adresse et la barre d'onglets.
     enum Chrome {
-        static let sidebarWidth: CGFloat = 220
+        static let sidebarWidth: CGFloat = 202
         /// Assez haute pour une cible de clic confortable, pas plus : la barre du haut
         /// est un cadre, pas un panneau. Chaque point de hauteur est pris à la page.
         static let topBarHeight: CGFloat = 38

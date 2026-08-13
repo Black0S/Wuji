@@ -1,11 +1,14 @@
 import AppKit
 import WebKit
 
-/// Un onglet. Pas de barre d'onglets dans le prototype, et c'est délibéré : la thèse à
-/// éprouver est que **l'omnibox devient le vrai sélecteur d'onglets** quand l'interface
-/// disparaît. Une barre d'onglets rendrait le test caduc.
+/// Un onglet.
+///
+/// Il porte une identité stable. C'est ce qui permet à tout le reste de le désigner sans
+/// jamais parler de position : un index change dès qu'on épingle, déplace ou ferme
+/// quelque chose ailleurs, et on croit alors désigner un onglet alors qu'on désigne un rang.
 @MainActor
 final class Tab {
+    let id = UUID()
     let webView: WKWebView
 
     /// Épinglé : regroupé en tête de liste et tenu à l'écart des onglets de passage.

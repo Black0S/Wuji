@@ -3,10 +3,10 @@ import AppKit
 /// Ce que l'omnibox peut proposer. L'ordre du tableau est l'ordre affiché, et il compte :
 /// **les onglets ouverts passent avant tout le reste.**
 enum OmniboxResult {
-    /// L'onglet est désigné par son espace **et** sa position : la palette cherche dans
+    /// L'onglet est désigné par son espace **et son identité** : la palette cherche dans
     /// tous les espaces, pas seulement celui qui est ouvert. Sans ça, retrouver un onglet
     /// demanderait de deviner d'abord dans quel espace on l'a laissé.
-    case tab(space: Int, tab: Int, title: String, subtitle: String, icon: NSImage?)
+    case tab(space: Int, tab: UUID, title: String, subtitle: String, icon: NSImage?)
     case url(URL)
     case search(String)
 

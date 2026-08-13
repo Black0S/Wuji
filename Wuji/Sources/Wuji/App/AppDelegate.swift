@@ -29,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     }()
 
     private var currentSpace: Space { spaces[currentSpaceIndex] }
-    private var currentTab: Tab? { currentSpace.currentTab }
+    private var currentTab: Tab? { currentSpace.current }
 
     // MARK: - Cycle de vie
 
@@ -44,18 +44,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         layout.findBar.delegate = self
         layout.spacesPanel.delegate = self
 
-        layout.sidebar.onSelect = { [weak self] index in
-            guard let self, self.currentSpace.tabs.indices.contains(index) else { return }
-            self.currentSpace.currentIndex = index
-            self.activateCurrentTab()
-        }
-        layout.sidebar.onClose = { [weak self] index in
-            guard let self, self.currentSpace.tabs.indices.contains(index) else { return }
-            self.currentSpace.currentIndex = index
-            self.closeTab(nil)
-        }
+        layout.sidebar.onSelectTab = { [weak self] id in self?.select(tabID: id) }
+        layout.sidebar.onCloseTab = { [weak self] id in self?.close(tabID: id) }
+        layout.sidebar.onToggleFolder = { [weak self] id in self?.toggleFolder(id) }
+        layout.sidebar.onTabMenu = { [weak self] id, event in self?.showTabMenu(id, event) }
+        layout.sidebar.onFolderMenu = { [weak self] id, event in self?.showFolderMenu(id, event) }
+        layout.sidebar.onDropTab = { [weak self] id, drop in self?.drop(tabID: id, on: drop) }
         layout.sidebar.onNew = { [weak self] in self?.newTab(nil) }
-        layout.sidebar.onTogglePin = { [weak self] index in self?.togglePin(at: index) }
         layout.sidebar.onSpaceClick = { [weak self] anchor in self?.showSpacesPanel(from: anchor) }
 
         favicons.onUpdate = { [weak self] in self?.syncSidebar() }
@@ -76,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private func applySettings() {
         NSApp.appearance = settings.theme.appearance
 
-        for tab in spaces.flatMap(\.tabs) {
+        for tab in spaces.flatMap(\.allTabs) {
             tab.webView.pageZoom = settings.pageZoom
             tab.webView.isInspectable = settings.safariInspection
         }
@@ -111,10 +106,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private func newTab(url: URL?) {
         let tab = Tab(configuration: configuration)
-        currentSpace.tabs.append(tab)
-        currentSpace.currentIndex = currentSpace.tabs.count - 1
+        currentSpace.append(tab)
         activateCurrentTab()
         if let url { tab.webView.load(URLRequest(url: url)) }
+    }
+
+    private func select(tabID: UUID) {
+        guard let tab = currentSpace.tab(with: tabID) else { return }
+        currentSpace.current = tab
+        activateCurrentTab()
+    }
+
+    private func close(tabID: UUID) {
+        guard let tab = currentSpace.tab(with: tabID) else { return }
+        currentSpace.remove(tab)
+        if currentSpace.isEmpty {
+            newTab(url: nil)
+            openOmnibox()
+        } else {
+            activateCurrentTab()
+        }
     }
 
     /// `⌘W` ferme ce qui est devant, et rien d'autre.
@@ -132,47 +143,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             return
         }
 
-        let space = currentSpace
-        guard space.currentTab != nil else { return }
-        space.tabs.remove(at: space.currentIndex)
-        if space.tabs.isEmpty {
-            newTab(url: nil)
-            openOmnibox()
-        } else {
-            space.currentIndex = min(space.currentIndex, space.tabs.count - 1)
-            activateCurrentTab()
-        }
+        guard let tab = currentSpace.current else { return }
+        close(tabID: tab.id)
     }
 
-    @objc func nextTab(_ sender: Any?) {
-        let space = currentSpace
-        guard space.tabs.count > 1 else { return }
-        space.currentIndex = (space.currentIndex + 1) % space.tabs.count
+    @objc func nextTab(_ sender: Any?) { step(by: 1) }
+    @objc func previousTab(_ sender: Any?) { step(by: -1) }
+
+    /// La navigation clavier suit l'ordre d'affichage, dossiers compris : c'est celui que
+    /// l'utilisateur a sous les yeux.
+    private func step(by delta: Int) {
+        let order = currentSpace.allTabs
+        guard order.count > 1,
+              let position = order.firstIndex(where: { $0 === currentSpace.current }) else { return }
+        currentSpace.current = order[(position + delta + order.count) % order.count]
         activateCurrentTab()
-    }
-
-    @objc func previousTab(_ sender: Any?) {
-        let space = currentSpace
-        guard space.tabs.count > 1 else { return }
-        space.currentIndex = (space.currentIndex - 1 + space.tabs.count) % space.tabs.count
-        activateCurrentTab()
-    }
-
-    /// Épingler prend l'adresse courante comme point de retour : c'est celle qu'on avait
-    /// sous les yeux au moment de décider que cet onglet devait rester.
-    private func togglePin(at index: Int) {
-        let space = currentSpace
-        guard space.tabs.indices.contains(index) else { return }
-        space.setPinned(!space.tabs[index].isPinned, at: index)
-        syncSidebar()
     }
 
     @objc func togglePinCurrent(_ sender: Any?) {
-        togglePin(at: currentSpace.currentIndex)
+        guard let tab = currentSpace.current else { return }
+        currentSpace.setPinned(!tab.isPinned, tab: tab)
+        syncSidebar()
     }
 
     private func activateCurrentTab() {
-        guard let tab = currentTab else { return }
+        guard let tab = currentSpace.current ?? currentSpace.allTabs.first else { return }
+        currentSpace.current = tab
         layout.content.attach(tab.webView)
 
         let sync: @Sendable (WKWebView, Any) -> Void = { [weak self] _, _ in
@@ -202,19 +198,181 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         syncSidebar()
     }
 
+    /// Construit la liste affichée : épinglés, séparateur, dossiers avec leur contenu,
+    /// puis onglets de passage. La sidebar ne reçoit que des identités et de quoi dessiner.
     private func syncSidebar() {
         let space = currentSpace
         layout.sidebar.update(space: SpaceSnapshot(name: space.name,
                                                    symbol: space.symbol,
                                                    color: space.tint.color))
-        let snapshots = space.tabs.map {
-            TabSnapshot(title: $0.title,
-                        host: $0.url?.host() ?? "",
-                        isLoading: $0.webView.isLoading,
-                        favicon: favicons.icon(for: $0.url),
-                        isPinned: $0.isPinned)
+
+        var items: [SidebarItem] = space.pinned.map { item(for: $0, depth: 0) }
+        if !items.isEmpty, !space.folders.isEmpty || !space.loose.isEmpty {
+            items.append(.separator)
         }
-        layout.sidebar.update(tabs: snapshots, selected: space.currentIndex)
+        for folder in space.folders {
+            items.append(.folder(id: folder.id, name: folder.name,
+                                 isExpanded: folder.isExpanded, count: folder.tabs.count))
+            if folder.isExpanded {
+                items.append(contentsOf: folder.tabs.map { item(for: $0, depth: 1) })
+            }
+        }
+        items.append(contentsOf: space.loose.map { item(for: $0, depth: 0) })
+
+        layout.sidebar.update(items: items, selected: space.current?.id)
+    }
+
+    private func item(for tab: Tab, depth: Int) -> SidebarItem {
+        .tab(id: tab.id, title: tab.title, host: tab.url?.host() ?? "",
+             isLoading: tab.webView.isLoading, favicon: favicons.icon(for: tab.url), depth: depth)
+    }
+
+    // MARK: - Dossiers et déplacements
+
+    @objc func newFolder(_ sender: Any?) {
+        let folder = currentSpace.addFolder(named: "Dossier \(currentSpace.folders.count + 1)")
+        // Le nouvel onglet courant y entre : créer un dossier vide qu'il faudrait ensuite
+        // remplir à la main serait deux gestes pour une intention.
+        if let tab = currentSpace.current { currentSpace.place(tab, at: .into(folder)) }
+        syncSidebar()
+    }
+
+    private func toggleFolder(_ id: UUID) {
+        guard let folder = currentSpace.folder(with: id) else { return }
+        folder.isExpanded.toggle()
+        syncSidebar()
+    }
+
+    private func drop(tabID: UUID, on drop: SidebarDrop) {
+        let space = currentSpace
+        guard let tab = space.tab(with: tabID) else { return }
+        switch drop {
+        case .before(let otherID):
+            guard let other = space.tab(with: otherID) else { return }
+            space.place(tab, at: .before(other))
+        case .into(let folderID):
+            guard let folder = space.folder(with: folderID) else { return }
+            space.place(tab, at: .into(folder))
+        case .end:
+            space.place(tab, at: .looseEnd)
+        }
+        syncSidebar()
+    }
+
+    private func showTabMenu(_ id: UUID, _ event: NSEvent) {
+        let space = currentSpace
+        guard let tab = space.tab(with: id) else { return }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let pin = NSMenuItem(title: tab.isPinned ? "Désépingler" : "Épingler",
+                             action: #selector(togglePinFromMenu(_:)), keyEquivalent: "")
+        pin.image = NSImage(systemSymbolName: tab.isPinned ? "pin.slash" : "pin",
+                            accessibilityDescription: nil)
+        pin.target = self
+        pin.representedObject = id
+        menu.addItem(pin)
+
+        // Le glisser-déposer reste le geste principal ; ce sous-menu est le chemin
+        // clavier-souris équivalent, pour qui ne veut pas viser.
+        let move = NSMenuItem(title: "Déplacer vers", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for folder in space.folders {
+            let item = NSMenuItem(title: folder.name, action: #selector(moveToFolder(_:)), keyEquivalent: "")
+            item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+            item.target = self
+            item.representedObject = [id, folder.id]
+            submenu.addItem(item)
+        }
+        if !space.folders.isEmpty { submenu.addItem(.separator()) }
+        let out = NSMenuItem(title: "Hors dossier", action: #selector(moveToFolder(_:)), keyEquivalent: "")
+        out.target = self
+        out.representedObject = [id]
+        submenu.addItem(out)
+        move.submenu = submenu
+        menu.addItem(move)
+
+        menu.addItem(.separator())
+        let close = NSMenuItem(title: "Fermer l'onglet", action: #selector(closeFromMenu(_:)), keyEquivalent: "")
+        close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)
+        close.target = self
+        close.representedObject = id
+        menu.addItem(close)
+
+        NSMenu.popUpContextMenu(menu, with: event, for: layout.sidebar)
+    }
+
+    private func showFolderMenu(_ id: UUID, _ event: NSEvent) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let rename = NSMenuItem(title: "Renommer", action: #selector(renameFolder(_:)), keyEquivalent: "")
+        rename.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
+        rename.target = self
+        rename.representedObject = id
+        menu.addItem(rename)
+
+        let delete = NSMenuItem(title: "Supprimer le dossier", action: #selector(deleteFolder(_:)), keyEquivalent: "")
+        delete.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+        delete.target = self
+        delete.representedObject = id
+        menu.addItem(delete)
+
+        NSMenu.popUpContextMenu(menu, with: event, for: layout.sidebar)
+    }
+
+    @objc private func togglePinFromMenu(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID,
+              let tab = currentSpace.tab(with: id) else { return }
+        currentSpace.setPinned(!tab.isPinned, tab: tab)
+        syncSidebar()
+    }
+
+    @objc private func closeFromMenu(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID else { return }
+        close(tabID: id)
+    }
+
+    @objc private func moveToFolder(_ sender: NSMenuItem) {
+        guard let ids = sender.representedObject as? [UUID], let tabID = ids.first,
+              let tab = currentSpace.tab(with: tabID) else { return }
+        if ids.count > 1, let folder = currentSpace.folder(with: ids[1]) {
+            currentSpace.place(tab, at: .into(folder))
+        } else {
+            currentSpace.place(tab, at: .looseEnd)
+        }
+        syncSidebar()
+    }
+
+    /// Renommer un dossier passe par une boîte de dialogue, faute d'une ligne qui puisse
+    /// devenir éditable comme dans le panneau des espaces — la sidebar reconstruit ses
+    /// lignes à chaque changement, l'édition en place n'y survivrait pas.
+    @objc private func renameFolder(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID,
+              let folder = currentSpace.folder(with: id) else { return }
+        let alert = NSAlert()
+        alert.messageText = "Renommer le dossier"
+        alert.addButton(withTitle: "Renommer")
+        alert.addButton(withTitle: "Annuler")
+        let field = NSTextField(string: folder.name)
+        field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        folder.name = name
+        syncSidebar()
+    }
+
+    /// Supprimer un dossier ne ferme pas ses onglets : ils redeviennent des onglets de
+    /// passage. Rien à confirmer, rien n'est perdu.
+    @objc private func deleteFolder(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID,
+              let folder = currentSpace.folder(with: id) else { return }
+        currentSpace.removeFolder(folder)
+        syncSidebar()
     }
 
     // MARK: - Navigation
@@ -246,7 +404,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private var spaceSnapshots: [SpaceRowSnapshot] {
         spaces.map {
             SpaceRowSnapshot(name: $0.name, symbol: $0.symbol,
-                             color: $0.tint.color, tabCount: $0.tabs.count)
+                             color: $0.tint.color, tabCount: $0.tabCount)
         }
     }
 
@@ -262,7 +420,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         guard spaces.indices.contains(index), index != currentSpaceIndex else { return }
         currentSpaceIndex = index
         // Un espace vide n'existe pas : on y entre toujours sur un onglet.
-        if currentSpace.tabs.isEmpty {
+        if currentSpace.isEmpty {
             newTab(url: URL(string: settings.homepage))
         } else {
             activateCurrentTab()
@@ -304,12 +462,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
         // Supprimer un espace ferme ses onglets, et rien ne les rouvrira tant qu'il n'y a
         // pas d'historique : c'est une perte, donc on demande.
-        if !doomed.tabs.isEmpty {
+        if !doomed.isEmpty {
             let alert = NSAlert()
             alert.messageText = "Supprimer « \(doomed.name) » ?"
-            alert.informativeText = doomed.tabs.count == 1
+            alert.informativeText = doomed.tabCount == 1
                 ? "Son onglet sera fermé."
-                : "Ses \(doomed.tabs.count) onglets seront fermés."
+                : "Ses \(doomed.tabCount) onglets seront fermés."
             alert.addButton(withTitle: "Supprimer")
             alert.addButton(withTitle: "Annuler")
             alert.alertStyle = .warning
@@ -318,7 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
         spaces.remove(at: index)
         currentSpaceIndex = min(currentSpaceIndex, spaces.count - 1)
-        if currentSpace.tabs.isEmpty {
+        if currentSpace.isEmpty {
             newTab(url: URL(string: settings.homepage))
         } else {
             activateCurrentTab()
@@ -444,8 +602,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
         var matchingTabs: [OmniboxResult] = []
         for (spaceIndex, space) in spaces.enumerated() {
-            for (tabIndex, tab) in space.tabs.enumerated() {
-                guard !(spaceIndex == currentSpaceIndex && tabIndex == space.currentIndex) else { continue }
+            for tab in space.allTabs {
+                guard !(spaceIndex == currentSpaceIndex && tab === space.current) else { continue }
                 let haystack = "\(tab.title) \(tab.url?.absoluteString ?? "")".lowercased()
                 guard trimmed.isEmpty || haystack.contains(trimmed.lowercased()) else { continue }
                 // L'espace n'est rappelé que s'il n'est pas celui où l'on se trouve :
@@ -453,7 +611,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                 let host = tab.url?.host() ?? "onglet"
                 let subtitle = spaceIndex == currentSpaceIndex ? host : "\(space.name) · \(host)"
                 matchingTabs.append(.tab(space: spaceIndex,
-                                         tab: tabIndex,
+                                         tab: tab.id,
                                          title: tab.title,
                                          subtitle: subtitle,
                                          icon: favicons.icon(for: tab.url)))
@@ -470,9 +628,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     func omnibox(_ omnibox: Omnibox, didActivate result: OmniboxResult) {
         switch result {
-        case .tab(let spaceIndex, let tabIndex, _, _, _):
+        case .tab(let spaceIndex, let tabID, _, _, _):
             currentSpaceIndex = spaceIndex
-            currentSpace.currentIndex = tabIndex
+            if let tab = currentSpace.tab(with: tabID) { currentSpace.current = tab }
             activateCurrentTab()
         case .url(let url):
             currentTab?.webView.load(URLRequest(url: url))
@@ -511,6 +669,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         let fileItem = NSMenuItem()
         let fileMenu = NSMenu(title: "Fichier")
         fileMenu.addItem(withTitle: "Nouvel onglet", action: #selector(newTab(_:)), keyEquivalent: "t")
+        let folderItem = NSMenuItem(title: "Nouveau dossier",
+                                    action: #selector(newFolder(_:)), keyEquivalent: "n")
+        folderItem.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(folderItem)
         fileMenu.addItem(withTitle: "Fermer l'onglet", action: #selector(closeTab(_:)), keyEquivalent: "w")
         let pinItem = NSMenuItem(title: "Épingler l'onglet",
                                  action: #selector(togglePinCurrent(_:)), keyEquivalent: "P")
