@@ -35,7 +35,7 @@ enum HistoryPage {
         <head>
         <meta charset="utf-8">
         <title>Historique</title>
-        <style>\(style)</style>
+        <style>\(InternalStyle.shared)\(style)</style>
         </head>
         <body>
           <header>
@@ -112,61 +112,16 @@ enum HistoryPage {
 
     // MARK: - Style
 
+    /// Ce qui appartient à cette page seulement — le reste vient d'`InternalStyle`.
     private static let style = """
-    :root {
-      --bg: #FFFFFF; --raised: #F5F5F7; --text: #1D1D1F; --muted: #6E6E73;
-      --hairline: rgba(0,0,0,.10); --hover: rgba(0,0,0,.05); --danger: #C7302B;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #1C1C1E; --raised: #2C2C2E; --text: #FFFFFF; --muted: #8E8E93;
-        --hairline: rgba(255,255,255,.14); --hover: rgba(255,255,255,.07); --danger: #E0554F;
-      }
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; background: var(--bg); color: var(--text);
-      font: 13px -apple-system, system-ui, sans-serif;
-      -webkit-font-smoothing: antialiased;
-    }
-    header {
-      display: flex; align-items: center; gap: 12px;
-      max-width: 760px; margin: 0 auto; padding: 48px 24px 16px;
-    }
-    .titles { flex: 1; }
-    h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -.4px; }
-    header p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
-    input[type=search] {
-      appearance: none; width: 200px; height: 32px; padding: 0 12px;
-      background: transparent; color: var(--text);
-      border: 1px solid var(--hairline); border-radius: 8px; font: inherit; outline: none;
-    }
-    input[type=search]:focus { border-color: var(--muted); }
-    .ghost {
-      height: 32px; padding: 0 12px; background: transparent; color: var(--muted);
-      border: 1px solid var(--hairline); border-radius: 8px; font: inherit; cursor: pointer;
-    }
-    .ghost:hover { color: var(--danger); border-color: var(--danger); }
-    main { max-width: 760px; margin: 0 auto; padding: 0 24px 64px; }
-    section { margin-top: 24px; }
-    h2 {
-      margin: 0 0 6px; padding: 0 12px; font-size: 10px; font-weight: 600;
-      letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted);
-    }
-    ul { list-style: none; margin: 0; padding: 0; }
-    li {
-      display: flex; align-items: center; gap: 12px;
-      height: 40px; padding: 0 12px; border-radius: 8px;
-    }
-    li:hover { background: var(--hover); }
-    img { width: 16px; height: 16px; border-radius: 3px; flex: none; }
-    /* Le site n'a pas servi d'icône : un carré neutre plutôt qu'une image cassée. */
-    img.fallback { visibility: hidden; }
     a {
       flex: 1; min-width: 0; color: inherit; text-decoration: none;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     li:hover a { text-decoration: underline; }
+    img { width: 16px; height: 16px; border-radius: 3px; flex: none; }
+    /* Le site n'a pas servi d'icône : un carré neutre plutôt qu'une image cassée. */
+    img.fallback { visibility: hidden; }
     .host { color: var(--muted); font-size: 12px; max-width: 200px;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -179,7 +134,6 @@ enum HistoryPage {
        bruit pour une action rare. */
     li:hover .remove { opacity: 1; }
     .remove:hover { background: var(--danger); color: #fff; }
-    .empty { color: var(--muted); text-align: center; padding: 64px 0; line-height: 1.6; }
     """
 
     private static let script = """

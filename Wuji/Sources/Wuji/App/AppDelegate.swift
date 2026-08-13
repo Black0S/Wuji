@@ -3,7 +3,8 @@ import WebKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate, OmniboxDelegate, FindBarDelegate, SpacesPanelDelegate,
-                       WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+                       WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler,
+                       WKDownloadDelegate {
 
     private var window: BrowserWindow!
     private var layout: BrowserLayout!
@@ -11,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private let favicons = FaviconStore()
     private let session = SessionStore()
     private let history = HistoryStore()
+    private let downloads = DownloadStore()
     private let settings = Settings()
     private var settingsWindow: SettingsWindow?
 
@@ -30,9 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         // Le gestionnaire doit être posé avant la création de la moindre vue web : une
         // configuration déjà utilisée ne l'accepte plus.
-        config.setURLSchemeHandler(InternalPageHandler(history: history),
+        config.setURLSchemeHandler(InternalPageHandler(history: history, downloads: downloads),
                                    forURLScheme: InternalPageHandler.scheme)
         config.userContentController.add(self, name: "wujiHistory")
+        config.userContentController.add(self, name: "wujiDownloads")
         return config
     }()
 
@@ -255,6 +258,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard let url = webView.url else { return }
         history.record(url: url, title: webView.title ?? "")
+    }
+
+    /// Une réponse que WebKit ne sait pas afficher est un fichier, pas une page.
+    func webView(_ webView: WKWebView,
+                 decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+        navigationResponse.canShowMIMEType ? .allow : .download
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction,
+                 didBecome download: WKDownload) {
+        register(download, source: navigationAction.request.url)
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse,
+                 didBecome download: WKDownload) {
+        register(download, source: navigationResponse.response.url)
+    }
+
+    private func register(_ download: WKDownload, source: URL?) {
+        download.delegate = self
+        let item = DownloadItem(download: download,
+                                source: source ?? URL(string: "about:blank")!,
+                                filename: source?.lastPathComponent ?? "fichier")
+        downloads.add(item)
+        refreshDownloads()
+    }
+
+    // MARK: - WKDownloadDelegate
+
+    func download(_ download: WKDownload,
+                  decideDestinationUsing response: URLResponse,
+                  suggestedFilename: String) async -> URL? {
+        let destination = DownloadStore.destination(for: suggestedFilename)
+        guard let item = downloads.item(for: download) else { return destination }
+        item.filename = destination.lastPathComponent
+        item.destination = destination
+        item.expected = response.expectedContentLength
+        refreshDownloads()
+        return destination
+    }
+
+    func download(_ download: WKDownload, didReceiveData length: Int64) {
+        guard let item = downloads.item(for: download) else { return }
+        item.received += length
+        refreshDownloads()
+    }
+
+    func downloadDidFinish(_ download: WKDownload) {
+        guard let item = downloads.item(for: download) else { return }
+        item.state = .finished
+        if let destination = item.destination,
+           let size = try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? Int64 {
+            item.received = size
+        }
+        refreshDownloads()
+        // Sans signal, un téléchargement terminé est invisible : le fichier est arrivé
+        // quelque part et rien ne le dit.
+        layout.toast.show("\(item.filename) · téléchargé") { [weak self] in self?.showDownloads(nil) }
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: any Error, resumeData: Data?) {
+        guard let item = downloads.item(for: download) else { return }
+        item.state = .failed(error.localizedDescription)
+        refreshDownloads()
+    }
+
+    /// La page des téléchargements ne s'anime pas toute seule : si elle est ouverte, on la
+    /// recharge. Une barre figée laisserait croire à un blocage.
+    private func refreshDownloads() {
+        downloads.changed()
+        for tab in spaces.flatMap(\.allTabs) where tab.url == Self.downloadsPage {
+            tab.webView.reload()
+        }
+    }
+
+    static let downloadsPage = URL(string: "wuji://downloads")!
+
+    @objc func showDownloads(_ sender: Any?) {
+        openInternal(Self.downloadsPage)
     }
 
     /// `target="_blank"` et `window.open` : WebKit demande une nouvelle vue plutôt que de
@@ -554,6 +636,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             .separator,
             ActionItem(title: "Historique", symbol: "clock", shortcut: "⌘Y",
                        action: { [weak self] in self?.showHistory(nil) }),
+            ActionItem(title: "Téléchargements", symbol: "arrow.down.circle", shortcut: "⌘J",
+                       action: { [weak self] in self?.showDownloads(nil) }),
             ActionItem(title: "Rechercher dans la page…", symbol: "magnifyingglass", shortcut: "⌘F",
                        action: { [weak self] in self?.findInPage(nil) }),
             ActionItem(title: "Imprimer…", symbol: "printer", shortcut: "⌘P",
@@ -567,10 +651,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     }
 
     @objc func showHistory(_ sender: Any?) {
-        guard let url = URL(string: "wuji://history") else { return }
-        // Dans l'onglet courant s'il est vierge, dans un nouveau sinon : ouvrir un onglet
-        // par consultation de l'historique en laisserait une traînée.
-        if let tab = currentTab, tab.url == nil || tab.url == Self.blankPage {
+        openInternal(URL(string: "wuji://history")!)
+    }
+
+    /// Dans l'onglet courant s'il est vierge ou s'il montre déjà cette page, dans un
+    /// nouveau sinon : consulter deux fois l'historique ne doit pas laisser deux onglets.
+    private func openInternal(_ url: URL) {
+        if let tab = currentTab, tab.url == nil || tab.url == Self.blankPage || tab.url == url {
             tab.webView.load(URLRequest(url: url))
         } else {
             newTab(url: url)
@@ -584,6 +671,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         MainActor.assumeIsolated {
             guard let payload = message.body as? [String: Any],
                   let action = payload["action"] as? String else { return }
+            if message.name == "wujiDownloads" {
+                handleDownloadAction(action, id: payload["id"] as? String)
+                return
+            }
             switch action {
             case "delete":
                 if let url = payload["url"] as? String { history.delete(url: url) }
@@ -593,6 +684,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             default:
                 break
             }
+        }
+    }
+
+    private func handleDownloadAction(_ action: String, id: String?) {
+        switch action {
+        case "clear":
+            downloads.clearFinished()
+            currentTab?.webView.reload()
+        case "reveal":
+            guard let item = downloads.items.first(where: { $0.id.uuidString == id }),
+                  let destination = item.destination else { return }
+            NSWorkspace.shared.activateFileViewerSelecting([destination])
+        case "cancel":
+            guard let item = downloads.items.first(where: { $0.id.uuidString == id }) else { return }
+            item.download.cancel()
+            item.state = .failed("Annulé")
+            refreshDownloads()
+        default:
+            break
         }
     }
 
@@ -912,6 +1022,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         viewMenu.addItem(withTitle: "Recharger", action: #selector(reload(_:)), keyEquivalent: "r")
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Historique", action: #selector(showHistory(_:)), keyEquivalent: "y")
+        viewMenu.addItem(withTitle: "Téléchargements", action: #selector(showDownloads(_:)), keyEquivalent: "j")
         viewMenu.addItem(withTitle: "Rechercher dans la page…", action: #selector(findInPage(_:)), keyEquivalent: "f")
         viewMenu.addItem(withTitle: "Résultat suivant", action: #selector(findNext(_:)), keyEquivalent: "g")
         let previousMatch = NSMenuItem(title: "Résultat précédent",

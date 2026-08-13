@@ -17,9 +17,11 @@ final class InternalPageHandler: NSObject, WKURLSchemeHandler {
     static let scheme = "wuji"
 
     private unowned let history: HistoryStore
+    private unowned let downloads: DownloadStore
 
-    init(history: HistoryStore) {
+    init(history: HistoryStore, downloads: DownloadStore) {
         self.history = history
+        self.downloads = downloads
     }
 
     nonisolated func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
@@ -43,8 +45,9 @@ final class InternalPageHandler: NSObject, WKURLSchemeHandler {
 
     private func html(for url: URL) -> String {
         switch url.host() ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) {
-        case "history": return HistoryPage.html(entries: history.recent())
-        default:        return NewTabPage.html
+        case "history":   return HistoryPage.html(entries: history.recent())
+        case "downloads": return DownloadsPage.html(items: downloads.items)
+        default:          return NewTabPage.html
         }
     }
 }
