@@ -215,6 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         layout.spacesPanel.present(spaces: spaceSnapshots,
                                    current: currentSpaceIndex,
                                    tint: currentSpace.tint,
+                                   symbol: currentSpace.symbol,
                                    anchor: anchor)
     }
 
@@ -231,8 +232,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     func spacesPanel(_ panel: SpacesPanel, didPick tint: Space.Tint) {
         currentSpace.tint = tint
+        refreshSpaces(panel)
+    }
+
+    func spacesPanel(_ panel: SpacesPanel, didPick symbol: String) {
+        currentSpace.symbol = symbol
+        refreshSpaces(panel)
+    }
+
+    func spacesPanel(_ panel: SpacesPanel, didRename index: Int, to name: String) {
+        guard spaces.indices.contains(index) else { return }
+        spaces[index].name = name
+        refreshSpaces(panel)
+    }
+
+    func spacesPanel(_ panel: SpacesPanel, didMove index: Int, to destination: Int) {
+        guard spaces.indices.contains(index), spaces.indices.contains(destination) else { return }
+        // L'espace courant est suivi par son identité, pas par sa position : réordonner
+        // ne doit pas faire basculer l'utilisateur dans un autre espace.
+        let staying = currentSpace
+        let moved = spaces.remove(at: index)
+        spaces.insert(moved, at: destination)
+        if let position = spaces.firstIndex(where: { $0 === staying }) {
+            currentSpaceIndex = position
+        }
+        refreshSpaces(panel)
+    }
+
+    func spacesPanel(_ panel: SpacesPanel, didDelete index: Int) {
+        guard spaces.indices.contains(index), spaces.count > 1 else { return }
+        let doomed = spaces[index]
+
+        // Supprimer un espace ferme ses onglets, et rien ne les rouvrira tant qu'il n'y a
+        // pas d'historique : c'est une perte, donc on demande.
+        if !doomed.tabs.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "Supprimer « \(doomed.name) » ?"
+            alert.informativeText = doomed.tabs.count == 1
+                ? "Son onglet sera fermé."
+                : "Ses \(doomed.tabs.count) onglets seront fermés."
+            alert.addButton(withTitle: "Supprimer")
+            alert.addButton(withTitle: "Annuler")
+            alert.alertStyle = .warning
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+
+        spaces.remove(at: index)
+        currentSpaceIndex = min(currentSpaceIndex, spaces.count - 1)
+        if currentSpace.tabs.isEmpty {
+            newTab(url: URL(string: settings.homepage))
+        } else {
+            activateCurrentTab()
+        }
+    }
+
+    /// Le panneau reste ouvert pendant qu'on règle un espace : il faut donc rafraîchir
+    /// les deux surfaces, la sidebar et le panneau lui-même.
+    private func refreshSpaces(_ panel: SpacesPanel) {
         syncSidebar()
-        panel.reload(spaces: spaceSnapshots, current: currentSpaceIndex, tint: tint)
+        panel.reload(spaces: spaceSnapshots,
+                     current: currentSpaceIndex,
+                     tint: currentSpace.tint,
+                     symbol: currentSpace.symbol)
     }
 
     func spacesPanelDidRequestNew(_ panel: SpacesPanel) {

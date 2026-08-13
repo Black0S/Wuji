@@ -12,6 +12,10 @@ struct SpaceRowSnapshot {
 protocol SpacesPanelDelegate: AnyObject {
     func spacesPanel(_ panel: SpacesPanel, didSelect index: Int)
     func spacesPanel(_ panel: SpacesPanel, didPick tint: Space.Tint)
+    func spacesPanel(_ panel: SpacesPanel, didPick symbol: String)
+    func spacesPanel(_ panel: SpacesPanel, didRename index: Int, to name: String)
+    func spacesPanel(_ panel: SpacesPanel, didMove index: Int, to destination: Int)
+    func spacesPanel(_ panel: SpacesPanel, didDelete index: Int)
     func spacesPanelDidRequestNew(_ panel: SpacesPanel)
 }
 
@@ -34,10 +38,13 @@ final class SpacesPanel: ThemedView {
                                        isCurrent: false)
     private var rows: [SpaceRow] = []
     private var swatches: [Swatch] = []
+    private var symbolButtons: [SymbolButton] = []
+    private var canDelete = false
 
     private static let cardWidth: CGFloat = 248
     private static let rowHeight: CGFloat = 34
     private static let swatchStrip: CGFloat = 44
+    private static let symbolStrip: CGFloat = 40
 
     /// Ancrage : coin haut-gauche du panneau, en coordonnées de cette vue.
     private var anchorPoint: NSPoint = .zero
@@ -59,12 +66,22 @@ final class SpacesPanel: ThemedView {
         separator.wantsLayer = true
         card.addSubview(separator)
 
-        newSpaceRow.onClick = { [weak self] in
+        newSpaceRow.onMouseDown = { [weak self] _, _ in
             guard let self else { return }
             self.dismiss()
             self.delegate?.spacesPanelDidRequestNew(self)
         }
         card.addSubview(newSpaceRow)
+
+        for symbol in Space.symbols {
+            let button = SymbolButton(symbol: symbol)
+            button.onClick = { [weak self] in
+                guard let self else { return }
+                self.delegate?.spacesPanel(self, didPick: symbol)
+            }
+            card.addSubview(button)
+            symbolButtons.append(button)
+        }
 
         for tint in Space.Tint.allCases {
             let swatch = Swatch(tint: tint)
@@ -92,30 +109,36 @@ final class SpacesPanel: ThemedView {
 
     // MARK: - Contenu
 
-    func present(spaces: [SpaceRowSnapshot], current: Int, tint: Space.Tint, anchor: NSView) {
+    func present(spaces: [SpaceRowSnapshot], current: Int, tint: Space.Tint,
+                 symbol: String, anchor: NSView) {
         // Sous le sélecteur qui l'a ouvert, aligné sur son bord gauche.
         let originInSelf = convert(NSPoint(x: 0, y: 0), from: anchor)
         anchorPoint = NSPoint(x: originInSelf.x, y: originInSelf.y - Tokens.Space.xs)
         isHidden = false
-        reload(spaces: spaces, current: current, tint: tint)
+        reload(spaces: spaces, current: current, tint: tint, symbol: symbol)
     }
 
     /// Recharge le contenu sans déplacer le panneau : indispensable après un choix de
-    /// couleur, sinon la pastille change dans la sidebar et pas dans le panneau qui vient
-    /// de servir à la choisir.
-    func reload(spaces: [SpaceRowSnapshot], current: Int, tint: Space.Tint) {
+    /// couleur ou un déplacement, sinon l'état change dans la sidebar et pas dans le
+    /// panneau qui vient de servir à le changer.
+    func reload(spaces: [SpaceRowSnapshot], current: Int, tint: Space.Tint, symbol: String) {
+        // Un espace ne peut pas être supprimé s'il est le dernier : il faut bien que les
+        // onglets vivent quelque part.
+        canDelete = spaces.count > 1
         rows.forEach { $0.removeFromSuperview() }
         rows = spaces.enumerated().map { index, snapshot in
             let row = SpaceRow(snapshot: snapshot, isCurrent: index == current)
-            row.onClick = { [weak self] in
+            row.onMouseDown = { [weak self] _, event in self?.beginTracking(at: index, event: event) }
+            row.onContextMenu = { [weak self] event in self?.showRowMenu(for: index, event: event) }
+            row.onRename = { [weak self] name in
                 guard let self else { return }
-                self.dismiss()
-                self.delegate?.spacesPanel(self, didSelect: index)
+                self.delegate?.spacesPanel(self, didRename: index, to: name)
             }
             card.addSubview(row)
             return row
         }
         swatches.forEach { $0.isSelected = $0.tint == tint }
+        symbolButtons.forEach { $0.isSelected = $0.symbol == symbol }
         needsLayout = true
         layoutSubtreeIfNeeded()
     }
@@ -132,7 +155,7 @@ final class SpacesPanel: ThemedView {
         separator.layer?.backgroundColor = Tokens.separator.cgColor
 
         let listHeight = CGFloat(rows.count + 1) * Self.rowHeight + Tokens.Space.s * 2
-        let cardHeight = listHeight + Self.swatchStrip
+        let cardHeight = listHeight + Self.symbolStrip + Self.swatchStrip
         card.frame = NSRect(x: anchorPoint.x, y: anchorPoint.y - cardHeight,
                             width: Self.cardWidth, height: cardHeight)
 
@@ -146,18 +169,97 @@ final class SpacesPanel: ThemedView {
         newSpaceRow.frame = NSRect(x: Tokens.Space.xs, y: cursor,
                                    width: Self.cardWidth - Tokens.Space.s, height: Self.rowHeight)
 
-        separator.frame = NSRect(x: 0, y: Self.swatchStrip, width: Self.cardWidth, height: 1)
+        separator.frame = NSRect(x: 0, y: Self.swatchStrip + Self.symbolStrip,
+                                 width: Self.cardWidth, height: 1)
 
-        // La palette, centrée dans son bandeau.
-        let diameter: CGFloat = 18
-        let gap: CGFloat = 10
-        let total = CGFloat(swatches.count) * diameter + CGFloat(swatches.count - 1) * gap
+        // Deux bandes : la forme puis la couleur. La forme vient d'abord parce qu'elle
+        // porte le sens — la couleur ne fait que l'accélérer.
+        layoutStrip(symbolButtons, height: Self.symbolStrip,
+                    bottom: Self.swatchStrip, diameter: 22, gap: 8)
+        layoutStrip(swatches, height: Self.swatchStrip, bottom: 0, diameter: 18, gap: 10)
+    }
+
+    private func layoutStrip(_ views: [NSView], height: CGFloat, bottom: CGFloat,
+                             diameter: CGFloat, gap: CGFloat) {
+        let total = CGFloat(views.count) * diameter + CGFloat(views.count - 1) * gap
         var x = (Self.cardWidth - total) / 2
-        for swatch in swatches {
-            swatch.frame = NSRect(x: x, y: (Self.swatchStrip - diameter) / 2,
-                                  width: diameter, height: diameter)
+        for view in views {
+            view.frame = NSRect(x: x, y: bottom + (height - diameter) / 2,
+                                width: diameter, height: diameter)
             x += diameter + gap
         }
+    }
+
+    // MARK: - Sélection et réordonnancement
+
+    /// Clic et glisser partagent le même appui : on ne sait lequel c'est qu'après coup.
+    ///
+    /// La boucle de suivi vit ici, et non dans la ligne : réordonner détruit et recrée
+    /// les lignes, donc une ligne qui suivrait son propre glissement disparaîtrait au
+    /// premier déplacement, avec les événements qu'elle attendait encore.
+    private func beginTracking(at index: Int, event: NSEvent) {
+        guard let window else { return }
+        var origin = index
+        var moved = false
+
+        window.trackEvents(matching: [.leftMouseDragged, .leftMouseUp],
+                           timeout: .infinity, mode: .eventTracking) { [weak self] event, stop in
+            guard let self, let event else { stop.pointee = true; return }
+
+            if event.type == .leftMouseUp {
+                stop.pointee = true
+                guard !moved else { return }
+                self.dismiss()
+                self.delegate?.spacesPanel(self, didSelect: origin)
+                return
+            }
+
+            let point = self.convert(event.locationInWindow, from: nil)
+            let target = self.rowIndex(at: point)
+            guard target != origin, self.rows.indices.contains(target) else { return }
+            moved = true
+            self.delegate?.spacesPanel(self, didMove: origin, to: target)
+            origin = target
+        }
+    }
+
+    private func rowIndex(at point: NSPoint) -> Int {
+        let top = card.frame.maxY - Tokens.Space.s
+        let offset = Int((top - point.y) / Self.rowHeight)
+        return min(max(offset, 0), max(rows.count - 1, 0))
+    }
+
+    private func showRowMenu(for index: Int, event: NSEvent) {
+        let menu = NSMenu()
+        // Sans ça, AppKit valide les entrées lui-même à partir de la cible : « Supprimer »
+        // serait proposé même sur le dernier espace, où il ne peut rien faire.
+        menu.autoenablesItems = false
+
+        let rename = NSMenuItem(title: "Renommer", action: #selector(renameRow(_:)), keyEquivalent: "")
+        rename.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
+        rename.target = self
+        rename.tag = index
+        menu.addItem(rename)
+
+        let delete = NSMenuItem(title: "Supprimer", action: #selector(deleteRow(_:)), keyEquivalent: "")
+        delete.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+        delete.target = self
+        delete.tag = index
+        delete.isEnabled = canDelete
+        menu.addItem(delete)
+
+        NSMenu.popUpContextMenu(menu, with: event, for: rows[index])
+    }
+
+    @objc private func renameRow(_ sender: NSMenuItem) {
+        guard rows.indices.contains(sender.tag) else { return }
+        rows[sender.tag].beginRename(in: window)
+    }
+
+    @objc private func deleteRow(_ sender: NSMenuItem) {
+        guard canDelete, rows.indices.contains(sender.tag) else { return }
+        dismiss()
+        delegate?.spacesPanel(self, didDelete: sender.tag)
     }
 }
 
@@ -165,9 +267,11 @@ final class SpacesPanel: ThemedView {
 
 /// Une ligne d'espace : pastille, nom, nombre d'onglets.
 @MainActor
-private final class SpaceRow: ThemedView {
+private final class SpaceRow: ThemedView, NSTextFieldDelegate {
 
-    var onClick: (() -> Void)?
+    var onMouseDown: ((Int, NSEvent) -> Void)?
+    var onContextMenu: ((NSEvent) -> Void)?
+    var onRename: ((String) -> Void)?
 
     private let glyph = NSImageView()
     private let label = NSTextField(labelWithString: "")
@@ -176,6 +280,7 @@ private final class SpaceRow: ThemedView {
     private let isCurrent: Bool
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
+    private var isRenaming = false
 
     init(snapshot: SpaceRowSnapshot, isCurrent: Bool) {
         self.tint = snapshot.color
@@ -192,6 +297,8 @@ private final class SpaceRow: ThemedView {
         label.stringValue = snapshot.name
         label.font = .systemFont(ofSize: 13, weight: isCurrent ? .medium : .regular)
         label.lineBreakMode = .byTruncatingTail
+        label.focusRingType = .none
+        label.delegate = self
         addSubview(label)
 
         // -1 sert de « pas de compte » pour la ligne d'ajout.
@@ -228,8 +335,84 @@ private final class SpaceRow: ThemedView {
         glyph.frame = NSRect(x: Tokens.Space.m, y: (bounds.height - 15) / 2, width: 15, height: 15)
         let left = Tokens.Space.m + 15 + Tokens.Space.m
         count.frame = NSRect(x: bounds.width - 44, y: (bounds.height - 15) / 2, width: 36, height: 15)
-        label.frame = NSRect(x: left, y: (bounds.height - 16) / 2,
-                             width: count.frame.minX - left - Tokens.Space.s, height: 16)
+        count.isHidden = isRenaming
+        label.frame = NSRect(x: left, y: (bounds.height - 20) / 2,
+                             width: count.frame.minX - left - Tokens.Space.s, height: 20)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard !isRenaming else { return }
+        onMouseDown?(0, event)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        onContextMenu?(event)
+    }
+
+    // MARK: - Renommage
+
+    /// Renommage sur place plutôt qu'en boîte de dialogue : le nom se relit dans son
+    /// contexte, à côté des autres espaces, ce qu'une fenêtre modale interdit.
+    func beginRename(in window: NSWindow?) {
+        isRenaming = true
+        label.isEditable = true
+        label.isSelectable = true
+        label.isBordered = true
+        label.bezelStyle = .roundedBezel
+        label.drawsBackground = true
+        needsLayout = true
+        window?.makeFirstResponder(label)
+        label.currentEditor()?.selectAll(nil)
+    }
+
+    private func endRename() {
+        guard isRenaming else { return }
+        isRenaming = false
+        label.isEditable = false
+        label.isSelectable = false
+        label.isBordered = false
+        label.drawsBackground = false
+        needsLayout = true
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        let name = label.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        endRename()
+        guard !name.isEmpty else { return }
+        onRename?(name)
+    }
+}
+
+/// Un choix de forme. La forme est ce qui distingue un espace quand la couleur ne peut
+/// pas être vue — elle n'est pas un ornement à côté de la pastille colorée.
+@MainActor
+private final class SymbolButton: ThemedView {
+
+    let symbol: String
+    var onClick: (() -> Void)?
+    var isSelected = false { didSet { needsLayout = true } }
+
+    private let glyph = NSImageView()
+
+    init(symbol: String) {
+        self.symbol = symbol
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.cornerCurve = .continuous
+        glyph.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        glyph.imageScaling = .scaleProportionallyDown
+        addSubview(glyph)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        layer?.backgroundColor = isSelected ? Tokens.selectionFill.cgColor : NSColor.clear.cgColor
+        glyph.contentTintColor = isSelected ? Tokens.textPrimary : Tokens.textSecondary
+        glyph.frame = bounds.insetBy(dx: 4, dy: 4)
     }
 
     override func mouseDown(with event: NSEvent) { onClick?() }
