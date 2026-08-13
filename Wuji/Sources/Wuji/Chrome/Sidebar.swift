@@ -81,16 +81,20 @@ final class Sidebar: ThemedView {
 
         // Sous les feux de circulation, que macOS place lui-même.
         var top = bounds.height - Tokens.Chrome.trafficLights
-        let bottom = Tokens.Space.s + rowHeight + Tokens.Space.s
 
         spaceSwitcher.frame = NSRect(x: inset, y: top - rowHeight,
                                      width: width - inset * 2, height: rowHeight)
+        top -= rowHeight + Tokens.Space.s
+
+        // « Nouvel onglet » entre l'espace et la liste : l'action se lit avec l'espace
+        // auquel elle ajoute, et la liste garde le bas de la colonne pour elle seule —
+        // elle est la seule chose qui grandit.
+        newTabButton.frame = NSRect(x: inset, y: top - rowHeight,
+                                    width: width - inset * 2, height: rowHeight)
         top -= rowHeight + Tokens.Space.m
 
-        newTabButton.frame = NSRect(x: inset, y: Tokens.Space.s,
-                                    width: width - inset * 2, height: rowHeight)
-
-        list.frame = NSRect(x: 0, y: bottom, width: width, height: max(0, top - bottom))
+        list.frame = NSRect(x: 0, y: Tokens.Space.s, width: width,
+                            height: max(0, top - Tokens.Space.s))
         for (index, row) in rows.enumerated() {
             row.frame = NSRect(x: inset,
                                y: list.bounds.height - CGFloat(index + 1) * rowHeight,
