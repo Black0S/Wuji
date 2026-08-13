@@ -13,13 +13,24 @@ final class RevealController: RevealGestureDelegate {
 
     enum State { case immersive, revealed }
 
-    /// Bande haute qui déclenche la révélation (candidat C).
-    private let revealZone: CGFloat = 6
-    /// Zone de maintien, plus haute que la bande de déclenchement : c'est l'hystérésis.
+    /// Bande qui déclenche la révélation (candidat C). Réglable en direct : trouver la
+    /// bonne valeur est l'objet même de J0, et recompiler à chaque essai la fausserait.
+    var revealZone: CGFloat = 6
+    /// Zone de maintien, plus large que la bande de déclenchement : c'est l'hystérésis.
     /// Sans elle, le chrome clignote dès que la main tremble à la frontière.
-    private let keepZone: CGFloat = 96
+    var keepZone: CGFloat = 96
     /// Délai avant escamotage, pour ne pas punir un aller-retour du curseur.
-    private let hideDelay: TimeInterval = 0.35
+    var hideDelay: TimeInterval = 0.35
+
+    /// Garde-fou d'accessibilité (spec §4.5) : l'auto-masquage est hostile à la navigation
+    /// clavier exclusive et à VoiceOver. Ici, il ne s'escamote plus jamais.
+    var isAlwaysVisible = false {
+        didSet {
+            guard isAlwaysVisible else { return }
+            cancelHide()
+            apply(.revealed, animated: true)
+        }
+    }
 
     private(set) var state: State = .revealed
     /// Candidat C, activable/désactivable comme les autres pour pouvoir les isoler.
@@ -106,8 +117,9 @@ final class RevealController: RevealGestureDelegate {
 
     func hideNow() {
         cancelHide()
-        // Ne jamais escamoter le chrome pendant que l'utilisateur écrit dans la palette.
-        guard state == .revealed, !shouldStayRevealed() else { return }
+        // Ne jamais escamoter le chrome pendant que l'utilisateur écrit dans la palette,
+        // ni quand l'interface est réglée sur « toujours visible ».
+        guard state == .revealed, !isAlwaysVisible, !shouldStayRevealed() else { return }
         apply(.immersive, animated: true)
     }
 

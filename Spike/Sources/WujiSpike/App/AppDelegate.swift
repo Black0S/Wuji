@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private let overscroll = OverscrollGesture()
     private let threeFinger = ThreeFingerGesture()
     private let favicons = FaviconStore()
+    private let settings = Settings()
+    private var settingsWindow: SettingsWindow?
 
     private var tabs: [Tab] = []
     private var currentIndex = 0
@@ -66,9 +68,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         threeFinger.delegate = reveal
         reveal.shouldStayRevealed = { [weak self] in self?.layout.omnibox.isOpen ?? false }
 
-        newTab(url: URL(string: "https://www.apple.com")!)
+        settings.onChange = { [weak self] in self?.applySettings() }
+        applySettings()
+
+        newTab(url: URL(string: settings.homepage))
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
+    }
+
+    /// Un seul endroit où les réglages descendent dans l'application. Sans ça, chaque
+    /// réglage finirait branché depuis sa propre rangée d'interface, et on ne saurait
+    /// plus qui pilote quoi.
+    private func applySettings() {
+        NSApp.appearance = settings.theme.appearance
+
+        reveal.isAlwaysVisible = settings.alwaysVisibleUI
+        reveal.isEdgeEnabled = settings.edgeEnabled
+        reveal.revealZone = settings.revealZone
+        reveal.keepZone = settings.keepZone
+        reveal.hideDelay = settings.hideDelay
+
+        overscroll.isEnabled = settings.overscrollEnabled
+        threeFinger.isEnabled = settings.threeFingerEnabled
+
+        for tab in tabs {
+            tab.webView.pageZoom = settings.pageZoom
+            tab.webView.isInspectable = settings.safariInspection
+        }
+    }
+
+    @objc func openSettings(_ sender: Any?) {
+        if settingsWindow == nil {
+            settingsWindow = SettingsWindow(settings: settings)
+        }
+        settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -216,7 +249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         case .url(let url):
             currentTab?.webView.load(URLRequest(url: url))
         case .search(let query):
-            if let url = Self.searchURL(query) {
+            if let url = settings.searchEngine.url(for: query) {
                 currentTab?.webView.load(URLRequest(url: url))
             }
         }
@@ -233,34 +266,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         let candidate = input.contains("://") ? input : "https://\(input)"
         guard let url = URL(string: candidate), url.host != nil else { return nil }
         return url
-    }
-
-    static func searchURL(_ query: String) -> URL? {
-        var components = URLComponents(string: "https://duckduckgo.com/")
-        components?.queryItems = [URLQueryItem(name: "q", value: query)]
-        return components?.url
-    }
-
-    // MARK: - Candidats de révélation
-
-    /// Isoler un candidat est le seul moyen de le juger : tant que les trois sont actifs,
-    /// on ne sait pas lequel a réellement servi.
-    @objc func toggleEdge(_ sender: NSMenuItem) {
-        reveal.isEdgeEnabled.toggle()
-        sender.state = reveal.isEdgeEnabled ? .on : .off
-        print("[spike] \(RevealSource.edge.rawValue) : \(reveal.isEdgeEnabled ? "actif" : "inactif")")
-    }
-
-    @objc func toggleOverscroll(_ sender: NSMenuItem) {
-        overscroll.isEnabled.toggle()
-        sender.state = overscroll.isEnabled ? .on : .off
-        print("[spike] \(RevealSource.overscroll.rawValue) : \(overscroll.isEnabled ? "actif" : "inactif")")
-    }
-
-    @objc func toggleThreeFinger(_ sender: NSMenuItem) {
-        threeFinger.isEnabled.toggle()
-        sender.state = threeFinger.isEnabled ? .on : .off
-        print("[spike] \(RevealSource.threeFinger.rawValue) : \(threeFinger.isEnabled ? "actif" : "inactif")")
     }
 
     @objc func printSummary(_ sender: Any?) {
@@ -287,6 +292,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Réglages…", action: #selector(openSettings(_:)), keyEquivalent: ",")
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Masquer Wuji Spike", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quitter Wuji Spike", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -335,26 +342,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         viewItem.submenu = viewMenu
         main.addItem(viewItem)
 
-        let gestureItem = NSMenuItem()
-        let gestureMenu = NSMenu(title: "Révélation")
-        let candidates: [(String, Selector, String)] = [
-            ("Bord haut (C)", #selector(toggleEdge(_:)), "1"),
-            ("Overscroll (A)", #selector(toggleOverscroll(_:)), "2"),
-            ("Trois doigts (B)", #selector(toggleThreeFinger(_:)), "3")
-        ]
-        for (title, action, key) in candidates {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-            item.keyEquivalentModifierMask = [.control]
-            item.state = .on
-            gestureMenu.addItem(item)
-        }
-        gestureMenu.addItem(.separator())
-        let summaryItem = NSMenuItem(title: "Compteurs par source",
+        // Les candidats de révélation ont quitté le menu pour les Réglages › Avancé :
+        // ils s'y règlent avec leurs seuils, au même endroit, plutôt qu'en deux moitiés.
+        let summaryItem = NSMenuItem(title: "Compteurs de révélation",
                                      action: #selector(printSummary(_:)), keyEquivalent: "s")
         summaryItem.keyEquivalentModifierMask = [.control]
-        gestureMenu.addItem(summaryItem)
-        gestureItem.submenu = gestureMenu
-        main.addItem(gestureItem)
+        viewMenu.addItem(.separator())
+        viewMenu.addItem(summaryItem)
 
         NSApp.mainMenu = main
     }

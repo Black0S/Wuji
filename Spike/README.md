@@ -11,6 +11,23 @@ Le script compile **et assemble un bundle `.app`**. Un exécutable SPM nu n'est 
 application pour macOS : sans `Info.plist`, pas de permissions système (caméra, micro,
 position) et pas d'identité au niveau du Dock. Le bundle vit dans `.build/`, ignoré par git.
 
+## Arborescence
+
+Calquée sur les modules de la spec §6.1, pour que le découpage du spike préfigure celui du
+projet réel. Une seule cible SPM pour l'instant : on n'extrait un paquet que le jour où un
+module doit devenir désactivable.
+
+```
+Sources/WujiSpike/
+├── App/           point d'entrée, assemblage, menus
+├── Window/        la fenêtre et toute la géométrie du layout
+├── Chrome/        barre du haut, sidebar, palette omnibox
+├── Reveal/        la révélation à l'intention et ses quatre candidats
+├── WebContent/    hôte WKWebView, liseré de sécurité, favicons
+├── Settings/      modèle de réglages et fenêtre de réglages
+└── DesignSystem/  tokens : couleurs, espacements, métriques du chrome
+```
+
 ## Raccourcis
 
 | | |

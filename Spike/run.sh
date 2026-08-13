@@ -13,9 +13,13 @@ swift build -c "$CONFIG"
 
 APP=".build/WujiSpike.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp ".build/$CONFIG/WujiSpike" "$APP/Contents/MacOS/WujiSpike"
+
+# L'icône est redessinée, pas redimensionnée : le halo de l'anneau devient une bouillie
+# grise en dessous de 128 px. `swift Resources/Icon/make-icon.swift` la régénère.
+[ -f Resources/Icon/AppIcon.icns ] && cp Resources/Icon/AppIcon.icns "$APP/Contents/Resources/"
 
 # Signature ad-hoc : suffit pour que macOS accorde les permissions localement.
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
