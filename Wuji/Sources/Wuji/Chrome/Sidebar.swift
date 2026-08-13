@@ -52,14 +52,21 @@ final class Sidebar: ThemedView {
     private let list = NSView()
     private let newTabButton = FooterButton(symbol: "plus", title: "Nouvel onglet", shortcut: "⌘T")
 
-    /// Repères de dépôt : un trait pour « entre deux lignes », un fond pour « dans ce
-    /// dossier ». Deux formes distinctes parce que ce sont deux gestes distincts — un
-    /// repère unique obligerait à deviner lequel des deux va se produire.
-    private let dropLine = NSView()
+    /// Le seul repère de dépôt restant : le fond qui s'allume sur un dossier. Entre deux
+    /// lignes, c'est le **trou** ouvert par les voisins qui fait office de repère — un
+    /// trait en plus du trou dirait deux fois la même chose.
     private let dropHighlight = NSView()
 
     private var items: [SidebarItem] = []
     private var rows: [NSView] = []
+
+    /// Ce qui est en cours de glissement. `gapIndex` est la place que la ligne prendrait
+    /// si on relâchait maintenant : c'est **le trou dans la liste** qui sert de repère,
+    /// pas un trait. Une ligne qui s'écarte dit où l'onglet va atterrir sans qu'on ait à
+    /// interpréter un symbole.
+    private var draggingID: UUID?
+    private var gapIndex: Int?
+    private var proxy: NSImageView?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -74,10 +81,6 @@ final class Sidebar: ThemedView {
         dropHighlight.layer?.cornerCurve = .continuous
         dropHighlight.isHidden = true
         list.addSubview(dropHighlight)
-
-        dropLine.wantsLayer = true
-        dropLine.isHidden = true
-        list.addSubview(dropLine)
 
         newTabButton.onClick = { [weak self] in self?.onNew?() }
         spaceSwitcher.onClick = { [weak self] view in self?.onSpaceClick?(view) }
@@ -124,7 +127,6 @@ final class Sidebar: ThemedView {
     override func layout() {
         super.layout()
         layer?.backgroundColor = Tokens.sidebarBackground.cgColor
-        dropLine.layer?.backgroundColor = Tokens.textPrimary.cgColor
         dropHighlight.layer?.backgroundColor = Tokens.selectionFill.cgColor
 
         let width = bounds.width
@@ -146,18 +148,50 @@ final class Sidebar: ThemedView {
 
         list.frame = NSRect(x: 0, y: Tokens.Space.s, width: width,
                             height: max(0, top - Tokens.Space.s))
+        positionRows(animated: false)
+    }
+
+    /// Pose les lignes de haut en bas, en sautant celle qu'on glisse et en ouvrant un trou
+    /// à l'endroit du dépôt. Animé pendant le glissement : c'est ce mouvement des voisins
+    /// qui donne la sensation que l'onglet se range vraiment quelque part.
+    private func positionRows(animated: Bool) {
+        let width = bounds.width
+        let inset = Tokens.Space.s
+        let rowHeight = Tokens.Chrome.rowHeight
 
         var cursor = list.bounds.height
+        var frames: [(NSView, NSRect)] = []
+
         for (index, row) in rows.enumerated() {
+            if gapIndex == index { cursor -= rowHeight }
+
             if case .separator = items[index] {
                 cursor -= Tokens.Space.m
                 row.layer?.backgroundColor = Tokens.separator.cgColor
-                row.frame = NSRect(x: inset, y: cursor + Tokens.Space.m / 2,
-                                   width: width - inset * 2, height: 1)
+                frames.append((row, NSRect(x: inset, y: cursor + Tokens.Space.m / 2,
+                                           width: width - inset * 2, height: 1)))
                 continue
             }
+
+            if items[index].id == draggingID {
+                row.isHidden = true
+                continue
+            }
+            row.isHidden = false
             cursor -= rowHeight
-            row.frame = NSRect(x: inset, y: cursor, width: width - inset * 2, height: rowHeight - 2)
+            frames.append((row, NSRect(x: inset, y: cursor,
+                                       width: width - inset * 2, height: rowHeight - 2)))
+        }
+        if gapIndex == rows.count { cursor -= rowHeight }
+
+        guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            frames.forEach { $0.0.frame = $0.1 }
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.14
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            frames.forEach { $0.0.animator().frame = $0.1 }
         }
     }
 
@@ -169,19 +203,28 @@ final class Sidebar: ThemedView {
     /// liste, donc une ligne qui suivrait son propre glissement disparaîtrait en cours de
     /// route, avec les événements qu'elle attendait encore.
     private func beginTracking(id: UUID, event: NSEvent) {
-        guard let window else { return }
-        let start = list.convert(event.locationInWindow, from: nil)
+        guard let window,
+              let index = items.firstIndex(where: { $0.id == id }),
+              rows.indices.contains(index) else { return }
+
+        let row = rows[index]
+        let start = convert(event.locationInWindow, from: nil)
+        let rowFrame = convert(row.frame, from: list)
+        // Décalage entre le point saisi et le haut de la ligne : sans lui, la copie
+        // sauterait sous le curseur au premier pixel de déplacement.
+        let grab = start.y - rowFrame.minY
         var moved = false
         var drop: SidebarDrop?
 
         window.trackEvents(matching: [.leftMouseDragged, .leftMouseUp],
                            timeout: .infinity, mode: .eventTracking) { [weak self] event, stop in
             guard let self, let event else { stop.pointee = true; return }
+            let point = self.convert(event.locationInWindow, from: nil)
 
             if event.type == .leftMouseUp {
                 stop.pointee = true
-                self.clearDropMarks()
                 if moved {
+                    self.endDrag()
                     if let drop { self.onDropTab?(id, drop) }
                 } else {
                     self.onSelectTab?(id)
@@ -189,14 +232,57 @@ final class Sidebar: ThemedView {
                 return
             }
 
-            let point = self.list.convert(event.locationInWindow, from: nil)
             // Quelques points de course avant de basculer en glissement, sinon un clic
             // avec la main qui tremble déplacerait un onglet.
             guard moved || abs(point.y - start.y) >= 4 else { return }
-            moved = true
-            drop = self.dropTarget(at: point, dragging: id)
-            self.showDropMark(for: drop)
+            if !moved {
+                moved = true
+                self.beginDrag(id: id, row: row, frame: rowFrame)
+            }
+
+            self.proxy?.frame.origin.y = point.y - grab
+            let inList = self.list.convert(point, from: self)
+            drop = self.dropTarget(at: inList, dragging: id)
+            self.showDrop(drop)
         }
+    }
+
+    /// Sort la ligne du flux et lui substitue une copie flottante. Une copie plutôt que la
+    /// ligne elle-même : la ligne appartient à la liste, qui la repose à chaque mise en
+    /// page — la copie, elle, n'obéit qu'au curseur.
+    private func beginDrag(id: UUID, row: NSView, frame: NSRect) {
+        draggingID = id
+
+        let image = NSImage(size: row.bounds.size)
+        if let rep = row.bitmapImageRepForCachingDisplay(in: row.bounds) {
+            row.cacheDisplay(in: row.bounds, to: rep)
+            image.addRepresentation(rep)
+        }
+
+        let floating = NSImageView(frame: frame)
+        floating.image = image
+        floating.imageScaling = .scaleNone
+        floating.wantsLayer = true
+        floating.shadow = {
+            let shadow = NSShadow()
+            shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+            shadow.shadowBlurRadius = 12
+            shadow.shadowOffset = NSSize(width: 0, height: -3)
+            return shadow
+        }()
+        addSubview(floating, positioned: .above, relativeTo: nil)
+        proxy = floating
+
+        positionRows(animated: false)
+    }
+
+    private func endDrag() {
+        proxy?.removeFromSuperview()
+        proxy = nil
+        draggingID = nil
+        gapIndex = nil
+        dropHighlight.isHidden = true
+        rows.forEach { $0.isHidden = false }
     }
 
     private func dropTarget(at point: NSPoint, dragging id: UUID) -> SidebarDrop? {
@@ -214,17 +300,17 @@ final class Sidebar: ThemedView {
                 if point.y > frame.minY + margin, point.y < frame.maxY - margin {
                     return .into(folderID)
                 }
-                return point.y > frame.midY ? insertion(from: index) : insertion(from: index + 1)
+                return insertion(from: point.y > frame.midY ? index : index + 1)
 
             case .tab(let tabID, _, _, _, _, _):
                 guard tabID != id else { return nil }
-                return point.y > frame.midY ? .before(tabID) : insertion(from: index + 1)
+                return insertion(from: point.y > frame.midY ? index : index + 1)
 
             case .separator:
                 return insertion(from: index + 1)
             }
         }
-        return .end
+        return point.y > (rows.first?.frame.maxY ?? 0) ? insertion(from: 0) : .end
     }
 
     /// Traduit « à partir de la ligne n » en cible, en sautant dossiers et séparateurs, et
@@ -236,34 +322,31 @@ final class Sidebar: ThemedView {
         return .end
     }
 
-    private func showDropMark(for drop: SidebarDrop?) {
-        clearDropMarks()
-        guard let drop else { return }
+    private func showDrop(_ drop: SidebarDrop?) {
+        var newGap: Int?
+        var highlight: Int?
+
         switch drop {
         case .into(let folderID):
-            guard let index = items.firstIndex(where: { $0.id == folderID }),
-                  rows.indices.contains(index) else { return }
-            dropHighlight.frame = rows[index].frame
-            dropHighlight.isHidden = false
-
+            highlight = items.firstIndex { $0.id == folderID }
         case .before(let tabID):
-            guard let index = items.firstIndex(where: { $0.id == tabID }),
-                  rows.indices.contains(index) else { return }
-            let frame = rows[index].frame
-            dropLine.frame = NSRect(x: frame.minX, y: frame.maxY, width: frame.width, height: 2)
-            dropLine.isHidden = false
-
+            newGap = items.firstIndex { $0.id == tabID }
         case .end:
-            guard let last = rows.last else { return }
-            dropLine.frame = NSRect(x: last.frame.minX, y: last.frame.minY - 2,
-                                    width: last.frame.width, height: 2)
-            dropLine.isHidden = false
+            newGap = rows.count
+        case nil:
+            break
         }
-    }
 
-    private func clearDropMarks() {
-        dropLine.isHidden = true
-        dropHighlight.isHidden = true
+        if let highlight, rows.indices.contains(highlight) {
+            dropHighlight.frame = rows[highlight].frame
+            dropHighlight.isHidden = false
+        } else {
+            dropHighlight.isHidden = true
+        }
+
+        guard newGap != gapIndex else { return }
+        gapIndex = newGap
+        positionRows(animated: true)
     }
 }
 
