@@ -11,8 +11,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private let settings = Settings()
     private var settingsWindow: SettingsWindow?
 
-    private var tabs: [Tab] = []
-    private var currentIndex = 0
+    /// Les onglets appartiennent à un espace, jamais à l'application. Tout ce qui suit
+    /// passe donc par `currentSpace` — c'est ce qui évite d'avoir deux notions
+    /// d'« onglet courant » qui se désynchronisent.
+    private var spaces: [Space] = [Space(name: "Personnel", symbol: Space.symbol(forIndex: 0))]
+    private var currentSpaceIndex = 0
     private var observations: [NSKeyValueObservation] = []
 
     /// Position et total de la recherche dans la page, tenus à la main — voir `countMatches`.
@@ -25,7 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         return config
     }()
 
-    private var currentTab: Tab? { tabs.indices.contains(currentIndex) ? tabs[currentIndex] : nil }
+    private var currentSpace: Space { spaces[currentSpaceIndex] }
+    private var currentTab: Tab? { currentSpace.currentTab }
 
     // MARK: - Cycle de vie
 
@@ -40,16 +44,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         layout.findBar.delegate = self
 
         layout.sidebar.onSelect = { [weak self] index in
-            guard let self, self.tabs.indices.contains(index) else { return }
-            self.currentIndex = index
+            guard let self, self.currentSpace.tabs.indices.contains(index) else { return }
+            self.currentSpace.currentIndex = index
             self.activateCurrentTab()
         }
         layout.sidebar.onClose = { [weak self] index in
-            guard let self, self.tabs.indices.contains(index) else { return }
-            self.currentIndex = index
+            guard let self, self.currentSpace.tabs.indices.contains(index) else { return }
+            self.currentSpace.currentIndex = index
             self.closeTab(nil)
         }
         layout.sidebar.onNew = { [weak self] in self?.newTab(nil) }
+        layout.sidebar.onSpaceClick = { [weak self] anchor in self?.showSpaceMenu(from: anchor) }
 
         favicons.onUpdate = { [weak self] in self?.syncSidebar() }
 
@@ -69,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private func applySettings() {
         NSApp.appearance = settings.theme.appearance
 
-        for tab in tabs {
+        for tab in spaces.flatMap(\.tabs) {
             tab.webView.pageZoom = settings.pageZoom
             tab.webView.isInspectable = settings.safariInspection
         }
@@ -94,33 +99,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private func newTab(url: URL?) {
         let tab = Tab(configuration: configuration)
-        tabs.append(tab)
-        currentIndex = tabs.count - 1
+        currentSpace.tabs.append(tab)
+        currentSpace.currentIndex = currentSpace.tabs.count - 1
         activateCurrentTab()
         if let url { tab.webView.load(URLRequest(url: url)) }
     }
 
     @objc func closeTab(_ sender: Any?) {
-        guard !tabs.isEmpty else { return }
-        tabs.remove(at: currentIndex)
-        if tabs.isEmpty {
+        let space = currentSpace
+        guard !space.tabs.isEmpty else { return }
+        space.tabs.remove(at: space.currentIndex)
+        if space.tabs.isEmpty {
             newTab(url: nil)
             openOmnibox()
         } else {
-            currentIndex = min(currentIndex, tabs.count - 1)
+            space.currentIndex = min(space.currentIndex, space.tabs.count - 1)
             activateCurrentTab()
         }
     }
 
     @objc func nextTab(_ sender: Any?) {
-        guard tabs.count > 1 else { return }
-        currentIndex = (currentIndex + 1) % tabs.count
+        let space = currentSpace
+        guard space.tabs.count > 1 else { return }
+        space.currentIndex = (space.currentIndex + 1) % space.tabs.count
         activateCurrentTab()
     }
 
     @objc func previousTab(_ sender: Any?) {
-        guard tabs.count > 1 else { return }
-        currentIndex = (currentIndex - 1 + tabs.count) % tabs.count
+        let space = currentSpace
+        guard space.tabs.count > 1 else { return }
+        space.currentIndex = (space.currentIndex - 1 + space.tabs.count) % space.tabs.count
         activateCurrentTab()
     }
 
@@ -156,13 +164,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     }
 
     private func syncSidebar() {
-        let snapshots = tabs.map {
+        let space = currentSpace
+        layout.sidebar.update(space: SpaceSnapshot(name: space.name, symbol: space.symbol))
+        let snapshots = space.tabs.map {
             TabSnapshot(title: $0.title,
                         host: $0.url?.host() ?? "",
                         isLoading: $0.webView.isLoading,
                         favicon: favicons.icon(for: $0.url))
         }
-        layout.sidebar.update(tabs: snapshots, selected: currentIndex)
+        layout.sidebar.update(tabs: snapshots, selected: space.currentIndex)
     }
 
     // MARK: - Navigation
@@ -187,6 +197,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         case .back:    currentTab?.webView.goBack()
         case .forward: currentTab?.webView.goForward()
         }
+    }
+
+    // MARK: - Espaces
+
+    private func showSpaceMenu(from anchor: NSView) {
+        let menu = NSMenu()
+        for (index, space) in spaces.enumerated() {
+            let item = NSMenuItem(title: space.name, action: #selector(selectSpace(_:)), keyEquivalent: "")
+            item.image = NSImage(systemSymbolName: space.symbol, accessibilityDescription: nil)
+            item.target = self
+            item.tag = index
+            // La coche dit lequel est actif : en monochrome, c'est le seul marqueur
+            // disponible, la teinte étant réservée à la sécurité.
+            item.state = index == currentSpaceIndex ? .on : .off
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let add = NSMenuItem(title: "Nouvel espace", action: #selector(newSpace(_:)), keyEquivalent: "")
+        add.target = self
+        menu.addItem(add)
+
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height), in: anchor)
+    }
+
+    @objc private func selectSpace(_ sender: NSMenuItem) {
+        guard spaces.indices.contains(sender.tag), sender.tag != currentSpaceIndex else { return }
+        currentSpaceIndex = sender.tag
+        // Un espace vide n'existe pas : on y entre toujours sur un onglet.
+        if currentSpace.tabs.isEmpty {
+            newTab(url: URL(string: settings.homepage))
+        } else {
+            activateCurrentTab()
+        }
+    }
+
+    @objc private func newSpace(_ sender: Any?) {
+        let index = spaces.count
+        spaces.append(Space(name: "Espace \(index + 1)", symbol: Space.symbol(forIndex: index)))
+        currentSpaceIndex = index
+        newTab(url: URL(string: settings.homepage))
     }
 
     // MARK: - Recherche dans la page
@@ -289,14 +339,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     func omnibox(_ omnibox: Omnibox, resultsFor query: String) -> [OmniboxResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let matchingTabs = tabs.enumerated().compactMap { index, tab -> OmniboxResult? in
-            guard index != currentIndex else { return nil }
-            let haystack = "\(tab.title) \(tab.url?.absoluteString ?? "")".lowercased()
-            guard trimmed.isEmpty || haystack.contains(trimmed.lowercased()) else { return nil }
-            return .tab(index: index,
-                        title: tab.title,
-                        subtitle: tab.url?.host() ?? "onglet",
-                        icon: favicons.icon(for: tab.url))
+        var matchingTabs: [OmniboxResult] = []
+        for (spaceIndex, space) in spaces.enumerated() {
+            for (tabIndex, tab) in space.tabs.enumerated() {
+                guard !(spaceIndex == currentSpaceIndex && tabIndex == space.currentIndex) else { continue }
+                let haystack = "\(tab.title) \(tab.url?.absoluteString ?? "")".lowercased()
+                guard trimmed.isEmpty || haystack.contains(trimmed.lowercased()) else { continue }
+                // L'espace n'est rappelé que s'il n'est pas celui où l'on se trouve :
+                // le préciser à chaque ligne serait du bruit dans le cas courant.
+                let host = tab.url?.host() ?? "onglet"
+                let subtitle = spaceIndex == currentSpaceIndex ? host : "\(space.name) · \(host)"
+                matchingTabs.append(.tab(space: spaceIndex,
+                                         tab: tabIndex,
+                                         title: tab.title,
+                                         subtitle: subtitle,
+                                         icon: favicons.icon(for: tab.url)))
+            }
         }
 
         guard !trimmed.isEmpty else { return matchingTabs }
@@ -309,8 +367,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     func omnibox(_ omnibox: Omnibox, didActivate result: OmniboxResult) {
         switch result {
-        case .tab(let index, _, _, _):
-            currentIndex = index
+        case .tab(let spaceIndex, let tabIndex, _, _, _):
+            currentSpaceIndex = spaceIndex
+            currentSpace.currentIndex = tabIndex
             activateCurrentTab()
         case .url(let url):
             currentTab?.webView.load(URLRequest(url: url))

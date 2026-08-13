@@ -3,23 +3,26 @@ import AppKit
 /// Ce que l'omnibox peut proposer. L'ordre du tableau est l'ordre affiché, et il compte :
 /// **les onglets ouverts passent avant tout le reste.**
 enum OmniboxResult {
-    case tab(index: Int, title: String, subtitle: String, icon: NSImage?)
+    /// L'onglet est désigné par son espace **et** sa position : la palette cherche dans
+    /// tous les espaces, pas seulement celui qui est ouvert. Sans ça, retrouver un onglet
+    /// demanderait de deviner d'abord dans quel espace on l'a laissé.
+    case tab(space: Int, tab: Int, title: String, subtitle: String, icon: NSImage?)
     case url(URL)
     case search(String)
 
     var title: String {
         switch self {
-        case .tab(_, let title, _, _): return title
-        case .url(let url):            return url.absoluteString
-        case .search(let query):       return query
+        case .tab(_, _, let title, _, _): return title
+        case .url(let url):               return url.absoluteString
+        case .search(let query):          return query
         }
     }
 
     var subtitle: String {
         switch self {
-        case .tab(_, _, let subtitle, _): return subtitle
-        case .url:                        return "Ouvrir l'adresse"
-        case .search:                     return "Rechercher"
+        case .tab(_, _, _, let subtitle, _): return subtitle
+        case .url:                           return "Ouvrir l'adresse"
+        case .search:                        return "Rechercher"
         }
     }
 
@@ -27,8 +30,8 @@ enum OmniboxResult {
     /// forme, jamais à une couleur (spec §4.6).
     var icon: NSImage? {
         switch self {
-        case .tab(_, _, _, let icon): return icon
-        default:                      return nil
+        case .tab(_, _, _, _, let icon): return icon
+        default:                         return nil
         }
     }
 
