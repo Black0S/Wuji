@@ -43,10 +43,8 @@ final class InternalPageHandler: NSObject, WKURLSchemeHandler {
 
     private func html(for url: URL) -> String {
         switch url.host() ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) {
-        case "history":
-            return HistoryPage.html(entries: history.recent())
-        default:
-            return HistoryPage.html(entries: history.recent())
+        case "history": return HistoryPage.html(entries: history.recent())
+        default:        return NewTabPage.html
         }
     }
 }

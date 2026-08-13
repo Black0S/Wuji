@@ -187,11 +187,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         openOmnibox(creatingTab: true)
     }
 
+    /// Sans adresse, l'onglet ouvre la page vierge de Wuji plutôt que de rester blanc :
+    /// elle porte le fond de la sidebar, donc la fenêtre reste une seule surface tant
+    /// qu'il n'y a rien à afficher.
+    static let blankPage = URL(string: "wuji://")!
+
     private func newTab(url: URL?) {
         let tab = makeTab()
         currentSpace.append(tab)
         activateCurrentTab()
-        if let url { tab.webView.load(URLRequest(url: url)) }
+        tab.webView.load(URLRequest(url: url ?? Self.blankPage))
     }
 
     private func makeTab(configuration override: WKWebViewConfiguration? = nil,
@@ -557,7 +562,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         guard let url = URL(string: "wuji://history") else { return }
         // Dans l'onglet courant s'il est vierge, dans un nouveau sinon : ouvrir un onglet
         // par consultation de l'historique en laisserait une traînée.
-        if let tab = currentTab, tab.url == nil {
+        if let tab = currentTab, tab.url == nil || tab.url == Self.blankPage {
             tab.webView.load(URLRequest(url: url))
         } else {
             newTab(url: url)
