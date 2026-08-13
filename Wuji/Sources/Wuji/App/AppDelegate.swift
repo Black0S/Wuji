@@ -286,7 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             MainActor.assumeIsolated { self?.refreshDownloads() }
         }
         downloads.add(item)
-        refreshDownloads()
+        refreshDownloads(reload: true)
     }
 
     // MARK: - WKDownloadDelegate
@@ -298,7 +298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         guard let item = downloads.item(for: download) else { return destination }
         item.filename = destination.lastPathComponent
         item.destination = destination
-        refreshDownloads()
+        refreshDownloads(reload: true)
         return destination
     }
 
@@ -306,7 +306,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         guard let item = downloads.item(for: download) else { return }
         item.state = .finished
         item.observation = nil
-        refreshDownloads()
+        refreshDownloads(reload: true)
         // Sans signal, un téléchargement terminé est invisible : le fichier est arrivé
         // quelque part et rien ne le dit.
         layout.toast.show("\(item.filename) · téléchargé") { [weak self] in self?.showDownloads(nil) }
@@ -315,22 +315,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     func download(_ download: WKDownload, didFailWithError error: any Error, resumeData: Data?) {
         guard let item = downloads.item(for: download) else { return }
         item.state = .failed(error.localizedDescription)
-        refreshDownloads()
+        refreshDownloads(reload: true)
     }
 
-    /// La page des téléchargements ne s'anime pas toute seule : si elle est ouverte, on la
-    /// recharge. Une barre figée laisserait croire à un blocage.
-    private func refreshDownloads() {
+    /// `reload` : à réserver aux changements de composition. Pour le seul avancement, on
+    /// pousse les chiffres dans la page — la recharger à chaque paquet reçu la faisait
+    /// clignoter et remontait le défilement.
+    private func refreshDownloads(reload: Bool = false) {
         downloads.changed()
         let running = downloads.items.filter(\.isRunning)
         // Un seul anneau pour tous : la moyenne dit « ça avance », ce qui est la seule
         // question qu'on se pose sans ouvrir la page.
         let fraction = running.isEmpty ? nil : running.reduce(0) { $0 + $1.fraction } / Double(running.count)
         layout.sidebar.updateDownloads(progress: fraction)
-        for tab in spaces.flatMap(\.allTabs) where tab.url == Self.downloadsPage {
-            tab.webView.reload()
+
+        let pages = spaces.flatMap(\.allTabs).filter { $0.url == Self.downloadsPage }
+        guard !pages.isEmpty else { return }
+
+        if reload {
+            pages.forEach { $0.webView.reload() }
+            return
+        }
+        // Quelques rafraîchissements par seconde suffisent à donner le mouvement ; le
+        // rappel d'avancement, lui, se déclenche des dizaines de fois.
+        guard Date().timeIntervalSince(lastProgressPush) > 0.15 else { return }
+        lastProgressPush = Date()
+
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        for item in downloads.items where item.isRunning {
+            let detail = "\(formatter.string(fromByteCount: item.received)) sur "
+                + (item.expected > 0 ? formatter.string(fromByteCount: item.expected) : "?")
+                + " · en cours"
+            let script = "window.wujiProgress && window.wujiProgress('\(item.id.uuidString)', "
+                + "\(Int(item.fraction * 100)), '\(detail)')"
+            pages.forEach { $0.webView.evaluateJavaScript(script) }
         }
     }
+
+    private var lastProgressPush = Date.distantPast
 
     static let downloadsPage = URL(string: "wuji://downloads")!
 
@@ -699,7 +722,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             guard let item = downloads.items.first(where: { $0.id.uuidString == id }) else { return }
             item.download.cancel()
             item.state = .failed("Annulé")
-            refreshDownloads()
+            refreshDownloads(reload: true)
         default:
             break
         }

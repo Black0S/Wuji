@@ -469,15 +469,19 @@ private final class DownloadButton: ThemedView {
             arc.stroke()
         }
 
-        let glyph = NSImage(systemSymbolName: progress == nil ? "arrow.down.circle" : "arrow.down",
-                            accessibilityDescription: "Téléchargements")?
-            .withSymbolConfiguration(.init(pointSize: progress == nil ? 15 : 9, weight: .regular))
-        guard let glyph else { return }
+        // La teinte passe par la configuration du symbole, pas par `set()` : une couleur
+        // posée dans le contexte ne colore pas une image, même en mode gabarit. C'est ce
+        // qui laissait le glyphe identique en clair et en sombre.
+        let tint = (isHovered || progress != nil) ? Tokens.textPrimary : Tokens.textSecondary
+        let configuration = NSImage.SymbolConfiguration(pointSize: progress == nil ? 15 : 9,
+                                                        weight: .regular)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [tint]))
+        guard let glyph = NSImage(systemSymbolName: progress == nil ? "arrow.down.circle" : "arrow.down",
+                                  accessibilityDescription: "Téléchargements")?
+            .withSymbolConfiguration(configuration) else { return }
         let size = glyph.size
-        let box = NSRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2,
-                         width: size.width, height: size.height)
-        (isHovered || progress != nil ? Tokens.textPrimary : Tokens.textSecondary).set()
-        glyph.draw(in: box)
+        glyph.draw(in: NSRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2,
+                              width: size.width, height: size.height))
     }
 }
 

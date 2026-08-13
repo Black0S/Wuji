@@ -39,8 +39,17 @@ enum DownloadsPage {
               if (!button) return;
               send({ action: button.dataset.action, id: button.closest('li').dataset.id });
             });
-            // La page ne se rafraîchit pas toute seule : l'application la recharge quand
-            // l'avancement change. Sans ça, une barre figée laisserait croire à un blocage.
+            // L'application pousse l'avancement ligne par ligne plutôt que de recharger la
+            // page : une reconstruction complète à chaque paquet reçu faisait clignoter la
+            // liste et remontait le défilement en haut. Le rechargement est réservé aux
+            // changements de composition — un fichier de plus, un fichier terminé.
+            window.wujiProgress = (id, percent, detail) => {
+              const row = document.querySelector(`li[data-id="${id}"]`);
+              if (!row) return;
+              row.querySelector('.detail').textContent = detail;
+              const bar = row.querySelector('.bar i');
+              if (bar) bar.style.width = percent + '%';
+            };
           </script>
         </body>
         </html>
