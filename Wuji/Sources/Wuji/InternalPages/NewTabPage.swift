@@ -18,6 +18,7 @@ enum NewTabPage {
         <html lang="fr">
         <head>
         <meta charset="utf-8">
+        <meta name="color-scheme" content="light dark">
         <!-- Le titre sert d'étiquette dans la liste des onglets : « Wuji » n'y dirait
              rien, « Nouvel onglet » dit ce que c'est. -->
         <title>Nouvel onglet</title>

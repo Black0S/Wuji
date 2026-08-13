@@ -19,6 +19,7 @@ enum DownloadsPage {
         <html lang="fr">
         <head>
         <meta charset="utf-8">
+        \(InternalStyle.meta)
         <title>Téléchargements</title>
         <style>\(InternalStyle.shared)\(style)</style>
         </head>
@@ -168,16 +169,25 @@ enum DownloadsPage {
 /// Il existe pour une raison simple : deux pages internes qui divergeraient d'un gris ou
 /// d'un rayon donneraient l'impression de deux applications. Les valeurs sont celles des
 /// tokens du chrome.
+///
+/// **Le fond est celui de la sidebar, pas celui du contenu.** Une page interne n'est pas
+/// un site : elle appartient à l'application. Lui donner le blanc du contenu la ferait
+/// lire comme une page ouverte dans le navigateur, avec un cadre autour d'elle. Au fond
+/// de la sidebar, elle prolonge la fenêtre.
 @MainActor
 enum InternalStyle {
+    /// À placer dans chaque `<head>` : sans elle, WebKit suppose une page claire et rend
+    /// les contrôles natifs sur cette base, même quand le reste est sombre.
+    static let meta = #"<meta name="color-scheme" content="light dark">"#
+
     static let shared = """
     :root {
-      --bg: #FFFFFF; --raised: #F5F5F7; --text: #1D1D1F; --muted: #6E6E73;
+      --bg: #F5F5F7; --raised: #FFFFFF; --text: #1D1D1F; --muted: #6E6E73;
       --hairline: rgba(0,0,0,.10); --hover: rgba(0,0,0,.05); --danger: #C7302B;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #1C1C1E; --raised: #2C2C2E; --text: #FFFFFF; --muted: #8E8E93;
+        --bg: #141416; --raised: #2C2C2E; --text: #FFFFFF; --muted: #8E8E93;
         --hairline: rgba(255,255,255,.14); --hover: rgba(255,255,255,.07); --danger: #E0554F;
       }
     }

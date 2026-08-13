@@ -34,6 +34,7 @@ enum HistoryPage {
         <html lang="fr">
         <head>
         <meta charset="utf-8">
+        \(InternalStyle.meta)
         <title>Historique</title>
         <style>\(InternalStyle.shared)\(style)</style>
         </head>
