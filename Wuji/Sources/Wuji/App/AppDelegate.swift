@@ -195,7 +195,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             guard index != currentIndex else { return nil }
             let haystack = "\(tab.title) \(tab.url?.absoluteString ?? "")".lowercased()
             guard trimmed.isEmpty || haystack.contains(trimmed.lowercased()) else { return nil }
-            return .tab(index: index, title: tab.title, subtitle: tab.url?.host() ?? "onglet")
+            return .tab(index: index,
+                        title: tab.title,
+                        subtitle: tab.url?.host() ?? "onglet",
+                        icon: favicons.icon(for: tab.url))
         }
 
         guard !trimmed.isEmpty else { return matchingTabs }
@@ -208,7 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     func omnibox(_ omnibox: Omnibox, didActivate result: OmniboxResult) {
         switch result {
-        case .tab(let index, _, _):
+        case .tab(let index, _, _, _):
             currentIndex = index
             activateCurrentTab()
         case .url(let url):

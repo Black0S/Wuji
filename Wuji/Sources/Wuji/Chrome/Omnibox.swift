@@ -1,36 +1,48 @@
 import AppKit
 
 /// Ce que l'omnibox peut proposer. L'ordre du tableau est l'ordre affiché, et il compte :
-/// **les onglets ouverts passent avant tout le reste**, parce que la thèse à éprouver est
-/// que l'omnibox remplace la barre d'onglets.
+/// **les onglets ouverts passent avant tout le reste.**
 enum OmniboxResult {
-    case tab(index: Int, title: String, subtitle: String)
+    case tab(index: Int, title: String, subtitle: String, icon: NSImage?)
     case url(URL)
     case search(String)
 
     var title: String {
         switch self {
-        case .tab(_, let title, _):  return title
-        case .url(let url):          return url.absoluteString
-        case .search(let query):     return query
+        case .tab(_, let title, _, _): return title
+        case .url(let url):            return url.absoluteString
+        case .search(let query):       return query
         }
     }
 
     var subtitle: String {
         switch self {
-        case .tab(_, _, let subtitle): return subtitle
-        case .url:                     return "Ouvrir l'adresse"
-        case .search:                  return "Rechercher avec DuckDuckGo"
+        case .tab(_, _, let subtitle, _): return subtitle
+        case .url:                        return "Ouvrir l'adresse"
+        case .search:                     return "Rechercher"
         }
     }
 
-    /// Monochrome : le type se lit à la forme du glyphe, jamais à une couleur (spec §4.6).
-    var glyph: String {
+    /// La favicon du site quand on l'a. Sinon un glyphe monochrome : le type se lit à la
+    /// forme, jamais à une couleur (spec §4.6).
+    var icon: NSImage? {
         switch self {
-        case .tab:    return "macwindow"
+        case .tab(_, _, _, let icon): return icon
+        default:                      return nil
+        }
+    }
+
+    var fallbackGlyph: String {
+        switch self {
+        case .tab:    return "square.on.square"
         case .url:    return "arrow.up.right"
         case .search: return "magnifyingglass"
         }
+    }
+
+    var isTab: Bool {
+        if case .tab = self { return true }
+        return false
     }
 }
 
@@ -41,9 +53,8 @@ protocol OmniboxDelegate: AnyObject {
     func omniboxDidDismiss(_ omnibox: Omnibox)
 }
 
-/// La palette modale. Point d'entrée unique quand l'interface est masquée — donc la seule
-/// vue du prototype qui a le droit d'être soignée : tout le reste est jetable, celle-ci est
-/// la maquette exécutable de ce que J2 doit livrer.
+/// La palette. Point d'entrée principal du navigateur : adresse, recherche, et surtout
+/// les onglets déjà ouverts, qui doivent se retrouver plus vite au clavier qu'à la souris.
 @MainActor
 final class Omnibox: ThemedView, NSTextFieldDelegate {
 
@@ -54,22 +65,30 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
     private let separator = NSView()
     private let rowsContainer = NSView()
 
-    private var results: [OmniboxResult] = []
-    private var rows: [OmniboxRow] = []
-    private var selection = 0
+    /// Ce qui est affiché : des en-têtes de groupe et des résultats. La sélection ne
+    /// circule que sur les résultats — un en-tête n'est pas activable.
+    private enum Entry {
+        case header(String)
+        case result(Int)
+    }
 
-    /// Le champ est pré-rempli avec l'URL courante — pratique pour l'éditer, désastreux
-    /// pour les résultats : filtrer sur cette URL masque tous les onglets ouverts, donc
-    /// exactement ce qu'on vient chercher à `⌘L`.
-    ///
-    /// Tant que rien n'a été tapé, la requête est considérée comme vide : on voit ses
-    /// onglets. À la première frappe, le texte pré-rempli est remplacé et le filtre prend.
-    private var isSeeded = false
+    private var results: [OmniboxResult] = []
+    private var entries: [Entry] = []
+    private var rows: [Int: OmniboxRow] = [:]
+    private var headers: [NSTextField] = []
+    private var selection = 0
 
     private static let cardWidth: CGFloat = 560
     private static let fieldHeight: CGFloat = 52
     private static let rowHeight: CGFloat = 40
-    private static let maxRows = 6
+    private static let headerHeight: CGFloat = 26
+    private static let maxResults = 8
+
+    /// Le champ est pré-rempli avec l'URL courante — pratique pour l'éditer, désastreux
+    /// pour les résultats : filtrer sur cette URL masque tous les onglets ouverts, donc
+    /// exactement ce qu'on vient chercher. Tant que rien n'est tapé, la requête est
+    /// considérée comme vide.
+    private var isSeeded = false
 
     var isOpen: Bool { !isHidden }
 
@@ -83,8 +102,8 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
 
         // `cancelOperation:` n'arrive pas jusqu'au délégué depuis l'éditeur de champ :
         // l'éditeur l'absorbe pour restaurer la valeur précédente. On intercepte donc
-        // la touche en amont — ce qui a l'avantage de fermer la palette même quand le
-        // focus n'est plus dans le champ.
+        // la touche en amont — ce qui ferme aussi la palette quand le focus n'est plus
+        // dans le champ.
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard event.keyCode == 53 else { return event }
             let handled = MainActor.assumeIsolated { () -> Bool in
@@ -142,41 +161,55 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
 
     override func layout() {
         super.layout()
-        let visibleRows = min(results.count, Self.maxRows)
-        let listHeight = visibleRows == 0 ? 0 : CGFloat(visibleRows) * Self.rowHeight + Tokens.Space.s
+        applyColors()
+
+        let listHeight = entries.reduce(0) { total, entry in
+            switch entry {
+            case .header: return total + Self.headerHeight
+            case .result: return total + Self.rowHeight
+            }
+        } + (entries.isEmpty ? 0 : Tokens.Space.s)
         let cardHeight = Self.fieldHeight + listHeight
 
         // La palette vit dans la zone de contenu : ses coordonnées commencent déjà après
-        // la sidebar et sous la barre du haut. Elle ne peut donc jamais les recouvrir —
-        // on ne perd pas de vue ce qu'on est en train de quitter.
+        // la sidebar et sous la barre du haut. Elle ne peut donc jamais les recouvrir.
         let cardTop = bounds.height - Tokens.Space.l
-        card.frame = NSRect(
-            x: (bounds.width - Self.cardWidth) / 2,
-            y: cardTop - cardHeight,
-            width: Self.cardWidth,
-            height: cardHeight
-        )
+        card.frame = NSRect(x: (bounds.width - Self.cardWidth) / 2,
+                            y: cardTop - cardHeight,
+                            width: Self.cardWidth,
+                            height: cardHeight)
 
         field.frame = NSRect(x: Tokens.Space.l,
                              y: cardHeight - Self.fieldHeight + (Self.fieldHeight - 24) / 2,
                              width: Self.cardWidth - Tokens.Space.l * 2,
                              height: 24)
 
-        separator.isHidden = visibleRows == 0
+        separator.isHidden = entries.isEmpty
         separator.frame = NSRect(x: 0, y: listHeight - Tokens.Space.xs,
                                  width: Self.cardWidth, height: 1)
 
         rowsContainer.frame = NSRect(x: 0, y: 0, width: Self.cardWidth, height: listHeight)
-        for (index, row) in rows.enumerated() {
-            row.frame = NSRect(x: Tokens.Space.s,
-                               y: listHeight - Tokens.Space.xs - CGFloat(index + 1) * Self.rowHeight,
-                               width: Self.cardWidth - Tokens.Space.s * 2,
-                               height: Self.rowHeight)
-        }
-    }
 
-    override func updateLayer() {
-        applyColors()
+        var cursor = listHeight - Tokens.Space.xs
+        var headerIndex = 0
+        for entry in entries {
+            switch entry {
+            case .header:
+                cursor -= Self.headerHeight
+                if headers.indices.contains(headerIndex) {
+                    headers[headerIndex].frame = NSRect(x: Tokens.Space.l + Tokens.Space.xs,
+                                                        y: cursor + 6,
+                                                        width: Self.cardWidth - Tokens.Space.l * 2,
+                                                        height: 14)
+                }
+                headerIndex += 1
+            case .result(let index):
+                cursor -= Self.rowHeight
+                rows[index]?.frame = NSRect(x: Tokens.Space.s, y: cursor,
+                                            width: Self.cardWidth - Tokens.Space.s * 2,
+                                            height: Self.rowHeight)
+            }
+        }
     }
 
     private func applyColors() {
@@ -184,6 +217,7 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
         card.layer?.borderColor = Tokens.chromeHairline.cgColor
         separator.layer?.backgroundColor = Tokens.separator.cgColor
         field.textColor = Tokens.textPrimary
+        headers.forEach { $0.textColor = Tokens.textSecondary }
     }
 
     // MARK: - Ouverture / fermeture
@@ -202,6 +236,7 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
         isHidden = true
         field.stringValue = ""
         results = []
+        entries = []
         window?.makeFirstResponder(nil)
         delegate?.omniboxDidDismiss(self)
     }
@@ -210,27 +245,71 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
 
     private func refresh() {
         let query = isSeeded ? "" : field.stringValue
-        results = delegate?.omnibox(self, resultsFor: query) ?? []
+        results = Array((delegate?.omnibox(self, resultsFor: query) ?? []).prefix(Self.maxResults))
         selection = 0
-        rebuildRows()
+        rebuild()
         needsLayout = true
     }
 
-    private func rebuildRows() {
-        rows.forEach { $0.removeFromSuperview() }
-        rows = results.prefix(Self.maxRows).enumerated().map { index, result in
-            let row = OmniboxRow(result: result)
-            row.isSelected = index == selection
-            row.onClick = { [weak self] in self?.activate(index: index) }
-            rowsContainer.addSubview(row)
-            return row
+    private func rebuild() {
+        rows.values.forEach { $0.removeFromSuperview() }
+        rows = [:]
+        headers.forEach { $0.removeFromSuperview() }
+        headers = []
+        entries = []
+
+        // Deux groupes seulement : ce qui est déjà ouvert, et ce qui ne l'est pas. Au-delà,
+        // les titres coûteraient plus de lecture qu'ils n'en font gagner.
+        let tabs = results.indices.filter { results[$0].isTab }
+        let others = results.indices.filter { !results[$0].isTab }
+
+        if !tabs.isEmpty {
+            appendHeader("Onglets ouverts")
+            tabs.forEach { appendRow(at: $0) }
         }
+        if !others.isEmpty {
+            if !tabs.isEmpty { appendHeader("Suggestions") }
+            others.forEach { appendRow(at: $0) }
+        }
+        updateSelection()
+    }
+
+    private func appendHeader(_ title: String) {
+        let label = NSTextField(labelWithString: title.uppercased())
+        label.font = .systemFont(ofSize: 10, weight: .semibold)
+        label.textColor = Tokens.textSecondary
+        rowsContainer.addSubview(label)
+        headers.append(label)
+        entries.append(.header(title))
+    }
+
+    private func appendRow(at index: Int) {
+        let row = OmniboxRow(result: results[index])
+        row.onClick = { [weak self] in self?.activate(index: index) }
+        // Le survol déplace la sélection : sans ça, la souris met en évidence une ligne
+        // pendant que `↵` en active une autre.
+        row.onHover = { [weak self] in
+            guard let self, self.selection != index else { return }
+            self.selection = index
+            self.updateSelection()
+        }
+        rowsContainer.addSubview(row)
+        rows[index] = row
+        entries.append(.result(index))
+    }
+
+    private func updateSelection() {
+        for (index, row) in rows { row.isSelected = index == selection }
     }
 
     private func move(by delta: Int) {
-        guard !rows.isEmpty else { return }
-        selection = (selection + delta + rows.count) % rows.count
-        for (index, row) in rows.enumerated() { row.isSelected = index == selection }
+        let order = entries.compactMap { entry -> Int? in
+            if case .result(let index) = entry { return index }
+            return nil
+        }
+        guard let current = order.firstIndex(of: selection), !order.isEmpty else { return }
+        selection = order[(current + delta + order.count) % order.count]
+        updateSelection()
     }
 
     private func activate(index: Int) {
@@ -262,19 +341,23 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
     }
 }
 
-/// Une ligne de résultat. Hauteur 40, glyphe, titre, sous-titre en gris secondaire.
+/// Une ligne de résultat : favicon ou glyphe, titre, hôte, et le rappel `↵` sur la ligne
+/// active — l'indice qui dit quoi faire sans avoir à l'expliquer.
 @MainActor
 private final class OmniboxRow: ThemedView {
 
     var onClick: (() -> Void)?
+    var onHover: (() -> Void)?
 
     var isSelected = false {
-        didSet { needsDisplay = true; needsLayout = true }
+        didSet { needsLayout = true }
     }
 
-    private let glyph = NSImageView()
+    private let icon = NSImageView()
     private let title = NSTextField(labelWithString: "")
     private let subtitle = NSTextField(labelWithString: "")
+    private let hint = NSTextField(labelWithString: "↵")
+    private var trackingArea: NSTrackingArea?
 
     init(result: OmniboxResult) {
         super.init(frame: .zero)
@@ -282,44 +365,72 @@ private final class OmniboxRow: ThemedView {
         layer?.cornerRadius = Tokens.Radius.pill - 2
         layer?.cornerCurve = .continuous
 
-        glyph.image = NSImage(systemSymbolName: result.glyph, accessibilityDescription: nil)
-        glyph.contentTintColor = Tokens.textSecondary
-        glyph.imageScaling = .scaleProportionallyDown
-        addSubview(glyph)
+        if let favicon = result.icon {
+            icon.image = favicon
+        } else {
+            icon.image = NSImage(systemSymbolName: result.fallbackGlyph, accessibilityDescription: nil)
+            icon.contentTintColor = Tokens.textSecondary
+        }
+        icon.imageScaling = .scaleProportionallyDown
+        addSubview(icon)
 
         title.stringValue = result.title
-        title.font = .systemFont(ofSize: 13, weight: .medium)
-        title.textColor = Tokens.textPrimary
+        title.font = .systemFont(ofSize: 13, weight: .regular)
         title.lineBreakMode = .byTruncatingTail
         addSubview(title)
 
         subtitle.stringValue = result.subtitle
         subtitle.font = .systemFont(ofSize: 12, weight: .regular)
-        subtitle.textColor = Tokens.textSecondary
-        subtitle.lineBreakMode = .byTruncatingMiddle
         subtitle.alignment = .right
+        subtitle.lineBreakMode = .byTruncatingTail
         addSubview(subtitle)
+
+        hint.font = .systemFont(ofSize: 12, weight: .regular)
+        hint.alignment = .center
+        addSubview(hint)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow],
+                                  owner: self)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHover?() }
+
     override func layout() {
         super.layout()
         layer?.backgroundColor = isSelected ? Tokens.selectionFill.cgColor : NSColor.clear.cgColor
+        // Le titre passe en medium quand la ligne est active : en monochrome, la graisse
+        // est le second levier après la valeur de fond.
+        title.font = .systemFont(ofSize: 13, weight: isSelected ? .medium : .regular)
+        title.textColor = Tokens.textPrimary
+        subtitle.textColor = Tokens.textSecondary
+        hint.textColor = Tokens.textSecondary
+        hint.isHidden = !isSelected
 
-        let glyphSize: CGFloat = 16
-        glyph.frame = NSRect(x: Tokens.Space.m, y: (bounds.height - glyphSize) / 2,
-                             width: glyphSize, height: glyphSize)
+        let iconSize: CGFloat = 16
+        icon.frame = NSRect(x: Tokens.Space.m, y: (bounds.height - iconSize) / 2,
+                            width: iconSize, height: iconSize)
 
-        let textLeft = Tokens.Space.m + glyphSize + Tokens.Space.m
-        let subtitleWidth = min(220, bounds.width * 0.4)
-        title.frame = NSRect(x: textLeft, y: (bounds.height - 18) / 2,
-                             width: bounds.width - textLeft - subtitleWidth - Tokens.Space.l,
-                             height: 18)
-        subtitle.frame = NSRect(x: bounds.width - subtitleWidth - Tokens.Space.m,
+        let hintWidth: CGFloat = isSelected ? 20 : 0
+        hint.frame = NSRect(x: bounds.width - Tokens.Space.m - 20,
+                            y: (bounds.height - 16) / 2, width: 20, height: 16)
+
+        let left = Tokens.Space.m + iconSize + Tokens.Space.m
+        let subtitleWidth = min(200, bounds.width * 0.35)
+        subtitle.frame = NSRect(x: bounds.width - Tokens.Space.m - hintWidth - subtitleWidth,
                                 y: (bounds.height - 16) / 2,
                                 width: subtitleWidth, height: 16)
+        title.frame = NSRect(x: left, y: (bounds.height - 18) / 2,
+                             width: max(0, subtitle.frame.minX - left - Tokens.Space.s),
+                             height: 18)
     }
 
     override func mouseDown(with event: NSEvent) { onClick?() }
