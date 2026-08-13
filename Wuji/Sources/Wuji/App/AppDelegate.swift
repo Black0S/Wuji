@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// Position et total de la recherche dans la page, tenus à la main — voir `countMatches`.
     private var findPosition = 1
     private var findTotal: Int?
+    private var omniboxCreatesTab = false
 
     private lazy var configuration: WKWebViewConfiguration = {
         let config = WKWebViewConfiguration()
@@ -175,9 +176,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     // MARK: - Onglets
 
+    /// `⌘T` n'ouvre que la palette. L'onglet ne naît qu'au moment où l'on choisit une
+    /// destination — et pas du tout si l'on bascule sur un onglet déjà ouvert, ce qui est
+    /// le cas le plus fréquent. Créer l'onglet d'abord laissait une page vide derrière
+    /// chaque changement d'onglet fait au clavier.
     @objc func newTab(_ sender: Any?) {
-        newTab(url: nil)
-        openOmnibox()
+        openOmnibox(creatingTab: true)
     }
 
     private func newTab(url: URL?) {
@@ -274,6 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             activateCurrentTab()
         }
     }
+
 
     /// `⌘W` ferme ce qui est devant, et rien d'autre.
     ///
@@ -484,8 +489,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     @objc func goBack(_ sender: Any?) { currentTab?.webView.goBack() }
     @objc func goForward(_ sender: Any?) { currentTab?.webView.goForward() }
 
-    private func openOmnibox() {
-        layout.omnibox.present(in: window, seed: currentTab?.url?.absoluteString ?? "")
+    /// `creatingTab` : la destination choisie ouvrira un onglet au lieu de remplacer la
+    /// page courante.
+    private func openOmnibox(creatingTab: Bool = false) {
+        omniboxCreatesTab = creatingTab
+        layout.omnibox.present(in: window,
+                               seed: creatingTab ? "" : (currentTab?.url?.absoluteString ?? ""))
+    }
+
+    /// Ouvre l'adresse là où il faut : dans un nouvel onglet si la palette a été appelée
+    /// pour ça, dans la page courante sinon — et dans un onglet neuf s'il n'y en a aucun.
+    private func go(to url: URL) {
+        guard !omniboxCreatesTab, let tab = currentTab else {
+            newTab(url: url)
+            return
+        }
+        tab.webView.load(URLRequest(url: url))
     }
 
     // MARK: - ContentTopBarDelegate
@@ -810,13 +829,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             if let tab = currentSpace.tab(with: tabID) { currentSpace.current = tab }
             activateCurrentTab()
         case .history(let url, _, _):
-            currentTab?.webView.load(URLRequest(url: url))
+            go(to: url)
         case .url(let url):
-            currentTab?.webView.load(URLRequest(url: url))
+            go(to: url)
         case .search(let query):
-            if let url = settings.searchEngine.url(for: query) {
-                currentTab?.webView.load(URLRequest(url: url))
-            }
+            if let url = settings.searchEngine.url(for: query) { go(to: url) }
         }
     }
 
