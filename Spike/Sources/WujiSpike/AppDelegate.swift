@@ -2,16 +2,24 @@ import AppKit
 import WebKit
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate, OmniboxDelegate {
 
     private var window: SpikeWindow!
     private var content: BrowserContent!
     private var chrome: ChromeOverlay!
+    private var omnibox: Omnibox!
     private var reveal: RevealController!
 
+    private var root: NSView!
     private var tabs: [Tab] = []
     private var currentIndex = 0
     private var observations: [NSKeyValueObservation] = []
+
+    /// Le mode par défaut. Recommandation de la spec : horizontal — deux ruptures
+    /// d'habitude en même temps (interface qui disparaît **et** onglets verticaux),
+    /// c'est une de trop.
+    private var mode: TabsMode = .horizontal
+    private var tabsView: TabsView?
 
     /// Prévisualisation manuelle du liseré (⌥1/⌥2/⌥3), pour juger le vocabulaire
     /// visuel de la sécurité avant que les vrais signaux existent.
@@ -53,10 +61,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate 
         chrome.delegate = self
         root.addSubview(chrome)
 
+        omnibox = Omnibox(frame: root.bounds)
+        omnibox.autoresizingMask = [.width, .height]
+        omnibox.delegate = self
+        root.addSubview(omnibox)
+
+        self.root = root
         window.contentView = root
-        reveal = RevealController(window: window, chrome: chrome)
+        reveal = RevealController(window: window)
         overscroll.delegate = reveal
         threeFinger.delegate = reveal
+        reveal.shouldStayRevealed = { [weak self] in self?.omnibox.isOpen ?? false }
+        mount(mode: mode)
 
         newTab(url: URL(string: "https://www.apple.com")!)
         window.makeKeyAndOrderFront(nil)
@@ -76,8 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate 
 
     @objc func newTab(_ sender: Any?) {
         newTab(url: nil)
-        chrome.focusOmnibox()
-        reveal.reveal(from: .keyboard)
+        openOmnibox()
     }
 
     private func newTab(url: URL?) {
@@ -93,8 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate 
         tabs.remove(at: currentIndex)
         if tabs.isEmpty {
             newTab(url: nil)
-            chrome.focusOmnibox()
-            reveal.reveal(from: .keyboard)
+            openOmnibox()
         } else {
             currentIndex = min(currentIndex, tabs.count - 1)
             activateCurrentTab()
@@ -116,13 +130,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate 
     private func activateCurrentTab() {
         guard let tab = currentTab else { return }
         content.attach(tab.webView)
+        let sync: @Sendable (WKWebView, Any) -> Void = { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.syncChrome() }
+        }
         observations = [
-            tab.webView.observe(\.url, options: [.initial, .new]) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.syncChrome() }
-            },
-            tab.webView.observe(\.title, options: [.initial, .new]) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.syncChrome() }
-            }
+            tab.webView.observe(\.url, options: [.initial, .new], changeHandler: sync),
+            tab.webView.observe(\.title, options: [.initial, .new], changeHandler: sync),
+            tab.webView.observe(\.canGoBack, options: [.initial, .new], changeHandler: sync),
+            tab.webView.observe(\.canGoForward, options: [.initial, .new], changeHandler: sync),
+            tab.webView.observe(\.isLoading, options: [.initial, .new], changeHandler: sync),
+            tab.webView.observe(\.estimatedProgress, options: [.initial, .new], changeHandler: sync)
         ]
         syncChrome()
     }
@@ -131,40 +148,141 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate 
         guard let tab = currentTab else { return }
         let state = borderPreview ?? tab.security
         content.border.set(state)
-        chrome.show(url: tab.url, security: state)
+        content.setProgress(tab.webView.estimatedProgress, isLoading: tab.webView.isLoading)
+        chrome.show(url: tab.url,
+                    security: state,
+                    canGoBack: tab.webView.canGoBack,
+                    canGoForward: tab.webView.canGoForward)
         window.title = tab.title
+        syncTabsView()
     }
 
     // MARK: - Navigation
 
-    @objc func focusOmnibox(_ sender: Any?) {
-        reveal.reveal(from: .keyboard)
-        chrome.focusOmnibox()
-    }
-
+    @objc func focusOmnibox(_ sender: Any?) { openOmnibox() }
     @objc func reload(_ sender: Any?) { currentTab?.webView.reload() }
     @objc func goBack(_ sender: Any?) { currentTab?.webView.goBack() }
     @objc func goForward(_ sender: Any?) { currentTab?.webView.goForward() }
 
-    func chromeOverlay(_ overlay: ChromeOverlay, didSubmit text: String) {
-        guard let url = Self.resolve(text) else { return }
-        currentTab?.webView.load(URLRequest(url: url))
+    private func openOmnibox() {
+        reveal.reveal(from: .keyboard)
+        omnibox.present(in: window, seed: currentTab?.url?.absoluteString ?? "")
+    }
+
+    // MARK: - ChromeOverlayDelegate
+
+    func chromeOverlayDidRequestOmnibox(_ overlay: ChromeOverlay) {
+        openOmnibox()
+    }
+
+    func chromeOverlay(_ overlay: ChromeOverlay, didTrigger action: ChromeOverlay.Action) {
+        switch action {
+        case .back:    currentTab?.webView.goBack()
+        case .forward: currentTab?.webView.goForward()
+        case .reload:  currentTab?.webView.reload()
+        }
+    }
+
+    // MARK: - OmniboxDelegate
+
+    /// **Les onglets ouverts passent avant tout le reste.** C'est là que se joue la thèse
+    /// du spike : sans barre d'onglets, c'est cette liste qui doit rendre le changement
+    /// d'onglet aussi rapide qu'un clic — sinon le concept ne tient pas.
+    func omnibox(_ omnibox: Omnibox, resultsFor query: String) -> [OmniboxResult] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let matchingTabs = tabs.enumerated().compactMap { index, tab -> OmniboxResult? in
+            guard index != currentIndex else { return nil }
+            let haystack = "\(tab.title) \(tab.url?.absoluteString ?? "")".lowercased()
+            guard trimmed.isEmpty || haystack.contains(trimmed.lowercased()) else { return nil }
+            return .tab(index: index, title: tab.title, subtitle: tab.url?.host() ?? "onglet")
+        }
+
+        guard !trimmed.isEmpty else { return matchingTabs }
+
+        var results = matchingTabs
+        if let url = Self.directURL(trimmed) { results.append(.url(url)) }
+        results.append(.search(trimmed))
+        return results
+    }
+
+    func omnibox(_ omnibox: Omnibox, didActivate result: OmniboxResult) {
+        switch result {
+        case .tab(let index, _, _):
+            currentIndex = index
+            activateCurrentTab()
+        case .url(let url):
+            currentTab?.webView.load(URLRequest(url: url))
+        case .search(let query):
+            if let url = Self.searchURL(query) {
+                currentTab?.webView.load(URLRequest(url: url))
+            }
+        }
+        reveal.hideNow()
+    }
+
+    func omniboxDidDismiss(_ omnibox: Omnibox) {
         reveal.hideNow()
     }
 
     /// Une adresse ou une recherche — la seule ambiguïté que l'omnibox doit lever.
-    static func resolve(_ input: String) -> URL? {
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
+    static func directURL(_ input: String) -> URL? {
+        guard !input.contains(" "), input.contains(".") else { return nil }
+        let candidate = input.contains("://") ? input : "https://\(input)"
+        guard let url = URL(string: candidate), url.host != nil else { return nil }
+        return url
+    }
 
-        if trimmed.contains(" ") == false, trimmed.contains(".") {
-            let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
-            if let url = URL(string: candidate), url.host != nil { return url }
-        }
+    static func searchURL(_ query: String) -> URL? {
         var components = URLComponents(string: "https://duckduckgo.com/")
-        components?.queryItems = [URLQueryItem(name: "q", value: trimmed)]
+        components?.queryItems = [URLQueryItem(name: "q", value: query)]
         return components?.url
     }
+
+    // MARK: - Modes d'onglets
+
+    /// Changer de mode **démonte** le précédent : la vue est retirée et libérée, pas
+    /// masquée. C'est le principe 4 à l'échelle du spike — et l'ancêtre du
+    /// `activate()`/`deactivate()` de J1.
+    private func mount(mode newMode: TabsMode) {
+        tabsView?.removeFromSuperview()
+        tabsView = nil
+        mode = newMode
+
+        if let view = TabsFactory.make(newMode) {
+            view.frame = root.bounds
+            view.autoresizingMask = [.width, .height]
+            view.onSelect = { [weak self] index in
+                guard let self, self.tabs.indices.contains(index) else { return }
+                self.currentIndex = index
+                self.activateCurrentTab()
+            }
+            view.onClose = { [weak self] index in
+                guard let self, self.tabs.indices.contains(index) else { return }
+                self.currentIndex = index
+                self.closeTab(nil)
+            }
+            view.onNew = { [weak self] in self?.newTab(nil) }
+            // Sous l'omnibox : la palette passe toujours par-dessus.
+            root.addSubview(view, positioned: .below, relativeTo: omnibox)
+            tabsView = view
+        }
+
+        reveal.chromeViews = [chrome, tabsView].compactMap { $0 }
+        syncTabsView()
+        print("[spike] mode d'onglets : \(newMode.rawValue)")
+    }
+
+    private func syncTabsView() {
+        let snapshots = tabs.map {
+            TabSnapshot(title: $0.title, host: $0.url?.host() ?? "", isLoading: $0.webView.isLoading)
+        }
+        tabsView?.update(tabs: snapshots, selected: currentIndex)
+    }
+
+    @objc func useHorizontal(_ sender: Any?) { mount(mode: .horizontal) }
+    @objc func useVertical(_ sender: Any?) { mount(mode: .vertical) }
+    @objc func useHidden(_ sender: Any?) { mount(mode: .hidden) }
 
     // MARK: - Candidats de révélation
 
@@ -259,6 +377,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate 
         }
         viewItem.submenu = viewMenu
         main.addItem(viewItem)
+
+        let modeItem = NSMenuItem()
+        let modeMenu = NSMenu(title: "Onglets")
+        let modes: [(String, Selector, String)] = [
+            ("Horizontal", #selector(useHorizontal(_:)), "1"),
+            ("Vertical", #selector(useVertical(_:)), "2"),
+            ("Masqué — omnibox seule", #selector(useHidden(_:)), "3")
+        ]
+        for (title, action, key) in modes {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            // Raccourci de banc d'essai uniquement : dans le produit, le mode se choisit
+            // dans les Réglages, une fois (spec §2.2). Ici, comparer est tout l'objet.
+            item.keyEquivalentModifierMask = [.command, .option]
+            modeMenu.addItem(item)
+        }
+        modeItem.submenu = modeMenu
+        main.addItem(modeItem)
 
         let gestureItem = NSMenuItem()
         let gestureMenu = NSMenu(title: "Révélation")

@@ -12,10 +12,18 @@ final class BrowserContent: NSView {
     let border = SecurityBorderView()
     private(set) var webView: WKWebView?
 
+    /// Le chargement est le seul retour d'information qui doit rester visible **même
+    /// interface masquée** : sans lui, une page lente est indiscernable d'un clic manqué.
+    /// D'où un filet de 2 pt collé au bord haut du contenu, qui s'efface tout seul.
+    private let progress = NSView()
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        progress.wantsLayer = true
+        progress.layer?.opacity = 0
         addSubview(border)
+        addSubview(progress)
     }
 
     @available(*, unavailable)
@@ -25,6 +33,19 @@ final class BrowserContent: NSView {
         super.layout()
         webView?.frame = bounds
         border.frame = bounds       // au-dessus du contenu : la page ne se remet jamais en page
+        progress.layer?.backgroundColor = Tokens.textPrimary.cgColor
+    }
+
+    func setProgress(_ value: Double, isLoading: Bool) {
+        let height: CGFloat = 2
+        let width = bounds.width * CGFloat(min(max(value, 0), 1))
+
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.15)
+        progress.frame = NSRect(x: 0, y: bounds.height - height, width: width, height: height)
+        // On disparaît à l'arrivée, pas à 100 % : la barre ne doit jamais rester à l'écran.
+        progress.layer?.opacity = (isLoading && value < 1) ? 0.55 : 0
+        CATransaction.commit()
     }
 
     func attach(_ newWebView: WKWebView) {

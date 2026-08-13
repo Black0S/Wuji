@@ -31,6 +31,13 @@ enum Tokens {
     /// #6E6E73 et non #8E8E93 : ce dernier tombe à 3,26:1 sur blanc, sous le seuil AA (spec §4.4).
     static let textSecondary = dynamic(light: hex(0x6E6E73), dark: hex(0x8E8E93))
 
+    /// Sélection dans une liste. En monochrome, la sélection ne peut pas être une teinte :
+    /// c'est un écart de valeur, et il doit rester lisible sous « Différencier sans couleur ».
+    static let selectionFill = dynamic(light: hex(0x000000, alpha: 0.07),
+                                       dark: hex(0xFFFFFF, alpha: 0.10))
+    static let separator = dynamic(light: hex(0x000000, alpha: 0.08),
+                                   dark: hex(0xFFFFFF, alpha: 0.10))
+
     // MARK: - Couleur sémantique de sécurité (spec §4.3)
 
     /// Une seule famille, réservée exclusivement à la sécurité, jamais utilisée ailleurs.
@@ -39,6 +46,31 @@ enum Tokens {
         static let permission = dynamic(light: hex(0xB2761B), dark: hex(0xD99A3A))
         static let privateSession = dynamic(light: hex(0x6B4FA8), dark: hex(0x9A7FD1))
         static let width: CGFloat = 3
+    }
+
+    // MARK: - Métriques du chrome
+
+    /// Une seule source de vérité pour la disposition du chrome. Chaque vue qui calculait
+    /// sa propre position finissait par se superposer à une autre — c'est exactement ce
+    /// qui est arrivé entre la barre d'adresse et la barre d'onglets.
+    enum Chrome {
+        static let barHeight: CGFloat = 40
+        static let stripHeight: CGFloat = 36
+        static let inset: CGFloat = 8
+
+        /// Largeur réservée aux feux de circulation. macOS les place lui-même en haut à
+        /// gauche : tout ce qui commence avant passe dessous.
+        static let trafficLights: CGFloat = 92
+
+        /// Bandeau principal : HUD de navigation et pilule d'adresse.
+        static func row1(in bounds: NSRect) -> CGFloat {
+            bounds.height - barHeight - inset
+        }
+
+        /// Second bandeau : la barre d'onglets en mode horizontal.
+        static func row2(in bounds: NSRect) -> CGFloat {
+            row1(in: bounds) - stripHeight - inset
+        }
     }
 
     // MARK: - Élévation — 3 niveaux maximum

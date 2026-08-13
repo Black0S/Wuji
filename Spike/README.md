@@ -4,8 +4,12 @@ Ce code ne va pas en production et ne doit pas être écrit comme s'il y allait.
 pour répondre à quatre questions binaires avant d'engager dix mois.
 
 ```bash
-swift run
+./run.sh
 ```
+
+Le script compile **et assemble un bundle `.app`**. Un exécutable SPM nu n'est pas une
+application pour macOS : sans `Info.plist`, pas de permissions système (caméra, micro,
+position) et pas d'identité au niveau du Dock. Le bundle vit dans `.build/`, ignoré par git.
 
 ## Raccourcis
 
@@ -18,9 +22,20 @@ swift run
 | `⌥0` `⌥1` `⌥2` `⌥3` | Liseré : réel · non chiffré · permission active · session privée |
 | `⌃1` `⌃2` `⌃3` | Activer/désactiver un candidat de révélation : bord haut · overscroll · trois doigts |
 | `⌃S` | Afficher les compteurs de révélation par source |
+| `⌘⌥1` `⌘⌥2` `⌘⌥3` | Mode d'onglets : horizontal · vertical · masqué (omnibox seule) |
 
-Pas de barre d'onglets : c'est délibéré — la thèse à éprouver est que l'omnibox devient
-le vrai sélecteur d'onglets.
+## Les trois modes d'onglets
+
+Le banc d'essai compare **horizontal**, **vertical** et **masqué**. Le mode masqué n'est
+pas une vue vide : rien n'est instancié du tout — c'est le principe 4 à l'échelle du spike.
+
+C'est là que se juge la thèse centrale : **sans barre d'onglets, l'omnibox suffit-elle ?**
+Le mode masqué est l'hypothèse pure, les deux autres sont les témoins. Passer de l'un à
+l'autre pendant une vraie session de travail est le seul moyen de trancher.
+
+> Le raccourci de bascule est un outil de banc d'essai. Dans le produit, le mode se choisit
+> dans les Réglages, une fois : changer de paradigme d'affichage par accident est une
+> mauvaise surprise, pas une fonctionnalité (spec §2.2).
 
 ## Les quatre questions
 
@@ -89,11 +104,27 @@ Utiliser le spike comme navigateur principal cinq jours. Noter chaque friction d
 ## Ce que le spike ne fait pas
 
 Pas d'historique, pas de favoris, pas de persistance, pas de restauration de session, pas
-d'adblock, un seul profil, aucune barre d'onglets. Tout ça, c'est J1 — et l'écrire ici
-serait la seule vraie façon de rater ce jalon.
+d'adblock, un seul profil. Tout ça, c'est J1 — et l'écrire ici serait la seule vraie façon
+de rater ce jalon.
 
-## Limites connues
+## Ce que l'usage a déjà corrigé
 
-Exécutable SPM sans bundle applicatif : les permissions système (caméra, micro, position)
-n'ont pas d'`Info.plist` pour se déclarer et échoueront. Sans importance pour les quatre
-questions ; le vrai bundle arrive avec le projet Xcode de J1.
+Des défauts que seule la manipulation révèle, pas la relecture :
+
+- **La palette était amorcée avec l'URL courante**, donc elle filtrait sur elle et
+  n'affichait aucun onglet ouvert — exactement ce qu'on vient chercher à `⌘L`. Tant que
+  rien n'est tapé, la requête est désormais considérée comme vide.
+- **Le HUD passait sous les feux de circulation** et la barre d'onglets recouvrait la
+  barre d'adresse. Chaque vue calculait sa propre position ; les métriques du chrome sont
+  maintenant dans une source unique (`Tokens.Chrome`).
+- **Le chrome invisible volait des clics à la page** : dans AppKit, une vue à `alpha 0`
+  continue de recevoir les événements. Il faut `isHidden`, appliqué après le fondu.
+- **`print` est bufferisé hors terminal**, donc les compteurs n'apparaissaient qu'à la
+  fermeture. `setbuf(stdout, nil)` dans `main.swift`.
+
+## Non vérifié
+
+`esc` pour fermer la palette : les événements Escape injectés par l'automatisation
+n'atteignent pas l'application, alors qu'elle est au premier plan — le code n'est pas en
+cause, mais **ce chemin demande une vraie frappe clavier pour être confirmé**. Le clic à
+côté, lui, est vérifié et emprunte le même `dismiss()`.

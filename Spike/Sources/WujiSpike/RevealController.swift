@@ -29,14 +29,24 @@ final class RevealController: RevealGestureDelegate {
     nonisolated(unsafe) private var monitor: Any?
 
     private unowned let window: SpikeWindow
-    private unowned let chrome: ChromeOverlay
+
+    /// Toutes les vues qui apparaissent et disparaissent ensemble. La vue d'onglets en
+    /// fait partie : ce n'est pas un second système d'auto-masquage, c'est le même
+    /// comportement appliqué à une vue de plus.
+    var chromeViews: [NSView] = [] {
+        didSet { apply(state, animated: false) }
+    }
+
+    /// Ce qui interdit l'escamotage. Aujourd'hui : la palette ouverte. Demain : un menu
+    /// déroulé, un téléchargement en cours, un champ de formulaire en édition. Une seule
+    /// porte, pour ne pas se retrouver avec quatre conditions éparpillées.
+    var shouldStayRevealed: () -> Bool = { false }
 
     /// Instrumentation pour le journal de frictions de la semaine 3.
     private(set) var revealCounts: [RevealSource: Int] = [:]
 
-    init(window: SpikeWindow, chrome: ChromeOverlay) {
+    init(window: SpikeWindow) {
         self.window = window
-        self.chrome = chrome
         apply(.immersive, animated: false)
 
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] event in
@@ -89,8 +99,8 @@ final class RevealController: RevealGestureDelegate {
 
     func hideNow() {
         cancelHide()
-        // Ne jamais escamoter le chrome pendant que l'utilisateur écrit dans l'omnibox.
-        guard state == .revealed, !chrome.isEditing else { return }
+        // Ne jamais escamoter le chrome pendant que l'utilisateur écrit dans la palette.
+        guard state == .revealed, !shouldStayRevealed() else { return }
         apply(.immersive, animated: true)
     }
 
@@ -117,8 +127,13 @@ final class RevealController: RevealGestureDelegate {
         let visible = newState == .revealed
         window.setTrafficLights(visible: visible, animated: animated)
 
+        // Une vue à alpha 0 continue de recevoir les clics dans AppKit : sans `isHidden`,
+        // le chrome invisible volerait des clics à la page. Démasquer avant le fondu,
+        // masquer après.
+        if visible { chromeViews.forEach { $0.isHidden = false } }
+
         guard animated else {
-            chrome.alphaValue = visible ? 1 : 0
+            chromeViews.forEach { $0.alphaValue = visible ? 1 : 0; $0.isHidden = !visible }
             return
         }
         NSAnimationContext.runAnimationGroup { context in
@@ -126,7 +141,12 @@ final class RevealController: RevealGestureDelegate {
             // instantanée, seul le fondu disparaît.
             context.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.18
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            chrome.animator().alphaValue = visible ? 1 : 0
+            chromeViews.forEach { $0.animator().alphaValue = visible ? 1 : 0 }
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.state == .immersive else { return }
+                self.chromeViews.forEach { $0.isHidden = true }
+            }
         }
     }
 
