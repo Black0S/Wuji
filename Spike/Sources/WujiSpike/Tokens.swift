@@ -23,6 +23,14 @@ enum Tokens {
 
     /// Fond des surfaces de chrome. Opaque : c'est toute la décision « flat ».
     static let chromeBackground = dynamic(light: hex(0xFFFFFF), dark: hex(0x1C1C1E))
+
+    /// La sidebar est en retrait par rapport au contenu, pas en avant : elle est le cadre,
+    /// la page est le sujet. D'où un fond plus sourd que la barre du haut — en clair comme
+    /// en sombre, sinon les deux surfaces fusionnent et la colonne disparaît.
+    static let sidebarBackground = dynamic(light: hex(0xF5F5F7), dark: hex(0x141416))
+
+    /// La ligne sélectionnée, elle, ressort — seul élément surélevé de la sidebar.
+    static let rowSelected = dynamic(light: hex(0xFFFFFF), dark: hex(0x2C2C2E))
     /// Le filet de 1 px est structurel, pas décoratif (spec §4.2) : sans lui, une pilule
     /// blanche opaque posée sur une page blanche disparaît.
     static let chromeHairline = dynamic(light: hex(0x000000, alpha: 0.12),
@@ -54,23 +62,15 @@ enum Tokens {
     /// sa propre position finissait par se superposer à une autre — c'est exactement ce
     /// qui est arrivé entre la barre d'adresse et la barre d'onglets.
     enum Chrome {
-        static let barHeight: CGFloat = 40
-        static let stripHeight: CGFloat = 36
+        static let sidebarWidth: CGFloat = 220
+        static let topBarHeight: CGFloat = 52
+        static let rowHeight: CGFloat = 34
+        static let footerHeight: CGFloat = 44
         static let inset: CGFloat = 8
 
-        /// Largeur réservée aux feux de circulation. macOS les place lui-même en haut à
-        /// gauche : tout ce qui commence avant passe dessous.
-        static let trafficLights: CGFloat = 92
-
-        /// Bandeau principal : HUD de navigation et pilule d'adresse.
-        static func row1(in bounds: NSRect) -> CGFloat {
-            bounds.height - barHeight - inset
-        }
-
-        /// Second bandeau : la barre d'onglets en mode horizontal.
-        static func row2(in bounds: NSRect) -> CGFloat {
-            row1(in: bounds) - stripHeight - inset
-        }
+        /// Hauteur réservée aux feux de circulation en haut de la sidebar. macOS les place
+        /// lui-même : tout ce qui commence au-dessus passe dessous.
+        static let trafficLights: CGFloat = 44
     }
 
     // MARK: - Élévation — 3 niveaux maximum

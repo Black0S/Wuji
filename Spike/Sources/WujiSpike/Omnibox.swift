@@ -146,9 +146,10 @@ final class Omnibox: NSView, NSTextFieldDelegate {
         let listHeight = visibleRows == 0 ? 0 : CGFloat(visibleRows) * Self.rowHeight + Tokens.Space.s
         let cardHeight = Self.fieldHeight + listHeight
 
-        // Sous les deux bandeaux du chrome : la palette ne doit jamais recouvrir la
-        // barre d'onglets, sinon on ne voit plus ce qu'on est en train de quitter.
-        let cardTop = Tokens.Chrome.row2(in: bounds) - Tokens.Space.s
+        // La palette vit dans la zone de contenu : ses coordonnées commencent déjà après
+        // la sidebar et sous la barre du haut. Elle ne peut donc jamais les recouvrir —
+        // on ne perd pas de vue ce qu'on est en train de quitter.
+        let cardTop = bounds.height - Tokens.Space.l
         card.frame = NSRect(
             x: (bounds.width - Self.cardWidth) / 2,
             y: cardTop - cardHeight,

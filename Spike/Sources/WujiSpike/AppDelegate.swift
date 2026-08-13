@@ -2,31 +2,23 @@ import AppKit
 import WebKit
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate, OmniboxDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate, OmniboxDelegate {
 
     private var window: SpikeWindow!
-    private var content: BrowserContent!
-    private var chrome: ChromeOverlay!
-    private var omnibox: Omnibox!
+    private var layout: BrowserLayout!
     private var reveal: RevealController!
 
-    private var root: NSView!
+    private let overscroll = OverscrollGesture()
+    private let threeFinger = ThreeFingerGesture()
+    private let favicons = FaviconStore()
+
     private var tabs: [Tab] = []
     private var currentIndex = 0
     private var observations: [NSKeyValueObservation] = []
 
-    /// Le mode par défaut. Recommandation de la spec : horizontal — deux ruptures
-    /// d'habitude en même temps (interface qui disparaît **et** onglets verticaux),
-    /// c'est une de trop.
-    private var mode: TabsMode = .horizontal
-    private var tabsView: TabsView?
-
     /// Prévisualisation manuelle du liseré (⌥1/⌥2/⌥3), pour juger le vocabulaire
     /// visuel de la sécurité avant que les vrais signaux existent.
     private var borderPreview: SecurityBorderView.State?
-
-    private let overscroll = OverscrollGesture()
-    private let threeFinger = ThreeFingerGesture()
 
     private lazy var configuration: WKWebViewConfiguration = {
         let config = WKWebViewConfiguration()
@@ -46,33 +38,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate,
         buildMenu()
 
         window = SpikeWindow()
+        layout = BrowserLayout(frame: window.contentLayoutRect)
+        layout.autoresizingMask = [.width, .height]
+        layout.topBar.delegate = self
+        layout.omnibox.delegate = self
 
-        let root = NSView(frame: window.contentLayoutRect)
-        root.autoresizingMask = [.width, .height]
-        // Sans ça, aucune touche indirecte du trackpad n'est livrée à l'app (candidat B).
-        root.allowedTouchTypes = [.indirect]
+        layout.sidebar.onSelect = { [weak self] index in
+            guard let self, self.tabs.indices.contains(index) else { return }
+            self.currentIndex = index
+            self.activateCurrentTab()
+        }
+        layout.sidebar.onClose = { [weak self] index in
+            guard let self, self.tabs.indices.contains(index) else { return }
+            self.currentIndex = index
+            self.closeTab(nil)
+        }
+        layout.sidebar.onNew = { [weak self] in self?.newTab(nil) }
 
-        content = BrowserContent(frame: root.bounds)
-        content.autoresizingMask = [.width, .height]
-        root.addSubview(content)
+        favicons.onUpdate = { [weak self] in self?.syncSidebar() }
 
-        chrome = ChromeOverlay(frame: root.bounds)
-        chrome.autoresizingMask = [.width, .height]
-        chrome.delegate = self
-        root.addSubview(chrome)
-
-        omnibox = Omnibox(frame: root.bounds)
-        omnibox.autoresizingMask = [.width, .height]
-        omnibox.delegate = self
-        root.addSubview(omnibox)
-
-        self.root = root
-        window.contentView = root
+        window.contentView = layout
         reveal = RevealController(window: window)
+        reveal.applyChrome = { [weak self] visible, animated in
+            self?.layout.setChrome(visible: visible, animated: animated)
+        }
         overscroll.delegate = reveal
         threeFinger.delegate = reveal
-        reveal.shouldStayRevealed = { [weak self] in self?.omnibox.isOpen ?? false }
-        mount(mode: mode)
+        reveal.shouldStayRevealed = { [weak self] in self?.layout.omnibox.isOpen ?? false }
 
         newTab(url: URL(string: "https://www.apple.com")!)
         window.makeKeyAndOrderFront(nil)
@@ -129,7 +121,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate,
 
     private func activateCurrentTab() {
         guard let tab = currentTab else { return }
-        content.attach(tab.webView)
+        layout.content.attach(tab.webView)
+
         let sync: @Sendable (WKWebView, Any) -> Void = { [weak self] _, _ in
             MainActor.assumeIsolated { self?.syncChrome() }
         }
@@ -147,14 +140,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate,
     private func syncChrome() {
         guard let tab = currentTab else { return }
         let state = borderPreview ?? tab.security
-        content.border.set(state)
-        content.setProgress(tab.webView.estimatedProgress, isLoading: tab.webView.isLoading)
-        chrome.show(url: tab.url,
-                    security: state,
-                    canGoBack: tab.webView.canGoBack,
-                    canGoForward: tab.webView.canGoForward)
+        layout.content.border.set(state)
+        layout.content.setProgress(tab.webView.estimatedProgress, isLoading: tab.webView.isLoading)
+        layout.topBar.show(url: tab.url,
+                           security: state,
+                           canGoBack: tab.webView.canGoBack,
+                           canGoForward: tab.webView.canGoForward)
         window.title = tab.title
-        syncTabsView()
+        syncSidebar()
+    }
+
+    private func syncSidebar() {
+        let snapshots = tabs.map {
+            TabSnapshot(title: $0.title,
+                        host: $0.url?.host() ?? "",
+                        isLoading: $0.webView.isLoading,
+                        favicon: favicons.icon(for: $0.url))
+        }
+        layout.sidebar.update(tabs: snapshots, selected: currentIndex)
     }
 
     // MARK: - Navigation
@@ -166,28 +169,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate,
 
     private func openOmnibox() {
         reveal.reveal(from: .keyboard)
-        omnibox.present(in: window, seed: currentTab?.url?.absoluteString ?? "")
+        layout.omnibox.present(in: window, seed: currentTab?.url?.absoluteString ?? "")
     }
 
-    // MARK: - ChromeOverlayDelegate
+    // MARK: - ContentTopBarDelegate
 
-    func chromeOverlayDidRequestOmnibox(_ overlay: ChromeOverlay) {
+    func topBarDidRequestOmnibox(_ bar: ContentTopBar) {
         openOmnibox()
     }
 
-    func chromeOverlay(_ overlay: ChromeOverlay, didTrigger action: ChromeOverlay.Action) {
+    func topBar(_ bar: ContentTopBar, didTrigger action: ContentTopBar.Action) {
         switch action {
         case .back:    currentTab?.webView.goBack()
         case .forward: currentTab?.webView.goForward()
-        case .reload:  currentTab?.webView.reload()
+        case .newTab:  newTab(nil)
         }
     }
 
     // MARK: - OmniboxDelegate
 
-    /// **Les onglets ouverts passent avant tout le reste.** C'est là que se joue la thèse
-    /// du spike : sans barre d'onglets, c'est cette liste qui doit rendre le changement
-    /// d'onglet aussi rapide qu'un clic — sinon le concept ne tient pas.
+    /// Les onglets ouverts passent avant tout le reste : même avec une sidebar, chercher
+    /// un onglet au clavier doit rester plus rapide que le viser à la souris.
     func omnibox(_ omnibox: Omnibox, resultsFor query: String) -> [OmniboxResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -238,51 +240,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate,
         components?.queryItems = [URLQueryItem(name: "q", value: query)]
         return components?.url
     }
-
-    // MARK: - Modes d'onglets
-
-    /// Changer de mode **démonte** le précédent : la vue est retirée et libérée, pas
-    /// masquée. C'est le principe 4 à l'échelle du spike — et l'ancêtre du
-    /// `activate()`/`deactivate()` de J1.
-    private func mount(mode newMode: TabsMode) {
-        tabsView?.removeFromSuperview()
-        tabsView = nil
-        mode = newMode
-
-        if let view = TabsFactory.make(newMode) {
-            view.frame = root.bounds
-            view.autoresizingMask = [.width, .height]
-            view.onSelect = { [weak self] index in
-                guard let self, self.tabs.indices.contains(index) else { return }
-                self.currentIndex = index
-                self.activateCurrentTab()
-            }
-            view.onClose = { [weak self] index in
-                guard let self, self.tabs.indices.contains(index) else { return }
-                self.currentIndex = index
-                self.closeTab(nil)
-            }
-            view.onNew = { [weak self] in self?.newTab(nil) }
-            // Sous l'omnibox : la palette passe toujours par-dessus.
-            root.addSubview(view, positioned: .below, relativeTo: omnibox)
-            tabsView = view
-        }
-
-        reveal.chromeViews = [chrome, tabsView].compactMap { $0 }
-        syncTabsView()
-        print("[spike] mode d'onglets : \(newMode.rawValue)")
-    }
-
-    private func syncTabsView() {
-        let snapshots = tabs.map {
-            TabSnapshot(title: $0.title, host: $0.url?.host() ?? "", isLoading: $0.webView.isLoading)
-        }
-        tabsView?.update(tabs: snapshots, selected: currentIndex)
-    }
-
-    @objc func useHorizontal(_ sender: Any?) { mount(mode: .horizontal) }
-    @objc func useVertical(_ sender: Any?) { mount(mode: .vertical) }
-    @objc func useHidden(_ sender: Any?) { mount(mode: .hidden) }
 
     // MARK: - Candidats de révélation
 
@@ -377,23 +334,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ChromeOverlayDelegate,
         }
         viewItem.submenu = viewMenu
         main.addItem(viewItem)
-
-        let modeItem = NSMenuItem()
-        let modeMenu = NSMenu(title: "Onglets")
-        let modes: [(String, Selector, String)] = [
-            ("Horizontal", #selector(useHorizontal(_:)), "1"),
-            ("Vertical", #selector(useVertical(_:)), "2"),
-            ("Masqué — omnibox seule", #selector(useHidden(_:)), "3")
-        ]
-        for (title, action, key) in modes {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-            // Raccourci de banc d'essai uniquement : dans le produit, le mode se choisit
-            // dans les Réglages, une fois (spec §2.2). Ici, comparer est tout l'objet.
-            item.keyEquivalentModifierMask = [.command, .option]
-            modeMenu.addItem(item)
-        }
-        modeItem.submenu = modeMenu
-        main.addItem(modeItem)
 
         let gestureItem = NSMenuItem()
         let gestureMenu = NSMenu(title: "Révélation")

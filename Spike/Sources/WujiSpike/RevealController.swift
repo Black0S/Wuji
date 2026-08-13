@@ -21,7 +21,7 @@ final class RevealController: RevealGestureDelegate {
     /// Délai avant escamotage, pour ne pas punir un aller-retour du curseur.
     private let hideDelay: TimeInterval = 0.35
 
-    private(set) var state: State = .immersive
+    private(set) var state: State = .revealed
     /// Candidat C, activable/désactivable comme les autres pour pouvoir les isoler.
     var isEdgeEnabled = true
 
@@ -30,12 +30,10 @@ final class RevealController: RevealGestureDelegate {
 
     private unowned let window: SpikeWindow
 
-    /// Toutes les vues qui apparaissent et disparaissent ensemble. La vue d'onglets en
-    /// fait partie : ce n'est pas un second système d'auto-masquage, c'est le même
+    /// Ce qui apparaît et disparaît. La sidebar et la barre du haut bougent **ensemble** :
+    /// ce n'est pas un second système d'auto-masquage pour la sidebar, c'est le même
     /// comportement appliqué à une vue de plus.
-    var chromeViews: [NSView] = [] {
-        didSet { apply(state, animated: false) }
-    }
+    var applyChrome: (_ visible: Bool, _ animated: Bool) -> Void = { _, _ in }
 
     /// Ce qui interdit l'escamotage. Aujourd'hui : la palette ouverte. Demain : un menu
     /// déroulé, un téléchargement en cours, un champ de formulaire en édition. Une seule
@@ -47,7 +45,10 @@ final class RevealController: RevealGestureDelegate {
 
     init(window: SpikeWindow) {
         self.window = window
-        apply(.immersive, animated: false)
+        // On démarre chrome visible, et non en immersif : au premier lancement, une page
+        // nue sans le moindre repère est le scénario qui fait désinstaller en trente
+        // secondes (spec §4.5). Le premier mouvement de souris l'escamote.
+        apply(.revealed, animated: false)
 
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] event in
             MainActor.assumeIsolated { self?.handle(event) }
@@ -65,10 +66,16 @@ final class RevealController: RevealGestureDelegate {
         guard isEdgeEnabled, event.window === window, let content = window.contentView else { return }
         // Coordonnées AppKit : origine en bas à gauche, donc le haut est la valeur maximale.
         let distanceFromTop = content.bounds.height - event.locationInWindow.y
+        let distanceFromLeft = event.locationInWindow.x
 
-        if distanceFromTop <= revealZone {
+        // Deux bords, parce qu'il y a deux surfaces : la barre en haut, la sidebar à
+        // gauche. Viser la sidebar par le bord haut serait un détour absurde.
+        let atEdge = distanceFromTop <= revealZone || distanceFromLeft <= revealZone
+        let insideKeep = distanceFromTop <= keepZone || distanceFromLeft <= Tokens.Chrome.sidebarWidth
+
+        if atEdge {
             reveal(from: .edge)
-        } else if distanceFromTop > keepZone {
+        } else if !insideKeep {
             scheduleHide()
         } else if state == .revealed {
             cancelHide()   // dans la zone de maintien : on reste ouvert
@@ -126,28 +133,7 @@ final class RevealController: RevealGestureDelegate {
         state = newState
         let visible = newState == .revealed
         window.setTrafficLights(visible: visible, animated: animated)
-
-        // Une vue à alpha 0 continue de recevoir les clics dans AppKit : sans `isHidden`,
-        // le chrome invisible volerait des clics à la page. Démasquer avant le fondu,
-        // masquer après.
-        if visible { chromeViews.forEach { $0.isHidden = false } }
-
-        guard animated else {
-            chromeViews.forEach { $0.alphaValue = visible ? 1 : 0; $0.isHidden = !visible }
-            return
-        }
-        NSAnimationContext.runAnimationGroup { context in
-            // Respect de « Réduire le mouvement » (spec §4.5) : la révélation reste
-            // instantanée, seul le fondu disparaît.
-            context.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.18
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            chromeViews.forEach { $0.animator().alphaValue = visible ? 1 : 0 }
-        } completionHandler: { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, self.state == .immersive else { return }
-                self.chromeViews.forEach { $0.isHidden = true }
-            }
-        }
+        applyChrome(visible, animated)
     }
 
     // MARK: - Journal
