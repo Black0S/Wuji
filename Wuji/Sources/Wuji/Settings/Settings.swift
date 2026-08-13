@@ -8,8 +8,7 @@ import AppKit
 /// maquettes trompeuses quand on les prend pour un cahier des charges.
 ///
 /// Le curseur « UI Transparency » de la maquette n'existe donc pas : la direction
-/// artistique est en flat, il ne piloterait rien. Sa place revient au délai d'escamotage,
-/// qui est un vrai paramètre — et justement celui que J0 doit trouver.
+/// artistique est en flat, il ne piloterait rien.
 @MainActor
 final class Settings {
 
@@ -63,23 +62,6 @@ final class Settings {
 
     // Apparence
     var theme: Theme = .auto { didSet { changed() } }
-    /// Interface visible en permanence, **par défaut**.
-    ///
-    /// La spec avait prévu ce réglage comme garde-fou d'accessibilité (§4.5) : l'auto-
-    /// masquage est hostile à la navigation clavier exclusive et à VoiceOver. Il devient
-    /// le comportement par défaut, l'escamotage automatique un choix.
-    ///
-    /// C'est l'inverse de ce que dit le principe 1, et c'est une décision de produit à
-    /// trancher, pas un réglage à ajuster — voir la note dans le README.
-    var alwaysVisibleUI = true { didSet { changed() } }
-    var hideDelay: TimeInterval = 0.35 { didSet { changed() } }
-
-    // Révélation — les seuils que J0 doit trouver, réglables sans recompiler
-    var revealZone: CGFloat = 6 { didSet { changed() } }
-    var keepZone: CGFloat = 96 { didSet { changed() } }
-    var edgeEnabled = true { didSet { changed() } }
-    var overscrollEnabled = true { didSet { changed() } }
-    var threeFingerEnabled = true { didSet { changed() } }
 
     // Recherche et contenu
     var searchEngine: SearchEngine = .duckduckgo { didSet { changed() } }

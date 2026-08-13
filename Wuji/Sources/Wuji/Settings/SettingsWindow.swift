@@ -14,8 +14,10 @@ final class SettingsWindow: NSWindow {
     private var sectionButtons: [SectionButton] = []
     private var current: Section = .appearance
 
+    /// Pas de section « Avancé » : elle ne contenait que les seuils de révélation.
+    /// Une section vide est un contrôle mort à l'échelle d'une page.
     enum Section: String, CaseIterable {
-        case general, appearance, privacy, search, websites, advanced
+        case general, appearance, privacy, search, websites
 
         var title: String {
             switch self {
@@ -24,7 +26,6 @@ final class SettingsWindow: NSWindow {
             case .privacy:    return "Confidentialité"
             case .search:     return "Recherche"
             case .websites:   return "Sites web"
-            case .advanced:   return "Avancé"
             }
         }
 
@@ -35,7 +36,6 @@ final class SettingsWindow: NSWindow {
             case .privacy:    return "hand.raised"
             case .search:     return "magnifyingglass"
             case .websites:   return "globe"
-            case .advanced:   return "slider.horizontal.3"
             }
         }
     }
@@ -115,7 +115,6 @@ final class SettingsWindow: NSWindow {
         case .privacy:    buildPrivacy(builder)
         case .search:     buildSearch(builder)
         case .websites:   buildWebsites(builder)
-        case .advanced:   buildAdvanced(builder)
         }
         let content = builder.finish(height: pane.bounds.height)
         pane.addSubview(content)
@@ -131,14 +130,6 @@ final class SettingsWindow: NSWindow {
                     options: Settings.Theme.allCases.map(\.label),
                     selected: Settings.Theme.allCases.firstIndex(of: settings.theme) ?? 2) { [weak self] index in
             self?.settings.theme = Settings.Theme.allCases[index]
-        }
-        pane.toggle(title: "Interface toujours visible",
-                    subtitle: "Désactive l'escamotage automatique. Nécessaire pour la navigation au clavier seul et VoiceOver.",
-                    isOn: settings.alwaysVisibleUI) { [weak self] in self?.settings.alwaysVisibleUI = $0 }
-        pane.slider(title: "Délai d'escamotage",
-                    subtitle: "Temps avant que l'interface disparaisse une fois le curseur éloigné.",
-                    value: settings.hideDelay, range: 0...2, unit: "s") { [weak self] in
-            self?.settings.hideDelay = $0
         }
     }
 
@@ -164,23 +155,6 @@ final class SettingsWindow: NSWindow {
         }
     }
 
-    private func buildAdvanced(_ pane: PaneBuilder) {
-        pane.toggle(title: "Bord haut et bord gauche", subtitle: "Candidat C. Marche aussi à la souris.",
-                    isOn: settings.edgeEnabled) { [weak self] in self?.settings.edgeEnabled = $0 }
-        pane.toggle(title: "Overscroll", subtitle: "Candidat A. Sans effet sur une page non défilable.",
-                    isOn: settings.overscrollEnabled) { [weak self] in self?.settings.overscrollEnabled = $0 }
-        pane.toggle(title: "Trois doigts", subtitle: "Candidat B. En conflit possible avec Mission Control.",
-                    isOn: settings.threeFingerEnabled) { [weak self] in self?.settings.threeFingerEnabled = $0 }
-        pane.slider(title: "Zone de déclenchement", subtitle: "Distance au bord qui révèle l'interface.",
-                    value: settings.revealZone, range: 2...24, unit: "pt") { [weak self] in
-            self?.settings.revealZone = $0
-        }
-        pane.slider(title: "Zone de maintien",
-                    subtitle: "Plus large que la zone de déclenchement : c'est l'hystérésis qui empêche le clignotement.",
-                    value: settings.keepZone, range: 40...240, unit: "pt") { [weak self] in
-            self?.settings.keepZone = $0
-        }
-    }
 }
 
 // MARK: - Construction du panneau

@@ -6,10 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private var window: BrowserWindow!
     private var layout: BrowserLayout!
-    private var reveal: RevealController!
 
-    private let overscroll = OverscrollGesture()
-    private let threeFinger = ThreeFingerGesture()
     private let favicons = FaviconStore()
     private let settings = Settings()
     private var settingsWindow: SettingsWindow?
@@ -21,10 +18,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private lazy var configuration: WKWebViewConfiguration = {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
-        // Candidat A : le seul endroit d'où l'on voit à la fois la position de défilement
-        // et l'intention de la molette est la page elle-même.
-        config.userContentController.addUserScript(OverscrollGesture.userScript)
-        config.userContentController.add(overscroll, name: OverscrollGesture.handlerName)
         return config
     }()
 
@@ -56,13 +49,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         favicons.onUpdate = { [weak self] in self?.syncSidebar() }
 
         window.contentView = layout
-        reveal = RevealController(window: window)
-        reveal.applyChrome = { [weak self] visible, animated in
-            self?.layout.setChrome(visible: visible, animated: animated)
-        }
-        overscroll.delegate = reveal
-        threeFinger.delegate = reveal
-        reveal.shouldStayRevealed = { [weak self] in self?.layout.omnibox.isOpen ?? false }
 
         settings.onChange = { [weak self] in self?.applySettings() }
         applySettings()
@@ -77,15 +63,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// plus qui pilote quoi.
     private func applySettings() {
         NSApp.appearance = settings.theme.appearance
-
-        reveal.isAlwaysVisible = settings.alwaysVisibleUI
-        reveal.isEdgeEnabled = settings.edgeEnabled
-        reveal.revealZone = settings.revealZone
-        reveal.keepZone = settings.keepZone
-        reveal.hideDelay = settings.hideDelay
-
-        overscroll.isEnabled = settings.overscrollEnabled
-        threeFinger.isEnabled = settings.threeFingerEnabled
 
         for tab in tabs {
             tab.webView.pageZoom = settings.pageZoom
@@ -102,12 +79,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        // Journal de frictions, semaine 3 : c'est ce tableau qui tranche le geste,
-        // pas une opinion en fin de semaine.
-        print(reveal.summary())
-        print("[wuji] onglets ouverts en fin de session : \(tabs.count)")
-    }
 
     // MARK: - Onglets
 
@@ -197,7 +168,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     @objc func goForward(_ sender: Any?) { currentTab?.webView.goForward() }
 
     private func openOmnibox() {
-        reveal.reveal(from: .keyboard)
         layout.omnibox.present(in: window, seed: currentTab?.url?.absoluteString ?? "")
     }
 
@@ -249,12 +219,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                 currentTab?.webView.load(URLRequest(url: url))
             }
         }
-        reveal.hideNow()
     }
 
-    func omniboxDidDismiss(_ omnibox: Omnibox) {
-        reveal.hideNow()
-    }
+    func omniboxDidDismiss(_ omnibox: Omnibox) {}
 
     /// Une adresse ou une recherche — la seule ambiguïté que l'omnibox doit lever.
     static func directURL(_ input: String) -> URL? {
@@ -262,10 +229,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         let candidate = input.contains("://") ? input : "https://\(input)"
         guard let url = URL(string: candidate), url.host != nil else { return nil }
         return url
-    }
-
-    @objc func printSummary(_ sender: Any?) {
-        print(reveal.summary())
     }
 
     // MARK: - Menus
@@ -309,14 +272,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Onglet suivant", action: #selector(nextTab(_:)), keyEquivalent: "]")
         viewMenu.addItem(withTitle: "Onglet précédent", action: #selector(previousTab(_:)), keyEquivalent: "[")
-        viewMenu.addItem(.separator())
-
-        // Les candidats de révélation vivent dans les Réglages › Avancé, avec leurs
-        // seuils, plutôt que d'être réglés en deux moitiés.
-        let summaryItem = NSMenuItem(title: "Compteurs de révélation",
-                                     action: #selector(printSummary(_:)), keyEquivalent: "s")
-        summaryItem.keyEquivalentModifierMask = [.control]
-        viewMenu.addItem(summaryItem)
 
         viewItem.submenu = viewMenu
         main.addItem(viewItem)

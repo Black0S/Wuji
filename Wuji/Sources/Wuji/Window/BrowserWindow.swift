@@ -1,10 +1,10 @@
 import AppKit
 
-/// **Question 1 du prototype** : un `WKWebView` bord à bord, sans barre de titre,
-/// avec des feux de circulation qui s'escamotent proprement.
+/// La fenêtre : contenu bord à bord, sans barre de titre, les feux de circulation posés
+/// par macOS en haut de la sidebar.
 ///
-/// Les feux ne peuvent pas être décolorés (spec §4.6, macOS impose sa couleur) —
-/// ils ne peuvent qu'apparaître et disparaître. C'est exactement ce que veut Zero Interface.
+/// Ils ne peuvent pas être décolorés (spec §4.6, macOS impose sa couleur) — c'est la
+/// seule couleur permanente du chrome, et on ne peut rien y faire.
 @MainActor
 final class BrowserWindow: NSWindow {
 
@@ -31,23 +31,4 @@ final class BrowserWindow: NSWindow {
     /// pour que le clavier et l'omnibox fonctionnent.
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
-
-    // MARK: - Feux de circulation
-
-    private var trafficLights: [NSButton] {
-        [.closeButton, .miniaturizeButton, .zoomButton].compactMap(standardWindowButton)
-    }
-
-    func setTrafficLights(visible: Bool, animated: Bool) {
-        let target: CGFloat = visible ? 1 : 0
-        guard animated else {
-            trafficLights.forEach { $0.alphaValue = target }
-            return
-        }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.18
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            trafficLights.forEach { $0.animator().alphaValue = target }
-        }
-    }
 }
