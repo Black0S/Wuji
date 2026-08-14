@@ -24,6 +24,7 @@ final class InternalPageHandler: NSObject, WKURLSchemeHandler {
     /// des listes, une compilation en cours, des règles écrites à la main : c'est
     /// l'application qui sait les assembler, pas ce gestionnaire.
     var adBlock: ((String) -> String)?
+    var scripts: (() -> String)?
 
     init(history: HistoryStore, downloads: DownloadStore, favorites: FavoritesStore,
          icons: FaviconStore) {
@@ -59,6 +60,7 @@ final class InternalPageHandler: NSObject, WKURLSchemeHandler {
         case "favorites": return FavoritesPage.html(items: favorites.items, icons: icons)
         // Le blocage a trois pages sous le même hôte : le chemin les distingue.
         case "ad-block":  return adBlock?(url.path) ?? NewTabPage.html
+        case "scripts":   return scripts?() ?? NewTabPage.html
         default:          return NewTabPage.html
         }
     }

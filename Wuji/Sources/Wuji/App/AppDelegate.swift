@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private let favorites = FavoritesStore()
     private let settings = Settings()
     private let filterLists = FilterListStore()
+    private let userScripts = UserScriptStore()
     private lazy var blocker = ContentBlocker(settings: settings, lists: filterLists)
     private var settingsWindow: SettingsWindow?
 
@@ -37,8 +38,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// deux onglets qui chargent en même temps se voleraient leurs scripts. Mesuré avant
     /// de s'y engager : WebKit ouvre déjà un processus de rendu par vue web, une
     /// configuration par onglet ne coûte donc rien de plus.
-    private func makeConfiguration() -> WKWebViewConfiguration {
+    private func makeConfiguration(isPrivate: Bool = false) -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
+        // Un magasin non persistant : cookies, cache et stockage local vivent en mémoire et
+        // disparaissent avec l'espace. C'est WebKit qui garantit l'effacement, pas nous.
+        if isPrivate { config.websiteDataStore = .nonPersistent() }
         config.defaultWebpagePreferences.allowsContentJavaScript = true
 
         // **Se présenter comme Safari, mot pour mot.**
@@ -63,12 +67,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                              exceptions: settings.blockingExceptions,
                              isBusy: blocker.state.isBusy)
         }
+        pages.scripts = { [unowned self] in ScriptsPage.html(scripts: userScripts.scripts) }
         config.setURLSchemeHandler(pages, forURLScheme: InternalPageHandler.scheme)
         config.userContentController.add(self, name: "wujiHistory")
         config.userContentController.add(self, name: "wujiDownloads")
         config.userContentController.add(self, name: "wujiFavorites")
         config.userContentController.add(self, name: "wujiAdBlock")
         config.userContentController.add(self, name: ElementPicker.handler)
+        config.userContentController.add(self, name: "wujiScripts")
         config.userContentController.add(self, name: "wujiError")
         config.userContentController.add(self, name: PageContextMenu.handler)
         config.userContentController.addUserScript(PageContextMenu.script)
@@ -77,6 +83,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     }
 
     private var currentSpace: Space { spaces[currentSpaceIndex] }
+    /// L'espace courant est-il privé ? Consulté à la création d'un onglet.
+    private var isPrivateSpace: Bool { spaces.indices.contains(currentSpaceIndex) && currentSpace.isPrivate }
     private var currentTab: Tab? { currentSpace.current }
 
     // MARK: - Cycle de vie
@@ -223,8 +231,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     }
 
     private func snapshot() -> StoredSession {
+        // Un espace privé n'est pas écrit : le retrouver au prochain lancement serait le
+        // contraire de ce qu'il promet.
         StoredSession(
-            spaces: spaces.map { space in
+            spaces: spaces.filter { !$0.isPrivate }.map { space in
                 let order = space.allTabs
                 return StoredSpace(
                     name: space.name,
@@ -356,7 +366,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private func makeTab(configuration override: WKWebViewConfiguration? = nil,
                          pendingURL: URL? = nil, pendingTitle: String? = nil) -> Tab {
-        let tab = Tab(configuration: override ?? makeConfiguration(),
+        let tab = Tab(configuration: override ?? makeConfiguration(isPrivate: isPrivateSpace),
                       pendingURL: pendingURL, pendingTitle: pendingTitle)
         tab.webView.navigationDelegate = self
         tab.webView.uiDelegate = self
@@ -399,6 +409,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             installAdvancedRules(for: navigationAction.request.url, in: webView)
         }
 
+        // Une adresse en `.user.js` est une offre d'installation, pas une page à lire.
+        if let url = navigationAction.request.url, url.path.hasSuffix(".user.js"),
+           navigationAction.targetFrame?.isMainFrame ?? true {
+            installScript(from: url)
+            return .cancel
+        }
+
         guard navigationAction.navigationType == .linkActivated,
               navigationAction.modifierFlags.contains(.command),
               let url = navigationAction.request.url else { return .allow }
@@ -435,6 +452,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// compterait les redirections et les erreurs comme des visites.
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard let url = webView.url else { return }
+        // Rien n'est noté depuis un espace privé — c'est tout ce qu'il promet.
+        guard !isPrivateSpace else { return }
         history.record(url: url, title: webView.title ?? "")
     }
 
@@ -549,6 +568,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         controller.removeAllUserScripts()
         controller.addUserScript(PageContextMenu.script)
 
+        // Les scripts de l'utilisateur passent avant le blocage : ils sont à lui, et ils
+        // s'appliquent même sur un site où la protection est levée.
+        for (script, code) in userScripts.matching(url) {
+            let time: WKUserScriptInjectionTime = script.runAt == "document-start" ? .atDocumentStart
+                                                                                  : .atDocumentEnd
+            controller.addUserScript(WKUserScript(source: "(function(){\n" + code + "\n})();",
+                                                  injectionTime: time, forMainFrameOnly: true))
+        }
+
         guard settings.blockingEnabled, !blocker.isExcepted(url) else { return }
 
         // La page part avant que l'index soit prêt — cas du tout premier lancement, ou
@@ -591,6 +619,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private static let extendedCss = AdvancedRules.extendedCssLibrary
 
     static let adBlockPage = URL(string: "wuji://ad-block")!
+    static let scriptsPage = URL(string: "wuji://scripts")!
+
+    @objc func showScripts(_ sender: Any?) {
+        openInternal(Self.scriptsPage)
+    }
+
+    private func refreshScriptsPages() {
+        spaces.flatMap(\.allTabs)
+            .filter { $0.url?.host() == "scripts" }
+            .forEach { $0.webView.reload() }
+    }
+
+    /// Télécharge un script et l'installe, après accord.
+    ///
+    /// Un script utilisateur s'exécute avec les pouvoirs de la page : l'installer sans le
+    /// demander serait exécuter du code tiers sur simple visite d'une adresse.
+    private func installScript(from url: URL) {
+        Task { [weak self] in
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let text = String(data: data, encoding: .utf8) else { return }
+            guard let self else { return }
+            let preview = UserScript(text: text, source: url)
+            self.layout.actionSheet.presentConfirmation(
+                title: "Installer « \(preview.name) » ?",
+                message: "Ce script s'exécutera sur : \(preview.patterns.prefix(3).joined(separator: ", ")). Il aura les mêmes pouvoirs que ces pages.",
+                confirm: "Installer") { [weak self] in
+                    self?.userScripts.add(text: text, source: url)
+                    self?.layout.toast.show("Script installé") { self?.showScripts(nil) }
+                    self?.refreshScriptsPages()
+                }
+        }
+    }
+
+    private func handleScriptAction(_ action: String, payload: [String: Any]) {
+        switch action {
+        case "install":
+            guard let raw = payload["url"] as? String, let url = URL(string: raw),
+                  url.scheme == "https" || url.scheme == "http" else { return }
+            installScript(from: url)
+        case "enable":
+            guard let value = payload["value"] as? Bool else { return }
+            userScripts.setEnabled(value, id: payload["id"] as? String)
+        case "remove":
+            userScripts.remove(id: payload["id"] as? String)
+        default:
+            break
+        }
+    }
 
     @objc func showAdBlock(_ sender: Any?) {
         openInternal(Self.adBlockPage)
@@ -618,13 +694,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             .forEach { $0.webView.reload() }
     }
 
-    /// Le menu du bouclier : l'état ici, l'outil pour corriger, la porte vers les listes.
+    /// Le menu du bouclier.
+    ///
+    /// Il répond d'abord à « que se passe-t-il **ici** » — l'état du site ouvert et ce que
+    /// les règles y font — avant d'offrir les outils. Une feuille qui commence par ses
+    /// réglages oblige à chercher l'information à chaque fois.
     private func blockingMenu() -> [ActionItem] {
         var items: [ActionItem] = []
         let url = currentTab.flatMap(favoritableURL(of:))
 
-        if let url {
+        if let url, let host = url.host() {
             let excepted = blocker.isExcepted(url)
+            let payload = blocker.advanced.payload(for: url)
+
+            // L'état du site, en une ligne qu'on lit sans cliquer.
+            items.append(ActionItem(title: excepted ? "Protection levée sur \(host)"
+                                                    : "Protection active sur \(host)",
+                                    symbol: excepted ? "shield.slash" : "shield.lefthalf.filled",
+                                    isEnabled: false))
+            // Ce que la page reçoit vraiment, quand il y a quelque chose à dire. Un
+            // compteur de requêtes bloquées serait inventé — WebKit n'en remonte aucune —
+            // mais ceci, on le sait exactement.
+            if !excepted, !payload.isEmpty {
+                let parts = [
+                    payload.scriptlets.isEmpty ? nil : "\(payload.scriptlets.count) scriptlet\(payload.scriptlets.count > 1 ? "s" : "")",
+                    payload.extendedSelectors.isEmpty ? nil : "\(payload.extendedSelectors.count) masquage\(payload.extendedSelectors.count > 1 ? "s" : "")"
+                ].compactMap { $0 }
+                items.append(ActionItem(title: parts.joined(separator: " · ") + " sur cette page",
+                                        symbol: "text.badge.checkmark", isEnabled: false))
+            }
+            items.append(.separator)
+
             items.append(ActionItem(title: excepted ? "Réactiver sur ce site" : "Désactiver sur ce site",
                                     symbol: excepted ? "shield" : "shield.slash",
                                     action: { [weak self] in self?.toggleBlocking(for: url) }))
@@ -632,11 +732,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                 items.append(ActionItem(title: "Bloquer un élément…", symbol: "scope",
                                         action: { [weak self] in self?.pickElement() }))
             }
+            items.append(.separator)
         }
-        if !items.isEmpty { items.append(.separator) }
+
         items.append(ActionItem(title: blocker.state.summary, symbol: "info.circle", isEnabled: false))
         items.append(ActionItem(title: "Gérer les listes…", symbol: "list.bullet",
                                 action: { [weak self] in self?.showAdBlock(nil) }))
+        items.append(ActionItem(title: "Scripts…", symbol: "curlybraces",
+                                action: { [weak self] in self?.showScripts(nil) }))
         return items
     }
 
@@ -1337,6 +1440,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                 handleFavoriteAction(action, id: payload["id"] as? String)
                 return
             }
+            if message.name == "wujiScripts" {
+                handleScriptAction(action, payload: payload)
+                return
+            }
             if message.name == "wujiAdBlock" {
                 handleAdBlockAction(action, payload: payload)
                 return
@@ -1482,6 +1589,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         let items: [ActionItem] = [
             ActionItem(title: "Renommer", symbol: "pencil",
                        action: { [weak panel] in panel?.beginRename(at: index) }),
+            ActionItem(title: spaces.indices.contains(index) && spaces[index].isPrivate
+                              ? "Rendre cet espace normal" : "Rendre cet espace privé",
+                       symbol: spaces.indices.contains(index) && spaces[index].isPrivate
+                              ? "eye" : "eye.slash",
+                       action: { [weak self, weak panel] in
+                           panel?.dismiss()
+                           self?.togglePrivate(at: index)
+                       }),
+            .separator,
             ActionItem(title: "Supprimer", symbol: "trash", isEnabled: canDelete,
                        isDestructive: true,
                        action: { [weak self, weak panel] in
@@ -1491,6 +1607,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                        })
         ]
         presentSheet(items, at: event)
+    }
+
+    /// Bascule un espace entre normal et privé.
+    ///
+    /// Les onglets déjà ouverts ne changent pas de monde : leurs vues web sont nées avec
+    /// un magasin de données, et on ne le remplace pas sous leurs pieds. La bascule vaut
+    /// donc pour la suite, et on le dit plutôt que de laisser croire à un effacement.
+    private func togglePrivate(at index: Int) {
+        guard spaces.indices.contains(index) else { return }
+        let space = spaces[index]
+        space.isPrivate.toggle()
+        layout.toast.show(space.isPrivate
+                          ? "« \(space.name) » est privé : rien ne sera enregistré"
+                          : "« \(space.name) » redevient normal")
+        syncSidebar()
+        session.save(snapshot())
     }
 
     func spacesPanel(_ panel: SpacesPanel, didDelete index: Int) {
@@ -1750,6 +1882,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         favoritesItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(favoritesItem)
         viewMenu.addItem(withTitle: "Blocage", action: #selector(showAdBlock(_:)), keyEquivalent: "")
+        viewMenu.addItem(withTitle: "Scripts", action: #selector(showScripts(_:)), keyEquivalent: "")
         viewMenu.addItem(withTitle: "Historique", action: #selector(showHistory(_:)), keyEquivalent: "y")
         viewMenu.addItem(withTitle: "Téléchargements", action: #selector(showDownloads(_:)), keyEquivalent: "j")
         viewMenu.addItem(withTitle: "Rechercher dans la page…", action: #selector(findInPage(_:)), keyEquivalent: "f")

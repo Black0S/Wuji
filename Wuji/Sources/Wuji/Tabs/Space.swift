@@ -47,6 +47,14 @@ final class Space {
     var name: String
     var symbol: String
 
+    /// **Un espace privé ne laisse rien.**
+    ///
+    /// Ni historique, ni session sur le disque, ni cookies qui survivent : ses vues web
+    /// travaillent sur un magasin de données éphémère, que WebKit efface avec lui. C'est
+    /// une propriété de l'espace et non d'une fenêtre — on garde ses onglets rangés comme
+    /// les autres, et on bascule d'un monde à l'autre par le sélecteur d'espaces.
+    var isPrivate = false
+
     private(set) var folders: [TabFolder] = []
     private(set) var loose: [Tab] = []
     var current: Tab?
