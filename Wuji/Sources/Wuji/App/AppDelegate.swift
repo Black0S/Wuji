@@ -1051,8 +1051,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     // MARK: - OmniboxDelegate
 
-    /// Les onglets ouverts passent avant tout le reste : même avec une sidebar, chercher
-    /// un onglet au clavier doit rester plus rapide que le viser à la souris.
+    /// **Ce qu'on tape passe en premier**, les onglets ouverts ensuite.
+    ///
+    /// L'ordre du tableau est l'ordre affiché et celui de la sélection : la première ligne
+    /// est donc toujours la lecture littérale de la frappe. Un onglet ouvert en tête ferait
+    /// changer la cible de `↵` au fil de la saisie — on taperait une recherche pour
+    /// atterrir sur une page qu'on avait déjà, sans l'avoir demandé.
     func omnibox(_ omnibox: Omnibox, resultsFor query: String) -> [OmniboxResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -1080,10 +1084,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // Pas d'historique ici : la palette sert à aller quelque part qu'on a en tête, et
         // une liste de pages déjà visitées la ferait relire à chaque frappe. Chercher dans
         // ce qu'on a vu est un autre geste, et il a sa page — `wuji://history`.
-        var results = matchingTabs
+        //
+        // L'adresse avant la recherche quand la frappe en est une : « exemple.fr » veut
+        // aller sur exemple.fr, pas chercher ces neuf caractères.
+        var results: [OmniboxResult] = []
         if let url = Self.directURL(trimmed) { results.append(.url(url)) }
         results.append(.search(trimmed))
-        return results
+        return results + matchingTabs
     }
 
     func omnibox(_ omnibox: Omnibox, didActivate result: OmniboxResult) {

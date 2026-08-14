@@ -1,7 +1,10 @@
 import AppKit
 
 /// Ce que l'omnibox peut proposer. L'ordre du tableau est l'ordre affiché, et il compte :
-/// **les onglets ouverts passent avant tout le reste.**
+/// **ce qu'on vient de taper passe en premier.** La première ligne est donc toujours la
+/// lecture littérale de la frappe — l'adresse si c'en est une, la recherche sinon — et `↵`
+/// fait ce qu'on croit qu'il fait. Les onglets ouverts viennent juste après : ils sont une
+/// alternative qu'on choisit, pas une destination qu'on subit.
 ///
 /// **L'historique n'y figure pas.** La palette répond à « je sais où je vais » ; retrouver
 /// une page vue la semaine dernière est une autre question, et elle a sa page. Mélanger les
@@ -288,11 +291,12 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
         headers = []
         entries = []
 
-        // Deux natures, dans l'ordre où elles répondent à la question « où est-ce que je
-        // veux aller » : ce qui est déjà ouvert, puis ce qu'il faudrait aller chercher.
+        // Deux natures : ce que la frappe demande littéralement, puis ce qui est déjà
+        // ouvert. Cet ordre est celui du tableau — la sélection part de la première ligne,
+        // et elle doit tomber sur ce qu'on vient d'écrire.
         let groups: [(String, [Int])] = [
-            ("Onglets ouverts", results.indices.filter { results[$0].isTab }),
-            ("Suggestions", results.indices.filter { !results[$0].isTab })
+            ("Suggestions", results.indices.filter { !results[$0].isTab }),
+            ("Onglets ouverts", results.indices.filter { results[$0].isTab })
         ]
         let visible = groups.filter { !$0.1.isEmpty }
         for (title, indices) in visible {
