@@ -11,10 +11,21 @@ import Foundation
 @MainActor
 enum ErrorPage {
 
+    /// Une adresse arrêtée par le bloqueur. WebKit la signale par ce couple précis, et le
+    /// message qu'il fournit est en anglais et technique — on écrit le nôtre.
+    static func isBlocked(_ error: NSError) -> Bool {
+        error.domain == "WebKitErrorDomain" && error.code == 104
+    }
+
     /// Ce qu'on montre, selon ce qui a lâché. Le message dit **ce qui s'est passé** et
     /// **ce qu'on peut faire** — un code d'erreur ne fait ni l'un ni l'autre.
     static func html(url: URL, error: NSError) -> String {
         let (title, message, hint) = explain(url: url, error: error)
+        let blocked = isBlocked(error)
+        // « Réessayer » sur une adresse bloquée échouerait à tous les coups : ce serait un
+        // bouton mort. À sa place, la seule action qui change quelque chose.
+        let button = blocked ? "Ne pas bloquer ce site" : "Réessayer"
+        let action = blocked ? #", action: "allow""# : ""
 
         return """
         <!doctype html>
@@ -31,7 +42,7 @@ enum ErrorPage {
               <h1>\(escape(title))</h1>
               <p class="message">\(escape(message))</p>
               <p class="host">\(escape(url.host() ?? url.absoluteString))</p>
-              <button id="retry">Réessayer</button>
+              <button id="retry">\(escape(button))</button>
               <p class="hint">\(escape(hint))</p>
             </div>
           </main>
@@ -39,7 +50,8 @@ enum ErrorPage {
             const retry = document.getElementById('retry');
             retry.addEventListener('click', () => {
               retry.disabled = true;
-              window.webkit.messageHandlers.wujiError.postMessage({ url: "\(escape(url.absoluteString))" });
+              window.webkit.messageHandlers.wujiError.postMessage(
+                { url: "\(escape(url.absoluteString))"\(action) });
             });
             retry.focus();
           </script>
@@ -50,6 +62,13 @@ enum ErrorPage {
 
     private static func explain(url: URL, error: NSError) -> (String, String, String) {
         let host = url.host() ?? "ce site"
+
+        if isBlocked(error) {
+            return ("Bloqué par Wuji",
+                    "« \(host) » est dans la liste des régies et des traceurs.",
+                    "La requête a été arrêtée avant de partir. Si une page en dépend pour fonctionner, la protection peut être levée pour ce site seulement.")
+        }
+
         switch error.code {
         case NSURLErrorNotConnectedToInternet:
             return ("Pas de connexion",

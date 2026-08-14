@@ -9,6 +9,7 @@ import AppKit
 final class SettingsWindow: NSWindow {
 
     private let settings: Settings
+    private unowned let blocker: ContentBlocker
     private let sidebar = NSView()
     private let pane = NSView()
     private var sectionButtons: [SectionButton] = []
@@ -39,8 +40,9 @@ final class SettingsWindow: NSWindow {
         }
     }
 
-    init(settings: Settings) {
+    init(settings: Settings, blocker: ContentBlocker) {
         self.settings = settings
+        self.blocker = blocker
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 460),
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -130,7 +132,33 @@ final class SettingsWindow: NSWindow {
     var onClearHistory: (() -> Void)?
     var historyCount: () -> Int = { 0 }
 
+    /// Le bloqueur compile en arrière-plan : la ligne qui annonce le nombre de règles est
+    /// fausse tant qu'il n'a pas fini. On la réécrit quand il a terminé.
+    func refreshBlocking() {
+        guard current == .privacy, isVisible else { return }
+        select(.privacy)
+    }
+
     private func buildPrivacy(_ pane: PaneBuilder) {
+        // En tête de section : c'est le réglage de confidentialité qui change le plus de
+        // choses, et le seul qui agisse avant qu'une requête parte.
+        pane.toggle(title: "Bloquer publicités et traceurs",
+                    subtitle: "\(blocker.state.summary). Liste écrite pour Wuji, jamais mise à jour dans votre dos.",
+                    isOn: settings.blockingEnabled) { [weak self] isOn in
+            self?.settings.blockingEnabled = isOn
+            self?.blocker.reload()
+            self?.refreshBlocking()
+        }
+        if !settings.blockingExceptions.isEmpty {
+            let hosts = settings.blockingExceptions
+            pane.button(title: "Sites sans protection",
+                        subtitle: hosts.joined(separator: ", "),
+                        action: "Réactiver") { [weak self] in
+                self?.settings.blockingExceptions = []
+                self?.blocker.reload()
+                self?.select(.privacy)
+            }
+        }
         pane.slider(title: "Conserver l'historique",
                     subtitle: "Au-delà, les pages sont effacées au lancement suivant.",
                     value: CGFloat(settings.historyRetention), range: 7...365, unit: "j") { [weak self] in

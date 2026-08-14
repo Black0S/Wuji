@@ -1,6 +1,6 @@
 import AppKit
 
-/// Les réglages du prototype.
+/// Les réglages.
 ///
 /// Règle tenue ici : **aucun contrôle mort.** Chaque interrupteur de cette fenêtre pilote
 /// quelque chose de réel. Un réglage qui ne fait rien est pire qu'un réglage absent — il
@@ -9,6 +9,11 @@ import AppKit
 ///
 /// Le curseur « UI Transparency » de la maquette n'existe donc pas : la direction
 /// artistique est en flat, il ne piloterait rien.
+///
+/// **Tout est relu au démarrage.** Ça paraît évident et ça ne l'était pas : les réglages
+/// vivaient en mémoire, donc le thème, le moteur de recherche et la rétention d'historique
+/// revenaient à leur valeur d'usine à chaque lancement. Un réglage qu'il faut refaire
+/// chaque matin n'est pas un réglage.
 @MainActor
 final class Settings {
 
@@ -60,18 +65,63 @@ final class Settings {
         }
     }
 
-    // Apparence
-    var theme: Theme = .auto { didSet { changed() } }
+    // MARK: - Apparence
 
-    // Recherche et contenu
-    var searchEngine: SearchEngine = .duckduckgo { didSet { changed() } }
-    var pageZoom: CGFloat = 1 { didSet { changed() } }
-    var safariInspection = false { didSet { changed() } }
+    var theme: Theme { didSet { store.set(theme.rawValue, forKey: Key.theme); changed() } }
+
+    // MARK: - Recherche et contenu
+
+    var searchEngine: SearchEngine {
+        didSet { store.set(searchEngine.rawValue, forKey: Key.searchEngine); changed() }
+    }
+    var pageZoom: CGFloat { didSet { store.set(Double(pageZoom), forKey: Key.pageZoom); changed() } }
+    var safariInspection: Bool {
+        didSet { store.set(safariInspection, forKey: Key.inspection); changed() }
+    }
     /// Rétention de l'historique, en jours. La spec §4.1 la veut configurable : c'est ce
     /// qui rend « vos données restent chez vous » vérifiable plutôt que déclaratif.
-    var historyRetention: Int = 90 { didSet { changed() } }
+    var historyRetention: Int {
+        didSet { store.set(historyRetention, forKey: Key.retention); changed() }
+    }
+
+    // MARK: - Protection
+
+    var blockingEnabled: Bool {
+        didSet { store.set(blockingEnabled, forKey: Key.blocking); changed() }
+    }
+    /// Les sites où la protection est éteinte, par hôte. Une page cassée par le filtrage
+    /// ne doit pas obliger à choisir entre cette page et la protection partout ailleurs.
+    var blockingExceptions: [String] {
+        didSet { store.set(blockingExceptions, forKey: Key.blockingExceptions); changed() }
+    }
 
     var onChange: (() -> Void)?
+
+    // MARK: - Stockage
+
+    private let store = UserDefaults.standard
+
+    private enum Key {
+        static let theme = "theme"
+        static let searchEngine = "searchEngine"
+        static let pageZoom = "pageZoom"
+        static let inspection = "safariInspection"
+        static let retention = "historyRetention"
+        static let blocking = "blockingEnabled"
+        static let blockingExceptions = "blockingExceptions"
+    }
+
+    init() {
+        // Les valeurs par défaut sont déclarées ici et nulle part ailleurs : `object(forKey:)`
+        // distingue « jamais réglé » de « réglé à zéro », ce que `bool(forKey:)` ne fait pas.
+        theme = Theme(rawValue: store.string(forKey: Key.theme) ?? "") ?? .auto
+        searchEngine = SearchEngine(rawValue: store.string(forKey: Key.searchEngine) ?? "") ?? .duckduckgo
+        pageZoom = store.object(forKey: Key.pageZoom).map { CGFloat($0 as? Double ?? 1) } ?? 1
+        safariInspection = store.bool(forKey: Key.inspection)
+        historyRetention = store.object(forKey: Key.retention) as? Int ?? 90
+        blockingEnabled = store.object(forKey: Key.blocking) as? Bool ?? true
+        blockingExceptions = store.stringArray(forKey: Key.blockingExceptions) ?? []
+    }
 
     private func changed() { onChange?() }
 }

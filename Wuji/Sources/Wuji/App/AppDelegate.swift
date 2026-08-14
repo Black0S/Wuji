@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private let downloads = DownloadStore()
     private let favorites = FavoritesStore()
     private let settings = Settings()
+    private lazy var blocker = ContentBlocker(settings: settings)
     private var settingsWindow: SettingsWindow?
 
     /// Les onglets appartiennent à un espace, jamais à l'application. Tout ce qui suit
@@ -53,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         config.userContentController.add(self, name: "wujiError")
         config.userContentController.add(self, name: PageContextMenu.handler)
         config.userContentController.addUserScript(PageContextMenu.script)
+        blocker.attach(to: config.userContentController)
         return config
     }()
 
@@ -91,6 +93,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
         settings.onChange = { [weak self] in self?.applySettings() }
         applySettings()
+
+        // Le bloqueur compile ses règles au démarrage : la première page ouverte doit
+        // déjà être protégée, pas la deuxième.
+        blocker.onChange = { [weak self] in self?.settingsWindow?.refreshBlocking() }
+        blocker.reload()
 
         history.purge(olderThan: settings.historyRetention)
         restoreSession()
@@ -209,7 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     @objc func openSettings(_ sender: Any?) {
         if settingsWindow == nil {
-            let window = SettingsWindow(settings: settings)
+            let window = SettingsWindow(settings: settings, blocker: blocker)
             window.historyCount = { [weak self] in self?.history.count ?? 0 }
             window.onClearHistory = { [weak self] in self?.history.clear() }
             settingsWindow = window
@@ -445,6 +452,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     @objc func showDownloads(_ sender: Any?) {
         openInternal(Self.downloadsPage)
+    }
+
+    /// Éteindre ou rallumer la protection sur un site, puis recharger.
+    ///
+    /// Le rechargement n'est pas une politesse : les règles de contenu s'appliquent au
+    /// moment où la requête part. Sans lui, la page reste exactement telle qu'elle était
+    /// et on croit que le réglage n'a rien fait.
+    private func toggleBlocking(for url: URL) {
+        blocker.toggleException(for: url)
+        let host = url.host() ?? ""
+        layout.toast.show(blocker.isExcepted(url)
+                          ? "Protection désactivée sur \(host)"
+                          : "Protection réactivée sur \(host)")
+        currentTab?.webView.reload()
     }
 
     // MARK: - Favoris
@@ -875,6 +896,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         items.append(ActionItem(title: "Favoris", symbol: "star.square", shortcut: "⇧⌘B",
                                 action: { [weak self] in self?.showFavorites(nil) }))
 
+        // La protection s'éteint par site et depuis le site : c'est là qu'on se rend
+        // compte qu'une page est cassée, pas dans une fenêtre de réglages.
+        if settings.blockingEnabled, let tab = currentTab, let url = favoritableURL(of: tab) {
+            let excepted = blocker.isExcepted(url)
+            items.append(ActionItem(title: excepted ? "Bloquer sur ce site" : "Ne pas bloquer ici",
+                                    symbol: excepted ? "shield" : "shield.slash",
+                                    action: { [weak self] in self?.toggleBlocking(for: url) }))
+        }
+
         items.append(contentsOf: [
             ActionItem(title: "Historique", symbol: "clock", shortcut: "⌘Y",
                        action: { [weak self] in self?.showHistory(nil) }),
@@ -1045,6 +1075,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             }
             if message.name == "wujiError" {
                 guard let raw = payload["url"] as? String, let url = URL(string: raw) else { return }
+                // « Ne pas bloquer ce site » depuis la page d'erreur : l'exception, puis
+                // la page. Sans le second geste, on resterait devant l'échec en croyant
+                // que le réglage n'a rien fait.
+                if payload["action"] as? String == "allow" { blocker.toggleException(for: url) }
                 currentTab?.webView.load(URLRequest(url: url))
                 return
             }
