@@ -118,7 +118,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // Recharger seulement quand la nouvelle liste est réellement en place : la
         // compilation de cent quarante mille règles prend quelques secondes.
         blocker.onApplied = { [weak self] in
-            guard let self, self.reloadAfterBlocking else { return }
+            guard let self else { return }
+            // Une page chargée avant que l'index des règles avancées existe n'a reçu aucun
+            // scriptlet : on la recharge une fois, maintenant qu'il est là.
+            if self.loadedWithoutAdvancedRules, self.blocker.advanced.ruleCount > 0 {
+                self.loadedWithoutAdvancedRules = false
+                self.currentTab?.webView.reload()
+                return
+            }
+            guard self.reloadAfterBlocking else { return }
             self.reloadAfterBlocking = false
             self.currentTab?.webView.reload()
         }
@@ -542,6 +550,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         controller.addUserScript(PageContextMenu.script)
 
         guard settings.blockingEnabled, !blocker.isExcepted(url) else { return }
+
+        // La page part avant que l'index soit prêt — cas du tout premier lancement, ou
+        // d'un changement de règles. On le note pour recharger dès qu'il arrive : sans ça,
+        // une publicité survit jusqu'à ce que l'utilisateur rafraîchisse lui-même.
+        if blocker.advanced.ruleCount == 0 { loadedWithoutAdvancedRules = true }
+
         let payload = blocker.advanced.payload(for: url)
         guard !payload.isEmpty else { return }
 
@@ -700,6 +714,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     /// Une page à recharger dès que la liste compilée sera en place.
     private var reloadAfterBlocking = false
+    /// Une page partie avant que l'index des règles avancées soit disponible.
+    private var loadedWithoutAdvancedRules = false
 
     // MARK: - Favoris
 
