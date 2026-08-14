@@ -31,6 +31,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private lazy var configuration: WKWebViewConfiguration = {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
+
+        // **Se présenter comme Safari, mot pour mot.**
+        //
+        // Sans ça, `WKWebView` s'annonce sans jeton « Version/… Safari/… » : les sites qui
+        // reniflent l'agent n'y reconnaissent aucun navigateur connu et servent leur page
+        // de repli — Google renvoyait sa mise en page d'il y a quinze ans.
+        //
+        // Et c'est aussi le choix le plus discret : un agent « Wuji/0.4 » serait unique au
+        // monde et suffirait à nous suivre d'un site à l'autre. Le meilleur endroit où se
+        // cacher, c'est la foule des Safari.
+        config.applicationNameForUserAgent = "Version/26.6 Safari/605.1.15"
         // Le gestionnaire doit être posé avant la création de la moindre vue web : une
         // configuration déjà utilisée ne l'accepte plus.
         config.setURLSchemeHandler(InternalPageHandler(history: history, downloads: downloads,
