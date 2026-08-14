@@ -77,43 +77,10 @@ final class HistoryStore {
 
     // MARK: - Lecture
 
-    func search(_ query: String, limit: Int = 5) -> [HistoryEntry] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
-
-        // Le classement : la fréquence pèse, la récence départage. `visits` est passé au
-        // logarithme pour qu'un site vu mille fois ne noie pas tout le reste.
-        let sql = """
-            SELECT url, title, visits, last_visit FROM visits
-            WHERE url LIKE ? OR title LIKE ?
-            ORDER BY (LOG(visits + 1) * 86400 + last_visit) DESC
-            LIMIT ?;
-        """
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_finalize(statement) }
-
-        let pattern = "%\(trimmed)%"
-        bind(statement, 1, pattern)
-        bind(statement, 2, pattern)
-        sqlite3_bind_int(statement, 3, Int32(limit))
-
-        var results: [HistoryEntry] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            guard let raw = sqlite3_column_text(statement, 0),
-                  let url = URL(string: String(cString: raw)) else { continue }
-            let title = sqlite3_column_text(statement, 1).map { String(cString: $0) } ?? ""
-            results.append(HistoryEntry(url: url,
-                                        title: title.isEmpty ? (url.host() ?? url.absoluteString) : title,
-                                        visits: Int(sqlite3_column_int(statement, 2)),
-                                        lastVisit: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))))
-        }
-        return results
-    }
-
-    /// Les pages les plus récentes, pour la page d'historique. Bornée : au-delà de
-    /// quelques centaines de lignes, on ne parcourt plus, on cherche — et la recherche
-    /// est là pour ça.
+    /// Les pages les plus récentes, pour la page d'historique. C'est la seule lecture de
+    /// l'historique : la palette n'y touche pas, et la page filtre elle-même la liste
+    /// qu'elle a déjà. Bornée, parce qu'au-delà de quelques centaines de lignes on ne
+    /// parcourt plus, on cherche — et le champ de la page est là pour ça.
     func recent(limit: Int = 600) -> [HistoryEntry] {
         var statement: OpaquePointer?
         let sql = "SELECT url, title, visits, last_visit FROM visits ORDER BY last_visit DESC LIMIT ?;"

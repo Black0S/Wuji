@@ -2,19 +2,22 @@ import AppKit
 
 /// Ce que l'omnibox peut proposer. L'ordre du tableau est l'ordre affiché, et il compte :
 /// **les onglets ouverts passent avant tout le reste.**
+///
+/// **L'historique n'y figure pas.** La palette répond à « je sais où je vais » ; retrouver
+/// une page vue la semaine dernière est une autre question, et elle a sa page. Mélanger les
+/// deux transforme chaque frappe en liste de pages déjà visitées qu'il faut lire pour ne
+/// pas les choisir par erreur.
 enum OmniboxResult {
     /// L'onglet est désigné par son espace **et son identité** : la palette cherche dans
     /// tous les espaces, pas seulement celui qui est ouvert. Sans ça, retrouver un onglet
     /// demanderait de deviner d'abord dans quel espace on l'a laissé.
     case tab(space: Int, tab: UUID, title: String, subtitle: String, icon: NSImage?)
-    case history(url: URL, title: String, icon: NSImage?)
     case url(URL)
     case search(String)
 
     var title: String {
         switch self {
         case .tab(_, _, let title, _, _): return title
-        case .history(_, let title, _):   return title
         case .url(let url):               return url.absoluteString
         case .search(let query):          return query
         }
@@ -23,7 +26,6 @@ enum OmniboxResult {
     var subtitle: String {
         switch self {
         case .tab(_, _, _, let subtitle, _): return subtitle
-        case .history(let url, _, _):        return url.host() ?? url.absoluteString
         case .url:                           return "Ouvrir l'adresse"
         case .search:                        return "Rechercher"
         }
@@ -34,7 +36,6 @@ enum OmniboxResult {
     var icon: NSImage? {
         switch self {
         case .tab(_, _, _, _, let icon):  return icon
-        case .history(_, _, let icon):    return icon
         default:                          return nil
         }
     }
@@ -42,7 +43,6 @@ enum OmniboxResult {
     var fallbackGlyph: String {
         switch self {
         case .tab:     return "square.on.square"
-        case .history: return "clock"
         case .url:     return "arrow.up.right"
         case .search:  return "magnifyingglass"
         }
@@ -50,11 +50,6 @@ enum OmniboxResult {
 
     var isTab: Bool {
         if case .tab = self { return true }
-        return false
-    }
-
-    var isHistory: Bool {
-        if case .history = self { return true }
         return false
     }
 }
@@ -192,7 +187,19 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
 
         // La palette vit dans la zone de contenu : ses coordonnées commencent déjà après
         // la sidebar et sous la barre du haut. Elle ne peut donc jamais les recouvrir.
-        let cardTop = bounds.height - Tokens.Space.l
+        //
+        // **Le champ est centré, pas la carte.** Centrer la carte entière ferait remonter
+        // le champ à chaque frappe, pendant que la liste pousse en dessous : on écrirait
+        // dans une cible mobile. Le champ garde donc sa place et la liste descend.
+        //
+        // Le centre visé est légèrement au-dessus du centre géométrique — l'œil place le
+        // centre d'une fenêtre un peu plus haut qu'il n'est, et une carte exactement au
+        // milieu paraît basse.
+        let fieldCenter = bounds.height * 0.58
+        // Le bas de la carte reste dans la zone de contenu : sur une fenêtre courte, une
+        // liste pleine descendrait sous le bord et les derniers résultats seraient perdus.
+        let cardTop = min(bounds.height - Tokens.Space.l,
+                          max(fieldCenter + Self.fieldHeight / 2, cardHeight + Tokens.Space.l))
         card.frame = NSRect(x: (bounds.width - Self.cardWidth) / 2,
                             y: cardTop - cardHeight,
                             width: Self.cardWidth,
@@ -281,13 +288,11 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
         headers = []
         entries = []
 
-        // Trois natures, dans l'ordre où elles répondent à la question « où est-ce que je
-        // veux aller » : ce qui est déjà ouvert, ce qu'on a déjà visité, puis ce qu'il
-        // faudrait aller chercher.
+        // Deux natures, dans l'ordre où elles répondent à la question « où est-ce que je
+        // veux aller » : ce qui est déjà ouvert, puis ce qu'il faudrait aller chercher.
         let groups: [(String, [Int])] = [
             ("Onglets ouverts", results.indices.filter { results[$0].isTab }),
-            ("Déjà visité", results.indices.filter { results[$0].isHistory }),
-            ("Suggestions", results.indices.filter { !results[$0].isTab && !results[$0].isHistory })
+            ("Suggestions", results.indices.filter { !results[$0].isTab })
         ]
         let visible = groups.filter { !$0.1.isEmpty }
         for (title, indices) in visible {

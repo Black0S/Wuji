@@ -1077,14 +1077,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
         guard !trimmed.isEmpty else { return matchingTabs }
 
+        // Pas d'historique ici : la palette sert à aller quelque part qu'on a en tête, et
+        // une liste de pages déjà visitées la ferait relire à chaque frappe. Chercher dans
+        // ce qu'on a vu est un autre geste, et il a sa page — `wuji://history`.
         var results = matchingTabs
-        // L'historique après les onglets ouverts : un onglet déjà là se retrouve plus vite
-        // qu'une page à recharger, même si on l'a visitée cent fois.
-        let openURLs = Set(spaces.flatMap(\.allTabs).compactMap(\.url?.absoluteString))
-        for entry in history.search(trimmed) where !openURLs.contains(entry.url.absoluteString) {
-            results.append(.history(url: entry.url, title: entry.title,
-                                    icon: favicons.icon(for: entry.url)))
-        }
         if let url = Self.directURL(trimmed) { results.append(.url(url)) }
         results.append(.search(trimmed))
         return results
@@ -1096,8 +1092,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             currentSpaceIndex = spaceIndex
             if let tab = currentSpace.tab(with: tabID) { currentSpace.current = tab }
             activateCurrentTab()
-        case .history(let url, _, _):
-            go(to: url)
         case .url(let url):
             go(to: url)
         case .search(let query):
