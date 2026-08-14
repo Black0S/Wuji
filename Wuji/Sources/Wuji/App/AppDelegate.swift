@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private let userScripts = UserScriptStore()
     private let permissions = Permissions()
     private lazy var blocker = ContentBlocker(settings: settings, lists: filterLists)
+    private let blockLog = BlockingLog()
+    private lazy var blockLogWindow = BlockLogWindow(log: blockLog)
 
     /// Les onglets appartiennent à un espace, jamais à l'application. Tout ce qui suit
     /// passe donc par `currentSpace` — c'est ce qui évite d'avoir deux notions
@@ -81,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         config.userContentController.add(self, name: "wujiScripts")
         config.userContentController.add(self, name: "wujiSettings")
         config.userContentController.add(self, name: MediaWatcher.handler)
+        config.userContentController.add(self, name: BlockLogWatcher.handler)
         config.userContentController.add(self, name: "wujiError")
         config.userContentController.add(self, name: PageContextMenu.handler)
         config.userContentController.addUserScript(PageContextMenu.script)
@@ -440,6 +443,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
               !(error.domain == "WebKitErrorDomain" && error.code == 102) else { return }
 
         guard let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL ?? webView.url else { return }
+        // Le seul refus dont WebKit nous informe : une adresse principale qu'une règle a
+        // arrêtée. C'est peu, et c'est vrai.
+        if ErrorPage.isBlocked(error) {
+            blockLog.record(.blocked, host: url.host() ?? "", detail: url.absoluteString)
+        }
         webView.loadSimulatedRequest(URLRequest(url: url),
                                      responseHTML: ErrorPage.html(url: url, error: error))
     }
@@ -564,6 +572,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         controller.removeAllUserScripts()
         controller.addUserScript(PageContextMenu.script)
         controller.addUserScript(MediaWatcher.script)
+        // Le mouchard n'est posé que si quelqu'un regarde : une fenêtre fermée ne doit
+        // pas coûter un écouteur sur chaque cadre de chaque page.
+        if blockLogWindow.isOpen { controller.addUserScript(BlockLogWatcher.script) }
 
         // Les scripts de l'utilisateur passent avant le blocage : ils sont à lui, et ils
         // s'appliquent même sur un site où la protection est levée.
@@ -587,6 +598,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // Les scriptlets d'abord, au tout début du document : leur travail est de
         // remplacer des fonctions du navigateur avant que la page ne s'en serve.
         if !payload.scriptlets.isEmpty {
+            if blockLogWindow.isOpen {
+                blockLog.record(.scriptlet, host: url?.host() ?? "",
+                                detail: "\(payload.scriptlets.count) scriptlet"
+                                    + (payload.scriptlets.count > 1 ? "s posés" : " posé"))
+            }
             let source = payload.scriptlets.map { "try{" + $0 + "}catch(e){}" }
                 .joined(separator: "\n")
             controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart,
@@ -607,6 +623,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
               engine.apply();
             }catch(e){}})();
             """.replacingOccurrences(of: "RULES", with: rules)
+            + (blockLogWindow.isOpen ? BlockLogWatcher.report(selectors: payload.extendedSelectors) : "")
             controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd,
                                                   forMainFrameOnly: false))
         }
@@ -676,6 +693,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     @objc func showScripts(_ sender: Any?) {
         openInternal(Self.scriptsPage)
+    }
+
+    /// Ouvre le journal, et **relance les pages ouvertes** : les mesures ne sont posées
+    /// qu'à la navigation, donc sans ce rechargement la fenêtre resterait vide devant une
+    /// page pleine de publicités arrêtées.
+    @objc func showBlockLog(_ sender: Any?) {
+        let wasOpen = blockLogWindow.isOpen
+        blockLogWindow.show()
+        guard !wasOpen else { return }
+        spaces.flatMap(\.allTabs).filter { !$0.isSleeping }.forEach { $0.webView.reload() }
     }
 
     private func refreshScriptsPages() {
@@ -812,6 +839,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                                 action: { [weak self] in self?.showAdBlock(nil) }))
         items.append(ActionItem(title: "Scripts…", symbol: "curlybraces",
                                 action: { [weak self] in self?.showScripts(nil) }))
+        items.append(ActionItem(title: "Journal de blocage…", symbol: "text.line.first.and.arrowtriangle.forward",
+                                action: { [weak self] in self?.showBlockLog(nil) }))
         return items
     }
 
@@ -1598,6 +1627,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                    tab.isPlayingMedia != playing {
                     tab.isPlayingMedia = playing
                     syncSidebar()
+                }
+                return
+            }
+            if message.name == BlockLogWatcher.handler {
+                let host = message.frameInfo.request.url?.host() ?? ""
+                for raw in payload["refused"] as? [String] ?? [] {
+                    guard let url = URL(string: raw) else { continue }
+                    blockLog.record(.refused, host: host,
+                                    detail: (url.host() ?? "") + url.path)
+                }
+                for hit in payload["hidden"] as? [[String: Any]] ?? [] {
+                    let count = hit["count"] as? Int ?? 0
+                    blockLog.record(.hidden, host: host,
+                                    detail: "\(count)× " + (hit["selector"] as? String ?? ""))
                 }
                 return
             }
