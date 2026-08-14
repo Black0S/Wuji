@@ -34,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // Le gestionnaire doit être posé avant la création de la moindre vue web : une
         // configuration déjà utilisée ne l'accepte plus.
         config.setURLSchemeHandler(InternalPageHandler(history: history, downloads: downloads,
-                                                      favorites: favorites),
+                                                      favorites: favorites, icons: favicons),
                                    forURLScheme: InternalPageHandler.scheme)
         config.userContentController.add(self, name: "wujiHistory")
         config.userContentController.add(self, name: "wujiDownloads")

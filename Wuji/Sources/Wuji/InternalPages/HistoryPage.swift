@@ -12,10 +12,10 @@ import AppKit
 @MainActor
 enum HistoryPage {
 
-    static func html(entries: [HistoryEntry]) -> String {
+    static func html(entries: [HistoryEntry], icons: FaviconStore) -> String {
         let groups = group(entries)
         let rows = groups.map { group in
-            let items = group.entries.map(row).joined()
+            let items = group.entries.map { row($0, icons) }.joined()
             return """
             <section>
               <h2>\(escape(group.title))</h2>
@@ -86,16 +86,14 @@ enum HistoryPage {
         }
     }
 
-    private static func row(_ entry: HistoryEntry) -> String {
+    private static func row(_ entry: HistoryEntry, _ icons: FaviconStore) -> String {
         let time = DateFormatter()
         time.locale = Locale(identifier: "fr_FR")
         time.dateFormat = "HH:mm"
         let host = entry.url.host() ?? ""
-        // La favicon vient du site lui-même, jamais d'un service tiers de résolution :
-        // celui-ci apprendrait chaque domaine de l'historique d'un coup.
         return """
         <li data-url="\(escape(entry.url.absoluteString))" data-search="\(escape((entry.title + " " + host).lowercased()))">
-          <img src="https://\(escape(host))/favicon.ico" onerror="this.classList.add('fallback')" alt="">
+          \(InternalStyle.favicon(for: entry.url, icons))
           <a href="\(escape(entry.url.absoluteString))">\(escape(entry.title))</a>
           <span class="host">\(escape(host))</span>
           <span class="time">\(time.string(from: entry.lastVisit))</span>
@@ -120,9 +118,6 @@ enum HistoryPage {
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     li:hover a { text-decoration: underline; }
-    img { width: 16px; height: 16px; border-radius: 3px; flex: none; }
-    /* Le site n'a pas servi d'icône : un carré neutre plutôt qu'une image cassée. */
-    img.fallback { visibility: hidden; }
     .host { color: var(--muted); font-size: 12px; max-width: 200px;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }

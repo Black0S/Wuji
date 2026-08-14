@@ -13,8 +13,8 @@ import Foundation
 @MainActor
 enum FavoritesPage {
 
-    static func html(items: [Favorite]) -> String {
-        let rows = items.map(row).joined()
+    static func html(items: [Favorite], icons: FaviconStore) -> String {
+        let rows = items.map { row($0, icons) }.joined()
         let empty = items.isEmpty ? """
             <p class="empty">Aucun favori.<br>
             <kbd>⌘D</kbd> met de côté la page ouverte, et la liste reste sur cette machine.</p>
@@ -46,14 +46,12 @@ enum FavoritesPage {
         """
     }
 
-    private static func row(_ item: Favorite) -> String {
+    private static func row(_ item: Favorite, _ icons: FaviconStore) -> String {
         let host = item.url.host() ?? ""
-        // La favicon vient du site lui-même, jamais d'un service tiers de résolution :
-        // celui-ci apprendrait d'un coup tout ce qu'on a mis de côté.
         return """
         <li data-id="\(item.id.uuidString)"
             data-search="\(escape((item.title + " " + host).lowercased()))">
-          <img src="https://\(escape(host))/favicon.ico" onerror="this.classList.add('fallback')" alt="">
+          \(InternalStyle.favicon(for: item.url, icons))
           <a href="\(escape(item.url.absoluteString))">\(escape(item.title))</a>
           <span class="host">\(escape(host))</span>
           <button data-action="rename" title="Renommer" aria-label="Renommer">\(pencil)</button>
@@ -89,8 +87,6 @@ enum FavoritesPage {
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     li:hover a { text-decoration: underline; }
-    img { width: 16px; height: 16px; border-radius: 3px; flex: none; }
-    img.fallback { visibility: hidden; }
     .host { color: var(--muted); font-size: 12px; max-width: 220px;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     li > button {

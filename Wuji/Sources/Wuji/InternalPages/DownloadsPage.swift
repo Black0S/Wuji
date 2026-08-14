@@ -72,7 +72,7 @@ enum DownloadsPage {
             let onDisk = item.destination.flatMap {
                 try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? Int64
             } ?? item.received
-            detail = "\(size(onDisk ?? item.received)) · terminé"
+            detail = "\(size(onDisk)) · terminé"
             action = button("reveal", "Afficher dans le Finder")
         case .failed(let reason):
             detail = "Échec · \(escape(reason))"
@@ -180,6 +180,26 @@ enum InternalStyle {
     /// les contrôles natifs sur cette base, même quand le reste est sombre.
     static let meta = #"<meta name="color-scheme" content="light dark">"#
 
+    /// L'icône d'une ligne : celle du site si l'application la connaît déjà, un globe
+    /// sinon.
+    ///
+    /// **Elle est intégrée à la page, jamais demandée par elle.** Une page interne qui
+    /// pointe cent icônes vers cent domaines tire cent requêtes d'un coup, sans que
+    /// personne les ait demandées — et il suffit que l'une ne réponde jamais pour que la
+    /// page reste en chargement, barre en travers de l'écran comprise.
+    static func favicon(for url: URL, _ icons: FaviconStore) -> String {
+        if let uri = icons.dataURI(for: url) {
+            return #"<img class="ico" src="\#(uri)" alt="">"#
+        }
+        // Le repli est dessiné et non masqué : une case vide décale l'œil d'une ligne à
+        // l'autre, alors qu'un globe gris tient la colonne.
+        return """
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.1">\
+        <circle cx="8" cy="8" r="5.6"/><path d="M2.4 8h11.2M8 2.4c2.6 3 2.6 8.2 0 11.2\
+        M8 2.4C5.4 5.4 5.4 10.6 8 13.6"/></svg>
+        """
+    }
+
     static let shared = """
     :root {
       --bg: #F5F5F7; --raised: #FFFFFF; --text: #1D1D1F; --muted: #6E6E73;
@@ -222,6 +242,10 @@ enum InternalStyle {
     }
     ul { list-style: none; margin: 0; padding: 0; }
     li { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; }
+    /* Même gabarit pour l'icône d'un site et pour son repli : sans ça, les titres ne
+       s'alignent plus d'une ligne à l'autre. */
+    .ico { width: 16px; height: 16px; flex: none; border-radius: 3px; }
+    svg.ico { color: var(--muted); }
     li:hover { background: var(--hover); }
     .empty { color: var(--muted); text-align: center; padding: 64px 0; line-height: 1.6; }
     """

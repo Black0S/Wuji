@@ -19,11 +19,14 @@ final class InternalPageHandler: NSObject, WKURLSchemeHandler {
     private unowned let history: HistoryStore
     private unowned let downloads: DownloadStore
     private unowned let favorites: FavoritesStore
+    private unowned let icons: FaviconStore
 
-    init(history: HistoryStore, downloads: DownloadStore, favorites: FavoritesStore) {
+    init(history: HistoryStore, downloads: DownloadStore, favorites: FavoritesStore,
+         icons: FaviconStore) {
         self.history = history
         self.downloads = downloads
         self.favorites = favorites
+        self.icons = icons
     }
 
     nonisolated func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
@@ -47,9 +50,9 @@ final class InternalPageHandler: NSObject, WKURLSchemeHandler {
 
     private func html(for url: URL) -> String {
         switch url.host() ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) {
-        case "history":   return HistoryPage.html(entries: history.recent())
+        case "history":   return HistoryPage.html(entries: history.recent(), icons: icons)
         case "downloads": return DownloadsPage.html(items: downloads.items)
-        case "favorites": return FavoritesPage.html(items: favorites.items)
+        case "favorites": return FavoritesPage.html(items: favorites.items, icons: icons)
         default:          return NewTabPage.html
         }
     }
