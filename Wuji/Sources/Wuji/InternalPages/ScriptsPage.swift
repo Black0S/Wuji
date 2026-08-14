@@ -90,13 +90,13 @@ enum ScriptsPage {
     }
     li:hover > button { opacity: 1; }
     li > button:hover { background: var(--danger); color: #fff; }
-    form { display: flex; gap: 8px; margin: 12px 12px 0; }
+    form { display: flex; gap: 8px; margin-top: 12px; }
     form input {
       flex: 1; height: 32px; padding: 0 12px; background: transparent; color: var(--text);
       border: 1px solid var(--hairline); border-radius: 8px; font: inherit; outline: none;
     }
     form input:focus { border-color: var(--muted); }
-    .note { margin: 16px 12px 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+    .note { margin-top: 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
     .note code { font-size: 11px; background: var(--hover); padding: 1px 5px; border-radius: 4px; }
     .empty code { font-size: 12px; background: var(--hover); padding: 1px 5px; border-radius: 4px; }
     """

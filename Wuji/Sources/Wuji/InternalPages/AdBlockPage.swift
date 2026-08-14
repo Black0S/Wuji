@@ -69,6 +69,7 @@ enum AdBlockPage {
           </div>
           <button id="update" class="ghost"\(isBusy ? " disabled" : "")>\(isBusy ? "En cours…" : "Mettre à jour")</button>
         </header>
+        <main>
         \(groups(lists))
         <form id="add">
           <input id="url" type="url" placeholder="https://…/liste.txt" spellcheck="false">
@@ -80,6 +81,7 @@ enum AdBlockPage {
           suivant et donnerait une fausse impression de protection. Elles ne sont
           téléchargées que depuis cette page, jamais en arrière-plan.
         </p>
+        </main>
         """
     }
 
@@ -127,6 +129,7 @@ enum AdBlockPage {
             <p>\(hosts.count) site\(hosts.count > 1 ? "s" : "")</p>
           </div>
         </header>
+        <main>
         \(hosts.isEmpty
           ? #"<p class="empty">Aucun site exclu.<br>Le bouclier de la barre éteint la protection sur la page ouverte.</p>"#
           : "<ul>\(hosts.map(exception).joined())</ul>")
@@ -135,6 +138,7 @@ enum AdBlockPage {
           vôtres. C'est fait pour les pages qu'un filtre casse : un lecteur vidéo, une
           banque, un mur de paiement.
         </p>
+        </main>
         """
     }
 
@@ -146,6 +150,7 @@ enum AdBlockPage {
             <p>\(rules.count) règle\(rules.count > 1 ? "s" : "")</p>
           </div>
         </header>
+        <main>
         \(rules.isEmpty
           ? #"<p class="empty">Aucune règle.<br>« Bloquer un élément » dans le menu du bouclier en écrit une.</p>"#
           : "<ul>\(rules.map(userRule).joined())</ul>")
@@ -159,6 +164,7 @@ enum AdBlockPage {
           partout. Format Adblock&nbsp;: <code>site.com##.selecteur</code> pour masquer,
           <code>@@||site.com^</code> pour laisser passer.
         </p>
+        </main>
         """
     }
 
