@@ -1,3 +1,4 @@
+import ContentBlockerConverter
 import CryptoKit
 import WebKit
 
@@ -32,8 +33,8 @@ final class ContentBlocker {
             case .compiling: return "Compilation…"
             case .active(let rules, let skipped, let dropped):
                 var text = "\(format(rules)) règles actives"
-                if skipped > 0 { text += " · \(format(skipped)) sans équivalent" }
-                if dropped > 0 { text += " · \(format(dropped)) refusées par le moteur" }
+                if skipped > 0 { text += " · \(format(skipped)) hors syntaxe Safari" }
+                if dropped > 0 { text += " · \(dropped) liste\(dropped > 1 ? "s" : "") refusée\(dropped > 1 ? "s" : "")" }
                 return text
             case .failed(let reason): return "Échec · \(reason)"
             }
@@ -129,77 +130,94 @@ final class ContentBlocker {
         state = .compiling
         onChange?()
 
-        // La conversion coûte plusieurs secondes sur trois cent mille lignes : hors du fil
-        // principal, sinon l'interface se fige au démarrage. Et **une liste par tâche** :
-        // elles ne se regardent pas, donc autant les traduire toutes en même temps.
-        let userRules = lists.userRules.joined(separator: "\n")
+        // La conversion tourne hors du fil principal, une liste par tâche : elles ne se
+        // regardent pas. **Une liste convertie donne une tranche compilée** — le
+        // convertisseur d'AdGuard s'arrête de lui-même au plafond de Safari, donc le
+        // découper par liste est aussi ce qui évite qu'il écarte le surplus.
+        let userRules = lists.userRules
         let hosts = settings.blockingExceptions
         Task.detached(priority: .userInitiated) {
-            var mine = FilterConverter.rules(from: userRules)
-            for host in hosts {
-                mine.exceptions.append([
-                    "trigger": ["url-filter": ".*", "if-domain": ["*\(host)"]],
-                    "action": ["type": "ignore-previous-rules"]
-                ])
-            }
-            // Ce que l'utilisateur a écrit doit valoir partout, donc être répété partout.
-            let universal = mine.exceptions
+            // Les règles de l'utilisateur valent partout, donc sont recopiées dans chaque
+            // tranche : `ignore-previous-rules` n'annule que ce qui le précède dans la
+            // même liste compilée.
+            let universal = (hosts.map { "@@||\($0)^$document" } + userRules)
+            let mine = ContentBlockerConverter().convertArray(
+                rules: universal, safariVersion: SafariVersion.autodetect(),
+                advancedBlocking: true, maxJsonSizeBytes: nil, progress: nil)
 
-            let converted = await withTaskGroup(of: (Int, Batch).self) { group in
+            let converted = await withTaskGroup(of: (Int, Converted).self) { group in
                 for (position, source) in sources.enumerated() {
                     group.addTask {
-                        let output = FilterConverter.rules(from: source.1)
-                        return (position, Batch(output: output))
+                        let result = ContentBlockerConverter().convertArray(
+                            rules: source.1.components(separatedBy: "\n"),
+                            safariVersion: SafariVersion.autodetect(),
+                            advancedBlocking: true, maxJsonSizeBytes: nil, progress: nil)
+                        return (position, Converted(result: result))
                     }
                 }
-                // L'ordre du catalogue est rétabli à l'arrivée : les tâches finissent dans
-                // le désordre, et l'ordre des règles change ce qu'elles font.
-                var result = [Batch?](repeating: nil, count: sources.count)
-                for await (position, batch) in group { result[position] = batch }
+                var result = [Converted?](repeating: nil, count: sources.count)
+                for await (position, item) in group { result[position] = item }
                 return result.compactMap { $0 }
             }
 
-            var chunks: [[[String: Any]]] = []
-            var accepted = universal.count
-            var rejected = 0
+            var chunks: [String] = []
+            var advanced: [String] = []
+            var accepted = 0, rejected = 0
             var perList: [(UUID, Int, Int)] = []
 
-            for (source, batch) in zip(sources, converted) {
-                let output = batch.output
-                perList.append((source.0.id, output.accepted + output.rejected, output.accepted))
-                rejected += output.rejected
-                accepted += output.accepted
-
-                // Le masquage après le blocage, les exceptions en dernier : c'est l'ordre
-                // qu'exige `ignore-previous-rules`.
-                let body = output.blocking + output.cosmetic
-                let tail = output.exceptions + universal
-                let room = max(1, Self.chunkSize - tail.count)
-                for start in stride(from: 0, to: max(body.count, 1), by: room) {
-                    let slice = Array(body[start..<min(start + room, body.count)])
-                    guard !slice.isEmpty || !tail.isEmpty else { continue }
-                    chunks.append(slice + tail)
+            for (source, item) in zip(sources, converted) {
+                let result = item.result
+                perList.append((source.0.id, result.sourceRulesCount, result.safariRulesCount))
+                accepted += result.safariRulesCount
+                rejected += result.sourceRulesCount - result.sourceSafariCompatibleRulesCount
+                if let json = Self.splice(result.safariRulesJSON, adding: mine.safariRulesJSON) {
+                    chunks.append(json)
                 }
+                if let text = result.advancedRulesText { advanced.append(text) }
             }
-            let mineRules = mine.blocking + mine.cosmetic + universal
-            if !mineRules.isEmpty { chunks.append(mineRules) }
+            if let text = mine.advancedRulesText { advanced.append(text) }
 
-            let counts = (accepted: accepted, rejected: rejected, chunks: chunks.count)
-            let sealed = chunks
+            let counts = (accepted: accepted + mine.safariRulesCount * chunks.count,
+                          rejected: rejected,
+                          advanced: advanced.reduce(0) { $0 + $1.split(separator: "\n").count })
+            let sealedChunks = chunks
+            let sealedAdvanced = advanced.joined(separator: "\n")
             await MainActor.run { [weak self] in
                 perList.forEach { self?.lists.record(lines: $0.1, rules: $0.2, for: $0.0) }
-                self?.install(chunks: sealed, counts: counts)
+                self?.advancedRules = sealedAdvanced
+                self?.install(chunks: sealedChunks, counts: counts)
             }
         }
     }
 
+    /// Les règles que WebKit ne sait pas exécuter — scriptlets, sélecteurs étendus.
+    ///
+    /// Gardées telles quelles, au format Adblock : c'est ce que la couche JavaScript
+    /// consommera. Aujourd'hui elles ne servent à rien d'autre qu'à être comptées, et
+    /// c'est déjà mieux que de les jeter comme avant.
+    private(set) var advancedRules = ""
+
+    /// Recolle deux tableaux JSON sans les relire.
+    ///
+    /// Le convertisseur rend une chaîne, et ces chaînes pèsent des mégaoctets : les
+    /// désérialiser pour ajouter trois exceptions coûterait plus cher que toute la
+    /// conversion. On coupe le crochet fermant et on aboute.
+    nonisolated private static func splice(_ json: String, adding extra: String) -> String? {
+        guard json.hasPrefix("["), json.hasSuffix("]") else { return nil }
+        let body = extra.dropFirst().dropLast()   // le contenu du second tableau
+        guard !body.isEmpty else { return json }
+        guard json.count > 2 else { return "[" + body + "]" }
+        return String(json.dropLast()) + "," + body + "]"
+    }
+
+    /// Le résultat d'une conversion, transporté d'une tâche à l'autre.
     /// Le résultat d'une conversion, transporté d'une tâche à l'autre.
     ///
-    /// `[String: Any]` n'est pas `Sendable` et ne le sera jamais : c'est un dictionnaire
-    /// hétérogène. Ici il est construit par une tâche, remis à une autre, et plus personne
-    /// n'y touche — un transfert sûr que le compilateur ne peut pas prouver seul.
-    private struct Batch: @unchecked Sendable {
-        let output: FilterConverter.Output
+    /// `ConversionResult` n'est pas déclaré `Sendable` par la bibliothèque. Il est
+    /// construit par une tâche, remis à une autre, et plus personne n'y touche — un
+    /// transfert sûr que le compilateur ne peut pas prouver seul.
+    private struct Converted: @unchecked Sendable {
+        let result: ConversionResult
     }
 
     /// Télécharge puis recompile.
@@ -222,21 +240,12 @@ final class ContentBlocker {
 
     // MARK: - Installation
 
-    private func install(chunks: [[[String: Any]]], counts: (accepted: Int, rejected: Int, chunks: Int)) {
+    private func install(chunks: [String], counts: (accepted: Int, rejected: Int, advanced: Int)) {
         guard !chunks.isEmpty else { return apply([], state: .empty) }
 
         var hasher = SHA256()
-        for chunk in chunks {
-            hasher.update(data: Data("\(chunk.count)".utf8))
-            if let first = chunk.first, let data = try? JSONSerialization.data(withJSONObject: first) {
-                hasher.update(data: data)
-            }
-            if let last = chunk.last, let data = try? JSONSerialization.data(withJSONObject: last) {
-                hasher.update(data: data)
-            }
-        }
+        chunks.forEach { hasher.update(data: Data($0.utf8)) }
         let signature = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        let store = WKContentRuleListStore.default()
 
         let done: ([WKContentRuleList]) -> Void = { [weak self] lists in
             UserDefaults.standard.set(signature, forKey: Self.signatureKey)
@@ -253,8 +262,8 @@ final class ContentBlocker {
             Task {
                 var found: [WKContentRuleList] = []
                 for index in chunks.indices {
-                    guard let list = try? await store?.contentRuleList(forIdentifier: Self.identifier(index))
-                    else { break }
+                    guard let list = try? await WKContentRuleListStore.default()?
+                        .contentRuleList(forIdentifier: Self.identifier(index)) else { break }
                     found.append(list)
                 }
                 if found.count == chunks.count { done(found) } else { build(chunks, signature, counts) }
@@ -264,16 +273,23 @@ final class ContentBlocker {
         build(chunks, signature, counts)
     }
 
-    private func build(_ chunks: [[[String: Any]]], _ signature: String,
-                       _ counts: (accepted: Int, rejected: Int, chunks: Int)) {
+    private func build(_ chunks: [String], _ signature: String,
+                       _ counts: (accepted: Int, rejected: Int, advanced: Int)) {
         Task {
             var built: [WKContentRuleList] = []
             var lost = 0
-            var index = 0
-            for chunk in chunks {
-                let (lists, dropped) = await compile(chunk, index: &index)
-                built += lists
-                lost += dropped
+            for (index, json) in chunks.enumerated() {
+                do {
+                    if let list = try await WKContentRuleListStore.default()?
+                        .compileContentRuleList(forIdentifier: Self.identifier(index),
+                                                encodedContentRuleList: json) {
+                        built.append(list)
+                    }
+                } catch {
+                    // Une liste refusée ne coûte plus que la sienne : les autres restent en
+                    // place. Un bloqueur amputé vaut mieux qu'un bloqueur éteint.
+                    lost += 1
+                }
             }
             guard !built.isEmpty else {
                 UserDefaults.standard.removeObject(forKey: Self.signatureKey)
@@ -281,44 +297,10 @@ final class ContentBlocker {
                 return
             }
             UserDefaults.standard.set(signature, forKey: Self.signatureKey)
-            UserDefaults.standard.set(built.count, forKey: Self.chunkKey)
-            apply(built, state: .active(rules: counts.accepted - lost,
-                                        skipped: counts.rejected, dropped: lost))
+            UserDefaults.standard.set(chunks.count, forKey: Self.chunkKey)
+            apply(built, state: .active(rules: counts.accepted, skipped: counts.rejected,
+                                        dropped: lost))
         }
-    }
-
-    /// Compile une tranche, et **la coupe en deux si elle est refusée**.
-    ///
-    /// Les listes viennent de projets tiers qui les changent chaque semaine. Il suffit
-    /// d'une règle qu'on a mal traduite, ou d'une syntaxe que WebKit n'accepte pas encore,
-    /// pour qu'une compilation entière échoue — et « échoue » veut dire zéro protection.
-    /// En coupant, on isole la zone fautive : on perd quelques centaines de règles au lieu
-    /// de cent mille, et le navigateur reste protégé.
-    ///
-    /// La dichotomie sépare aussi les exceptions de la tranche des règles qu'elles
-    /// annulaient. C'est un vrai coût, assumé : il ne se paie que dans le cas d'échec.
-    private func compile(_ rules: [[String: Any]],
-                         index: inout Int) async -> ([WKContentRuleList], Int) {
-        guard !rules.isEmpty else { return ([], 0) }
-
-        if let json = (try? JSONSerialization.data(withJSONObject: rules))
-            .flatMap({ String(data: $0, encoding: .utf8) }),
-           let list = try? await WKContentRuleListStore.default()?
-            .compileContentRuleList(forIdentifier: Self.identifier(index),
-                                    encodedContentRuleList: json) {
-            index += 1
-            return ([list], 0)
-        }
-
-        // Trop petite pour être coupée encore : on abandonne ces règles-là, pas les autres.
-        guard rules.count > 500 else { return ([], rules.count) }
-
-        let middle = rules.count / 2
-        var (lists, lost) = await compile(Array(rules[..<middle]), index: &index)
-        let (more, alsoLost) = await compile(Array(rules[middle...]), index: &index)
-        lists += more
-        lost += alsoLost
-        return (lists, lost)
     }
 
     private func apply(_ lists: [WKContentRuleList], state: State) {

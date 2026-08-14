@@ -75,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     // MARK: - Cycle de vie
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installTerminationHandler()
         buildMenu()
 
         window = BrowserWindow()
@@ -131,6 +132,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // La sauvegarde différée peut être en attente au moment où l'on quitte.
         session.save(snapshot())
     }
+
+    /// La session est aussi écrite quand on passe à une autre application.
+    ///
+    /// `applicationWillTerminate` ne suffit pas : il ne s'exécute pas si le processus est
+    /// tué — par un `kill`, par le forceur de quitter, par un plantage. L'écriture était
+    /// différée de huit dixièmes de seconde, et cette fenêtre a réellement coûté une
+    /// vingtaine d'onglets pendant les essais. Changer d'application est le moment le plus
+    /// fréquent où l'on peut écrire sans que personne attende.
+    func applicationDidResignActive(_ notification: Notification) {
+        guard !spaces.isEmpty else { return }
+        session.save(snapshot())
+    }
+
+    /// Le signal d'arrêt, qui n'est pas une notification AppKit.
+    ///
+    /// `SIGTERM` termine le processus sans passer par `applicationWillTerminate`. On
+    /// l'intercepte pour écrire la session avant de partir — c'est la différence entre
+    /// « fermé proprement » et « vingt onglets perdus ».
+    private func installTerminationHandler() {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                if let self, !self.spaces.isEmpty { self.session.save(self.snapshot()) }
+                exit(0)
+            }
+        }
+        source.resume()
+        terminationSource = source
+    }
+
+    private var terminationSource: DispatchSourceSignal?
 
     // MARK: - Session
 

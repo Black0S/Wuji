@@ -10,7 +10,22 @@ import PackageDescription
 let package = Package(
     name: "Wuji",
     platforms: [.macOS(.v26)],
+    dependencies: [
+        // Le convertisseur de règles d'AdGuard, celui qu'utilisent leurs produits Safari
+        // et wBlock. Il traduit vers WebKit **et** met de côté ce que WebKit ne sait pas
+        // faire — scriptlets, sélecteurs étendus — au lieu de le perdre.
+        //
+        // GPL-3.0 : Wuji devient GPL le jour où il est distribué. C'est le prix de ne pas
+        // réécrire dix ans de cas particuliers, et il est assumé.
+        .package(url: "https://github.com/AdguardTeam/SafariConverterLib", from: "4.3.0")
+    ],
     targets: [
-        .executableTarget(name: "Wuji", path: "Sources/Wuji")
+        .executableTarget(
+            name: "Wuji",
+            dependencies: [
+                .product(name: "ContentBlockerConverter", package: "SafariConverterLib")
+            ],
+            path: "Sources/Wuji"
+        )
     ]
 )
