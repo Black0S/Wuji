@@ -112,7 +112,7 @@ enum FavoritesPage {
     });
 
     const recount = () => {
-      const total = document.querySelectorAll('li').length;
+      const total = document.querySelectorAll('main li').length;
       document.getElementById('count').textContent =
         `${total} page${total > 1 ? 's' : ''} · conservées sur cette machine`;
     };
@@ -123,7 +123,7 @@ enum FavoritesPage {
     field.addEventListener('input', () => {
       const needle = field.value.trim().toLowerCase();
       let shown = 0;
-      document.querySelectorAll('li').forEach((row) => {
+      document.querySelectorAll('main li').forEach((row) => {
         const match = !needle || row.dataset.search.includes(needle);
         row.hidden = !match;
         if (match) shown++;

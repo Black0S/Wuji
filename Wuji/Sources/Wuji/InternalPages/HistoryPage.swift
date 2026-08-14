@@ -137,7 +137,7 @@ enum HistoryPage {
       row.remove();
       // Le compte suit la ligne retirée : sans ça l'en-tête annonce une page de plus
       // qu'il n'en reste, jusqu'au prochain rechargement.
-      const total = document.querySelectorAll('li').length;
+      const total = document.querySelectorAll('main li').length;
       document.getElementById('count').textContent =
         `${total} page${total > 1 ? 's' : ''} · conservées sur cette machine`;
     });
@@ -148,12 +148,12 @@ enum HistoryPage {
     field.addEventListener('input', () => {
       const needle = field.value.trim().toLowerCase();
       let shown = 0;
-      document.querySelectorAll('li').forEach((row) => {
+      document.querySelectorAll('main li').forEach((row) => {
         const match = !needle || row.dataset.search.includes(needle);
         row.hidden = !match;
         if (match) shown++;
       });
-      document.querySelectorAll('section').forEach((section) => {
+      document.querySelectorAll('main section').forEach((section) => {
         section.hidden = !section.querySelector('li:not([hidden])');
       });
       document.getElementById('none').hidden = shown > 0 || !needle;

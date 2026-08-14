@@ -53,7 +53,10 @@ enum InternalShell {
                 <a class="entry\(isCurrent ? " current" : "")" href="\(item.address)">\(escape(item.title))</a>
                 """
             }.joined()
-            return "<section><h4>\(escape(group))</h4>\(rows)</section>"
+            // Un `div` et non un `section` : les pages masquent leurs sections vides
+            // quand on filtre, et le sommaire disparaissait avec elles. La coquille ne
+            // doit rien porter qu'une page puisse viser sans le vouloir.
+            return "<div class=\"group\"><h4>\(escape(group))</h4>\(rows)</div>"
         }.joined()
 
         return """
@@ -91,7 +94,7 @@ enum InternalShell {
     nav {
       width: 202px; flex: none; padding: 44px 12px 12px; overflow-y: auto;
     }
-    nav section { margin: 0 0 18px; }
+    nav .group { margin: 0 0 18px; }
     nav h4 {
       margin: 0 0 4px; padding: 0 12px; font-size: 10px; font-weight: 600;
       letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted);
