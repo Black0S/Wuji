@@ -198,7 +198,10 @@ final class ActionSheet: ThemedView {
     ///
     /// L'action destructrice est **en premier et nommée par son verbe** — « Supprimer »,
     /// pas « OK ». On lit ce qu'on est en train de faire, pas un acquiescement.
+    /// `isDestructive` distingue « effacer » d'« autoriser ». La corbeille rouge sous une
+    /// demande de position disait le contraire de ce que le bouton faisait.
     func presentConfirmation(title: String, message: String, confirm: String,
+                             isDestructive: Bool = true,
                              onCancel: (@MainActor () -> Void)? = nil,
                              onConfirm: @escaping @MainActor () -> Void) {
         titleLabel.stringValue = title
@@ -210,7 +213,8 @@ final class ActionSheet: ThemedView {
         // une demande d'autorisation qui reste en suspens bloque la page qui l'a faite.
         cancelAction = onCancel
         stack = [[
-            ActionItem(title: confirm, symbol: "trash", isDestructive: true,
+            ActionItem(title: confirm, symbol: isDestructive ? "trash" : "checkmark",
+                       isDestructive: isDestructive,
                        action: { [weak self] in self?.cancelAction = nil; onConfirm() }),
             ActionItem(title: "Annuler", symbol: "xmark")
         ]]

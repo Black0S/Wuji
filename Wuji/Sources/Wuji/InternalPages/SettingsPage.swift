@@ -167,6 +167,7 @@ enum SettingsPage {
         switch kind {
         case "camera":     return "caméra"
         case "microphone": return "micro"
+        case "location":   return "position"
         default:           return "caméra et micro"
         }
     }

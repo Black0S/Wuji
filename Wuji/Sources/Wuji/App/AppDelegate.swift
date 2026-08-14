@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private let filterLists = FilterListStore()
     private let userScripts = UserScriptStore()
     private let permissions = Permissions()
+    private let location = LocationAccess()
     private lazy var blocker = ContentBlocker(settings: settings, lists: filterLists)
     private let blockLog = BlockingLog()
     private lazy var blockLogWindow = BlockLogWindow(log: blockLog)
@@ -1065,6 +1066,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                     continuation.resume(returning: .grant)
                 })
         }
+    }
+
+    /// La position, demandée par `navigator.geolocation`.
+    ///
+    /// **WebKit ne l'expose pas dans `WKUIDelegate` public**, et sans réponse il refuse en
+    /// silence : une page qui demande la position échouait sans que rien ne le dise. Le
+    /// sélecteur ci-dessous est celui que WebKit appelle réellement ; ne pas y répondre
+    /// n'est pas un choix de discrétion, c'est une fonction absente.
+    ///
+    /// La décision suit exactement la même règle que la caméra : demandée une fois,
+    /// retenue par site, révocable dans les réglages, et refusée par défaut.
+    @objc(_webView:requestGeolocationPermissionForOrigin:initiatedByFrame:decisionHandler:)
+    func webView(_ webView: WKWebView, requestGeolocationPermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        askLocation(host: origin.host) { decisionHandler($0 ? .grant : .deny) }
+    }
+
+    /// L'ancienne forme du même appel, gardée parce qu'on ne sait pas laquelle de ses deux
+    /// portes WebKit empruntera : elles ont cohabité longtemps.
+    @objc(_webView:requestGeolocationPermissionForFrame:decisionHandler:)
+    func webView(_ webView: WKWebView, requestGeolocationPermissionFor frame: WKFrameInfo,
+                 decisionHandler: @escaping (Bool) -> Void) {
+        askLocation(host: frame.request.url?.host() ?? "", then: decisionHandler)
+    }
+
+    private func askLocation(host: String, then decide: @escaping (Bool) -> Void) {
+        // Le refus de macOS l'emporte sur tout : demander à l'utilisateur d'autoriser un
+        // site quand le système a déjà dit non ferait promettre ce qu'on ne peut pas tenir.
+        guard !location.isBlockedBySystem else {
+            layout.toast.show("macOS refuse la position à Wuji — voir Réglages Système, Confidentialité.")
+            decide(false)
+            return
+        }
+        if let known = permissions.decision(host: host, kind: .location) {
+            guard known else { decide(false); return }
+            location.authorize(decide)
+            return
+        }
+        layout.actionSheet.presentConfirmation(
+            title: "Partager votre position ?",
+            message: "« \(host) » demande votre position. Cette réponse sera retenue pour ce site, et modifiable dans les réglages.",
+            confirm: "Partager", isDestructive: false,
+            onCancel: { [weak self] in
+                self?.permissions.remember(host: host, kind: .location, isAllowed: false)
+                decide(false)
+            },
+            onConfirm: { [weak self] in
+                guard let self else { decide(false); return }
+                permissions.remember(host: host, kind: .location, isAllowed: true)
+                // Et seulement maintenant la boîte du système : elle arrive derrière un
+                // oui explicite, jamais avant.
+                location.authorize(decide)
+            })
     }
 
     /// Ce qu'il faut faire si la feuille d'autorisation se ferme sans reponse.

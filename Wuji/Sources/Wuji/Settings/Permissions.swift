@@ -1,6 +1,6 @@
 import Foundation
 
-/// Les autorisations accordées aux sites : caméra, micro.
+/// Les autorisations accordées aux sites : caméra, micro, position.
 ///
 /// **Une décision par site, gardée jusqu'à ce qu'on la change.** Redemander à chaque visite
 /// use la vigilance : on finit par accepter sans lire, ce qui est exactement ce qu'un
@@ -13,13 +13,14 @@ import Foundation
 final class Permissions {
 
     enum Kind: String, CaseIterable, Codable {
-        case camera, microphone, both
+        case camera, microphone, both, location
 
         var label: String {
             switch self {
             case .camera:     return "la caméra"
             case .microphone: return "le micro"
             case .both:       return "la caméra et le micro"
+            case .location:   return "votre position"
             }
         }
     }
@@ -51,7 +52,10 @@ final class Permissions {
         if let exact = decisions.last(where: { $0.host == host && $0.kind == kind }) {
             return exact.isAllowed
         }
-        if kind != .both, let both = decisions.last(where: { $0.host == host && $0.kind == .both }) {
+        // La position ne se déduit de rien : elle n'est pas un appareil de capture, et
+        // avoir accepté la caméra ne dit rien de l'envie d'être localisé.
+        if kind != .both, kind != .location,
+           let both = decisions.last(where: { $0.host == host && $0.kind == .both }) {
             return both.isAllowed
         }
         return nil
