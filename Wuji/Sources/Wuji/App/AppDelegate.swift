@@ -1653,6 +1653,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     }
 
     func spacesPanel(_ panel: SpacesPanel, didPick symbol: String) {
+        // Le symbole d'un espace privé ne se change pas : c'est à quoi on le reconnaît.
+        guard !currentSpace.isPrivate else {
+            layout.toast.show("Le symbole d'un espace privé ne change pas")
+            return
+        }
         currentSpace.symbol = symbol
         refreshSpaces(panel)
     }

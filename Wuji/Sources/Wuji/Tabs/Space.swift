@@ -34,6 +34,14 @@ final class Space {
     /// dessin : à 14 pt, deux symboles voisins se confondent.
     static let symbols = ["square.stack", "briefcase", "book", "leaf", "bolt", "flask"]
 
+    /// Le symbole des espaces privés, et **le leur seulement**.
+    ///
+    /// Il n'est ni dans la palette de choix ni modifiable : un espace privé doit se
+    /// reconnaître du premier coup d'œil, et se reconnaître *toujours* de la même façon.
+    /// Un symbole qu'on pourrait changer ferait de cette reconnaissance une convention
+    /// personnelle — donc quelque chose qu'on oublie au mauvais moment.
+    static let privateSymbol = "eye.slash"
+
     /// Où déposer un onglet. Le conteneur d'arrivée se déduit du voisin quand on dépose
     /// entre deux lignes — c'est ce qui permet de sortir d'un dossier en glissant sous lui.
     enum Destination {
@@ -53,7 +61,12 @@ final class Space {
     /// travaillent sur un magasin de données éphémère, que WebKit efface avec lui. C'est
     /// une propriété de l'espace et non d'une fenêtre — on garde ses onglets rangés comme
     /// les autres, et on bascule d'un monde à l'autre par le sélecteur d'espaces.
-    var isPrivate = false
+    var isPrivate = false {
+        didSet {
+            guard isPrivate != oldValue else { return }
+            symbol = isPrivate ? Self.privateSymbol : Self.symbol(forIndex: 0)
+        }
+    }
 
     private(set) var folders: [TabFolder] = []
     private(set) var loose: [Tab] = []
