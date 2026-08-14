@@ -14,47 +14,20 @@ enum DownloadsPage {
             Les fichiers vont dans votre dossier Téléchargements, et Wuji n'en garde pas la liste.</p>
             """ : ""
 
-        return """
-        <!doctype html>
-        <html lang="fr">
-        <head>
-        <meta charset="utf-8">
-        \(InternalStyle.meta)
-        <title>Téléchargements</title>
-        <style>\(InternalStyle.shared)\(style)</style>
-        </head>
-        <body>
-          <header>
-            <div class="titles">
-              <h1>Téléchargements</h1>
-              <p>\(items.count) fichier\(items.count > 1 ? "s" : "") · cette session</p>
-            </div>
-            <button id="clear" class="ghost">Effacer la liste</button>
-          </header>
-          <main><ul>\(rows)</ul>\(empty)</main>
-          <script>
-            const send = (payload) => window.webkit.messageHandlers.wujiDownloads.postMessage(payload);
-            document.getElementById('clear').addEventListener('click', () => send({ action: 'clear' }));
-            document.addEventListener('click', (event) => {
-              const button = event.target.closest('button[data-action]');
-              if (!button) return;
-              send({ action: button.dataset.action, id: button.closest('li').dataset.id });
-            });
-            // L'application pousse l'avancement ligne par ligne plutôt que de recharger la
-            // page : une reconstruction complète à chaque paquet reçu faisait clignoter la
-            // liste et remontait le défilement en haut. Le rechargement est réservé aux
-            // changements de composition — un fichier de plus, un fichier terminé.
-            window.wujiProgress = (id, percent, detail) => {
-              const row = document.querySelector(`li[data-id="${id}"]`);
-              if (!row) return;
-              row.querySelector('.detail').textContent = detail;
-              const bar = row.querySelector('.bar i');
-              if (bar) bar.style.width = percent + '%';
-            };
-          </script>
-        </body>
-        </html>
-        """
+        return InternalShell.page(
+            title: "Téléchargements", current: "wuji://downloads",
+            body: """
+              <header>
+                <div class="titles">
+                  <h1>Téléchargements</h1>
+                  <p>\(items.count) fichier\(items.count > 1 ? "s" : "") · cette session</p>
+                </div>
+                <button id="clear" class="ghost">Effacer la liste</button>
+              </header>
+              <main><ul>\(rows)</ul>\(empty)</main>
+              """,
+            script: script, style: style)
+
     }
 
     private static func row(_ item: DownloadItem) -> String {
@@ -131,6 +104,26 @@ enum DownloadsPage {
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
     }
+
+    private static let script = """
+    const send = (payload) => window.webkit.messageHandlers.wujiDownloads.postMessage(payload);
+    document.getElementById('clear').addEventListener('click', () => send({ action: 'clear' }));
+    document.addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-action]');
+      if (!button) return;
+      send({ action: button.dataset.action, id: button.closest('li').dataset.id });
+    });
+    // L'application pousse l'avancement ligne par ligne plutôt que de recharger la page :
+    // une reconstruction complète à chaque paquet reçu faisait clignoter la liste et
+    // remontait le défilement en haut.
+    window.wujiProgress = (id, percent, detail) => {
+      const row = document.querySelector(`li[data-id="${id}"]`);
+      if (!row) return;
+      row.querySelector('.detail').textContent = detail;
+      const bar = row.querySelector('.bar i');
+      if (bar) bar.style.width = percent + '%';
+    };
+    """
 
     private static let style = """
     li { height: auto; padding: 12px; align-items: center; }

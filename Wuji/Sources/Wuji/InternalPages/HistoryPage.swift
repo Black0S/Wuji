@@ -29,29 +29,21 @@ enum HistoryPage {
             L'historique se remplit à mesure que vous naviguez, et reste sur cette machine.</p>
             """ : ""
 
-        return """
-        <!doctype html>
-        <html lang="fr">
-        <head>
-        <meta charset="utf-8">
-        \(InternalStyle.meta)
-        <title>Historique</title>
-        <style>\(InternalStyle.shared)\(style)</style>
-        </head>
-        <body>
-          <header>
-            <div class="titles">
-              <h1>Historique</h1>
-              <p id="count">\(entries.count) page\(entries.count > 1 ? "s" : "") · conservées sur cette machine</p>
-            </div>
-            <input id="q" type="search" placeholder="Rechercher" autocomplete="off" spellcheck="false">
-            <button id="clear" class="ghost">Tout effacer</button>
-          </header>
-          <main>\(rows)\(empty)<p class="empty" id="none" hidden>Aucun résultat.</p></main>
-          <script>\(script)</script>
-        </body>
-        </html>
-        """
+        return InternalShell.page(
+            title: "Historique", current: "wuji://history",
+            body: """
+              <header>
+                <div class="titles">
+                  <h1>Historique</h1>
+                  <p id="count">\(entries.count) page\(entries.count > 1 ? "s" : "") · conservées sur cette machine</p>
+                </div>
+                <input id="q" type="search" placeholder="Rechercher" autocomplete="off" spellcheck="false">
+                <button id="clear" class="ghost">Tout effacer</button>
+              </header>
+              <main>\(rows)\(empty)<p class="empty" id="none" hidden>Aucun résultat.</p></main>
+              """,
+            script: script, style: style)
+
     }
 
     // MARK: - Regroupement

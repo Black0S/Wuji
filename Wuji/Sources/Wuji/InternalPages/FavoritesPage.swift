@@ -20,30 +20,22 @@ enum FavoritesPage {
             <kbd>⌘D</kbd> met de côté la page ouverte, et la liste reste sur cette machine.</p>
             """ : ""
 
-        return """
-        <!doctype html>
-        <html lang="fr">
-        <head>
-        <meta charset="utf-8">
-        \(InternalStyle.meta)
-        <title>Favoris</title>
-        <style>\(InternalStyle.shared)\(style)</style>
-        </head>
-        <body>
-          <header>
-            <div class="titles">
-              <h1>Favoris</h1>
-              <p id="count">\(items.count) page\(items.count > 1 ? "s" : "") · conservées sur cette machine</p>
-            </div>
-            <input id="q" type="search" placeholder="Rechercher" autocomplete="off" spellcheck="false">
-          </header>
-          <main><ul>\(rows)</ul>\(empty)
-            <p class="empty" id="none" hidden>Aucun résultat.</p>
-          </main>
-          <script>\(script)</script>
-        </body>
-        </html>
-        """
+        return InternalShell.page(
+            title: "Favoris", current: "wuji://favorites",
+            body: """
+              <header>
+                <div class="titles">
+                  <h1>Favoris</h1>
+                  <p id="count">\(items.count) page\(items.count > 1 ? "s" : "") · conservées sur cette machine</p>
+                </div>
+                <input id="q" type="search" placeholder="Rechercher" autocomplete="off" spellcheck="false">
+              </header>
+              <main><ul>\(rows)</ul>\(empty)
+                <p class="empty" id="none" hidden>Aucun résultat.</p>
+              </main>
+              """,
+            script: script, style: style)
+
     }
 
     private static func row(_ item: Favorite, _ icons: FaviconStore) -> String {

@@ -18,7 +18,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private let filterLists = FilterListStore()
     private let userScripts = UserScriptStore()
     private lazy var blocker = ContentBlocker(settings: settings, lists: filterLists)
-    private var settingsWindow: SettingsWindow?
 
     /// Les onglets appartiennent à un espace, jamais à l'application. Tout ce qui suit
     /// passe donc par `currentSpace` — c'est ce qui évite d'avoir deux notions
@@ -68,6 +67,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                              isBusy: blocker.state.isBusy)
         }
         pages.scripts = { [unowned self] in ScriptsPage.html(scripts: userScripts.scripts) }
+        pages.settings = { [unowned self] path in
+            SettingsPage.html(section: SettingsPage.Section.from(path: path),
+                              state: settingsState)
+        }
         config.setURLSchemeHandler(pages, forURLScheme: InternalPageHandler.scheme)
         config.userContentController.add(self, name: "wujiHistory")
         config.userContentController.add(self, name: "wujiDownloads")
@@ -75,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         config.userContentController.add(self, name: "wujiAdBlock")
         config.userContentController.add(self, name: ElementPicker.handler)
         config.userContentController.add(self, name: "wujiScripts")
+        config.userContentController.add(self, name: "wujiSettings")
         config.userContentController.add(self, name: "wujiError")
         config.userContentController.add(self, name: PageContextMenu.handler)
         config.userContentController.addUserScript(PageContextMenu.script)
@@ -139,7 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             self.currentTab?.webView.reload()
         }
         blocker.onChange = { [weak self] in
-            self?.settingsWindow?.refreshBlocking()
+            self?.refreshSettingsPages()
             self?.syncBlockingButton()
             self?.refreshAdBlockPages()
         }
@@ -295,20 +299,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             applyPageBackground(to: tab)
             if tab.url?.scheme == InternalPageHandler.scheme { tab.webView.reload() }
         }
-    }
-
-    @objc func openSettings(_ sender: Any?) {
-        if settingsWindow == nil {
-            let window = SettingsWindow(settings: settings, blocker: blocker)
-            window.historyCount = { [weak self] in self?.history.count ?? 0 }
-            window.onClearHistory = { [weak self] in self?.history.clear() }
-            window.onOpenAdBlock = { [weak self] in
-                self?.showAdBlock(nil)
-                self?.window.makeKeyAndOrderFront(nil)
-            }
-            settingsWindow = window
-        }
-        settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -620,6 +610,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     static let adBlockPage = URL(string: "wuji://ad-block")!
     static let scriptsPage = URL(string: "wuji://scripts")!
+
+    /// Ce que la page des reglages doit afficher.
+    private var settingsState: SettingsPage.State {
+        SettingsPage.State(theme: settings.theme.rawValue,
+                           searchEngine: settings.searchEngine.rawValue,
+                           pageZoom: Double(settings.pageZoom),
+                           inspection: settings.safariInspection,
+                           retention: settings.historyRetention,
+                           historyCount: history.count,
+                           blockingEnabled: settings.blockingEnabled,
+                           blockingSummary: blocker.state.summary)
+    }
+
+    static let settingsPage = URL(string: "wuji://settings")!
+
+    @objc func openSettings(_ sender: Any?) {
+        openInternal(Self.settingsPage)
+    }
+
+    private func handleSettingsAction(_ action: String, payload: [String: Any]) {
+        switch action {
+        case "set":
+            guard let key = payload["key"] as? String,
+                  let value = payload["value"] as? String else { return }
+            switch key {
+            case "theme":      settings.theme = Settings.Theme(rawValue: value) ?? .auto
+            case "engine":     settings.searchEngine = Settings.SearchEngine(rawValue: value) ?? .duckduckgo
+            case "inspection": settings.safariInspection = (value == "true")
+            case "retention":  settings.historyRetention = Int(value) ?? 90
+            case "zoom":       settings.pageZoom = (Double(value) ?? 100) / 100
+            case "blocking":
+                settings.blockingEnabled = (value == "true")
+                blocker.start()
+            default: break
+            }
+        case "clear-history":
+            history.clear()
+            refreshSettingsPages()
+        default:
+            break
+        }
+    }
+
+    private func refreshSettingsPages() {
+        spaces.flatMap(\.allTabs)
+            .filter { $0.url?.host() == "settings" }
+            .forEach { $0.webView.reload() }
+    }
 
     @objc func showScripts(_ sender: Any?) {
         openInternal(Self.scriptsPage)
@@ -1438,6 +1476,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             }
             if message.name == "wujiFavorites" {
                 handleFavoriteAction(action, id: payload["id"] as? String)
+                return
+            }
+            if message.name == "wujiSettings" {
+                handleSettingsAction(action, payload: payload)
                 return
             }
             if message.name == "wujiScripts" {

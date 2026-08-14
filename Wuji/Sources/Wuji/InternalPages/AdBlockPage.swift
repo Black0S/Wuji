@@ -51,34 +51,10 @@ enum AdBlockPage {
         case .myRules:  body = rulesSection(userRules)
         }
 
-        let nav = [Section.rules, .unactive, .myRules].map { item in
-            """
-            <a class="tab\(item == section ? " current" : "")" href="\(item.address)">\(item.title)</a>
-            """
-        }.joined()
+        return InternalShell.page(
+            title: section.title, current: section.address,
+            body: body, script: script, style: style)
 
-        return """
-        <!doctype html>
-        <html lang="fr">
-        <head>
-        <meta charset="utf-8">
-        \(InternalStyle.meta)
-        <title>\(escape(section.title))</title>
-        <style>\(InternalStyle.shared)\(style)</style>
-        </head>
-        <body>
-          <div class="frame">
-            <nav>
-              <h1>Blocage</h1>
-              \(nav)
-              <p class="state">\(escape(state))</p>
-            </nav>
-            <div class="pane">\(body)</div>
-          </div>
-          <script>\(script)</script>
-        </body>
-        </html>
-        """
     }
 
     // MARK: - Sections

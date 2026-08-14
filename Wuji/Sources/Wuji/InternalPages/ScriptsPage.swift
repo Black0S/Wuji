@@ -16,43 +16,34 @@ enum ScriptsPage {
             Ouvrez une adresse en <code>.user.js</code> pour l'installer, ou collez-la ci-dessous.</p>
             """ : ""
 
-        return """
-        <!doctype html>
-        <html lang="fr">
-        <head>
-        <meta charset="utf-8">
-        \(InternalStyle.meta)
-        <title>Scripts</title>
-        <style>\(InternalStyle.shared)\(style)</style>
-        </head>
-        <body>
-          <header>
-            <div class="titles">
-              <h1>Scripts</h1>
-              <p>\(scripts.count) script\(scripts.count > 1 ? "s" : "") · exécutés sur cette machine</p>
-            </div>
-          </header>
-          <main>
-            <ul>\(rows)</ul>\(empty)
-            <form id="add">
-              <input id="url" type="url" placeholder="https://…/quelque-chose.user.js" spellcheck="false">
-              <button type="submit" class="ghost">Installer</button>
-            </form>
-            <p class="note">
-              Un script utilisateur s'exécute avec les mêmes pouvoirs que la page : il peut
-              tout lire et tout modifier sur les adresses qu'il vise. N'installez que ce dont
-              vous comprenez la provenance.
-              <br><br>
-              Les instructions <code>@grant</code>, <code>@require</code> et
-              <code>@resource</code> ne sont pas gérées — elles supposent une API
-              d'extension que Wuji n'a pas. Un script qui en dépend ne fonctionnera pas, et
-              c'est dit plutôt que caché.
-            </p>
-          </main>
-          <script>\(script)</script>
-        </body>
-        </html>
-        """
+        return InternalShell.page(
+            title: "Scripts", current: "wuji://scripts",
+            body: """
+              <header>
+                <div class="titles">
+                  <h1>Scripts</h1>
+                  <p>\(scripts.count) script\(scripts.count > 1 ? "s" : "") · exécutés sur cette machine</p>
+                </div>
+              </header>
+              <main>
+                <ul>\(rows)</ul>\(empty)
+                <form id="add">
+                  <input id="url" type="url" placeholder="https://…/quelque-chose.user.js" spellcheck="false">
+                  <button type="submit" class="ghost">Installer</button>
+                </form>
+                <p class="note">
+                  Un script utilisateur s'exécute avec les mêmes pouvoirs que la page : il peut
+                  tout lire et tout modifier sur les adresses qu'il vise. N'installez que ce dont
+                  vous comprenez la provenance.
+                  <br><br>
+                  Les instructions <code>@grant</code>, <code>@require</code> et
+                  <code>@resource</code> ne sont pas gérées — elles supposent une API
+                  d'extension que Wuji n'a pas.
+                </p>
+              </main>
+              """,
+            script: script, style: style)
+
     }
 
     private static func row(_ item: UserScript) -> String {
