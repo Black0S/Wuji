@@ -6,6 +6,40 @@
 
 ---
 
+## 0 bis. Ce qui a réellement été construit *(15 août 2026)*
+
+> Ce document reste la feuille de route d'origine. Il est conservé tel quel, mais **trois de
+> ses hypothèses sont fausses aujourd'hui**, et lire la suite sans le savoir induit en
+> erreur. Les corriger en silence effacerait la trace de décisions qui ont été prises pour
+> de bonnes raisons ; elles sont donc listées ici, pas réécrites plus bas.
+
+**1. L'auto-masquage n'existe pas, et le geste de révélation non plus.** Le produit décrit
+en J0 semaine 2, en J2 (« les quatre états ») et en risques §240–241 a été abandonné à
+l'usage : une sidebar qui se dérobe fait chercher ce qu'on veut atteindre. Ce qui l'a
+remplacé est plus banal et se vit mieux — une sidebar permanente, des espaces avec leurs
+dossiers, et une palette au centre de l'écran. Tout le vocabulaire « Zero Interface » de ce
+document s'applique donc au chrome (peu d'éléments, aucun doublon, rien de mort), pas à un
+mécanisme d'escamotage.
+
+**2. Le blocage va bien plus loin que ce qui était budgété.** L'hypothèse §16 prévoyait
+« pas de règles procédurales avancées ». Le convertisseur d'AdGuard, ses scriptlets et ses
+sélecteurs étendus sont intégrés : environ 304 000 règles actives, réparties en tranches
+compilées — la limite de 150 000 est par liste, pas par navigateur, et c'est par là qu'on
+passe. Les scriptlets sont développés une fois par JavaScriptCore au moment de la
+compilation, jamais dans la page. Contrepartie assumée : **GPL-3 le jour de la
+distribution**, ce que ce document n'avait pas anticipé.
+
+**3. Ce qui reste hors d'atteinte est mesuré, pas supposé.** WebKit accepte une action
+`redirect` à la compilation et l'ignore à l'exécution ; `modify-headers` est refusé d'entrée.
+Donc `$replace`, `$csp` et `$removeparam` ne sont pas faisables — et les `$redirect` vers
+une cible inerte sont ramenées à du blocage ordinaire, ce qui en récupère 717.
+
+Le reste — espaces privés, journal de blocage, scripts utilisateur, autorisations par site,
+mise en veille des onglets — a été construit hors de ce plan, dans l'ordre où l'usage l'a
+réclamé.
+
+---
+
 ## 0. Hypothèses de ce document
 
 Ces trois choix conditionnent tout ce qui suit. S'ils changent, la roadmap change.
