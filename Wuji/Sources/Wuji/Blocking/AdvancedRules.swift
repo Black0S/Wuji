@@ -23,12 +23,46 @@ final class AdvancedRules {
         var isEmpty: Bool { scriptlets.isEmpty && extendedSelectors.isEmpty }
     }
 
+    /// Ce que l'index retient pour un domaine : des **rangs** de scriptlets, pas leur
+    /// code. Le code vit dans le fichier, et n'en sort que pour la page qui le demande.
+    private struct Entry {
+        var scriptlets: [Int] = []
+        var extendedSelectors: [String] = []
+    }
+
     /// Index par domaine. La recherche remonte les domaines parents : une règle posée sur
     /// `youtube.com` doit s'appliquer à `www.youtube.com`.
-    private var byDomain: [String: Payload] = [:]
+    private var byDomain: [String: Entry] = [:]
     /// Règles sans domaine, qui valent partout. Rares et volontairement séparées : les
     /// mélanger à l'index obligerait à parcourir tout le dictionnaire.
-    private var global = Payload()
+    private var global = Entry()
+
+    // MARK: - La table des codes
+
+    /// Les codes développés, gardés **dans un fichier projeté en mémoire** plutôt que
+    /// décodés au lancement.
+    ///
+    /// Mesuré : 61 Mo de JSON, 26 ms pour les lire et **629 ms pour les décoder**, sur le
+    /// fil principal, avant que la fenêtre apparaisse — et 60 Mo qui restaient là pour la
+    /// durée de la session. Or presque aucun de ces codes ne sert : une page en demande
+    /// trois, jamais sept mille.
+    ///
+    /// Le fichier est donc une simple suite d'octets avec une table de bornes. En extraire
+    /// un code est une tranche ; le système charge la page de mémoire correspondante et
+    /// peut la reprendre quand il en a besoin ailleurs.
+    private var blob: Data?
+    private var offsets: [Int] = []
+    /// Les codes fraîchement développés, quand l'index vient d'être construit et pas relu.
+    private var builtCodes: [String] = []
+
+    private func code(at index: Int) -> String? {
+        if !builtCodes.isEmpty { return builtCodes[safe: index] }
+        guard let blob, offsets.indices.contains(index + 1) else { return nil }
+        let range = offsets[index]..<offsets[index + 1]
+        guard range.lowerBound >= 0, range.upperBound <= blob.count,
+              range.lowerBound <= range.upperBound else { return nil }
+        return String(decoding: blob[range], as: UTF8.self)
+    }
 
     private(set) var ruleCount = 0
 
@@ -66,7 +100,8 @@ final class AdvancedRules {
     /// table et désigné par son rang, il tient en quelques mégaoctets.
     private struct Cache: Codable {
         var signature: String
-        var codes: [String]
+        /// Les bornes des codes dans le fichier voisin, `n + 1` valeurs pour `n` codes.
+        var offsets: [Int]
         var global: [Int]
         var scriptlets: [String: [Int]]
         var selectors: [String: [String]]
@@ -78,21 +113,31 @@ final class AdvancedRules {
         return support.appendingPathComponent("Wuji/advanced.json")
     }
 
+    private var codeFile: URL {
+        cacheFile.deletingLastPathComponent().appendingPathComponent("advanced.codes")
+    }
+
     private var signature = ""
 
     /// Reprend l'index du dernier lancement, avant que quoi que ce soit ne se charge.
     func restore() {
         guard let data = try? Data(contentsOf: cacheFile),
               let cache = try? JSONDecoder().decode(Cache.self, from: data) else { return }
+        // Projeté, pas lu : les pages de ce fichier n'entrent en mémoire que si un code
+        // est réellement demandé.
+        blob = try? Data(contentsOf: codeFile, options: [.mappedIfSafe])
+        guard blob != nil else { return }
+
         signature = cache.signature
-        global = Payload(scriptlets: cache.global.compactMap { cache.codes[safe: $0] },
-                         extendedSelectors: [])
+        offsets = cache.offsets
+        builtCodes = []
+        global = Entry(scriptlets: cache.global)
         byDomain = [:]
         for (domain, indexes) in cache.scriptlets {
-            byDomain[domain, default: Payload()].scriptlets = indexes.compactMap { cache.codes[safe: $0] }
+            byDomain[domain, default: Entry()].scriptlets = indexes
         }
         for (domain, selectors) in cache.selectors {
-            byDomain[domain, default: Payload()].extendedSelectors = selectors
+            byDomain[domain, default: Entry()].extendedSelectors = selectors
         }
         ruleCount = byDomain.values.reduce(global.scriptlets.count) {
             $0 + $1.scriptlets.count + $1.extendedSelectors.count
@@ -100,28 +145,27 @@ final class AdvancedRules {
     }
 
     private func persist() {
-        var table: [String: Int] = [:]
-        var codes: [String] = []
-        func index(_ code: String) -> Int {
-            if let known = table[code] { return known }
-            codes.append(code)
-            table[code] = codes.count - 1
-            return codes.count - 1
+        var bytes = Data()
+        var offsets: [Int] = [0]
+        for code in builtCodes {
+            bytes.append(contentsOf: Array(code.utf8))
+            offsets.append(bytes.count)
         }
 
-        let globalIndexes = global.scriptlets.map(index)
         var scriptlets: [String: [Int]] = [:]
         var selectors: [String: [String]] = [:]
-        for (domain, payload) in byDomain {
-            if !payload.scriptlets.isEmpty { scriptlets[domain] = payload.scriptlets.map(index) }
-            if !payload.extendedSelectors.isEmpty { selectors[domain] = payload.extendedSelectors }
+        for (domain, entry) in byDomain {
+            if !entry.scriptlets.isEmpty { scriptlets[domain] = entry.scriptlets }
+            if !entry.extendedSelectors.isEmpty { selectors[domain] = entry.extendedSelectors }
         }
 
-        let cache = Cache(signature: signature, codes: codes, global: globalIndexes,
+        let cache = Cache(signature: signature, offsets: offsets, global: global.scriptlets,
                           scriptlets: scriptlets, selectors: selectors)
-        if let data = try? JSONEncoder().encode(cache) {
-            try? data.write(to: cacheFile, options: .atomic)
-        }
+        guard let data = try? JSONEncoder().encode(cache) else { return }
+        // Les octets d'abord : un index qui désignerait un fichier plus ancien que lui
+        // rendrait des codes tronqués.
+        try? bytes.write(to: codeFile, options: .atomic)
+        try? data.write(to: cacheFile, options: .atomic)
     }
 
     // MARK: - Construction
@@ -138,9 +182,12 @@ final class AdvancedRules {
 
     private func loadRules(_ text: String) {
         byDomain = [:]
-        global = Payload()
+        global = Entry()
         ruleCount = 0
-        var expanded: [String: String] = [:]   // appel → code, pour ne développer qu'une fois
+        builtCodes = []
+        blob = nil
+        offsets = []
+        var expanded: [String: Int] = [:]   // appel → rang, pour ne développer qu'une fois
 
         text.enumerateLines { line, _ in
             let line = line.trimmingCharacters(in: .whitespaces)
@@ -155,9 +202,16 @@ final class AdvancedRules {
             }
 
             if marker.contains("%") || body.hasPrefix("+js") || body.hasPrefix("//scriptlet") {
-                guard let code = expanded[body] ?? self.expand(body) else { return }
-                expanded[body] = code
-                payloads.forEach { self.add(scriptlet: code, to: $0) }
+                let rank: Int
+                if let known = expanded[body] {
+                    rank = known
+                } else {
+                    guard let code = self.expand(body) else { return }
+                    self.builtCodes.append(code)
+                    rank = self.builtCodes.count - 1
+                    expanded[body] = rank
+                }
+                payloads.forEach { self.add(scriptlet: rank, to: $0) }
             } else {
                 payloads.forEach { self.add(selector: body, to: $0) }
             }
@@ -181,16 +235,16 @@ final class AdvancedRules {
         return nil
     }
 
-    private func add(scriptlet code: String, to domain: String) {
-        if domain.isEmpty { global.scriptlets.append(code) }
-        else { byDomain[domain, default: Payload()].scriptlets.append(code) }
+    private func add(scriptlet rank: Int, to domain: String) {
+        if domain.isEmpty { global.scriptlets.append(rank) }
+        else { byDomain[domain, default: Entry()].scriptlets.append(rank) }
     }
 
     private func add(selector: String, to domain: String) {
         // Un sélecteur étendu sans domaine s'appliquerait au web entier à chaque mutation
         // du DOM : le coût serait partout, le bénéfice nulle part.
         guard !domain.isEmpty else { return }
-        byDomain[domain, default: Payload()].extendedSelectors.append(selector)
+        byDomain[domain, default: Entry()].extendedSelectors.append(selector)
     }
 
     /// Développe un appel — `//scriptlet('set-constant', 'x', 'true')` — en code prêt à
@@ -244,18 +298,21 @@ final class AdvancedRules {
     /// parents, et les globales.
     func payload(for url: URL?) -> Payload {
         guard let host = url?.host()?.lowercased() else { return Payload() }
-        var result = global
+        var ranks = global.scriptlets
+        var selectors: [String] = []
 
         // `a.b.example.com` interroge `a.b.example.com`, `b.example.com`, `example.com`.
         var parts = host.split(separator: ".").map(String.init)
         while parts.count >= 2 {
             if let found = byDomain[parts.joined(separator: ".")] {
-                result.scriptlets += found.scriptlets
-                result.extendedSelectors += found.extendedSelectors
+                ranks += found.scriptlets
+                selectors += found.extendedSelectors
             }
             parts.removeFirst()
         }
-        return result
+        // Les codes ne sont tirés du fichier qu'ici, pour les trois ou quatre scriptlets
+        // que cette page réclame.
+        return Payload(scriptlets: ranks.compactMap { code(at: $0) }, extendedSelectors: selectors)
     }
 }
 

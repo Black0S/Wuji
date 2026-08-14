@@ -68,6 +68,9 @@ final class ContentBlocker {
     private static func identifier(_ index: Int) -> String { "wuji.filters.\(index)" }
     private static let signatureKey = "blockingSignature"
     private static let chunkKey = "blockingChunks"
+    /// L'empreinte des règles **avant** conversion, et le décompte qui allait avec.
+    private static let sourceKey = "blockingSource"
+    private static let countsKey = "blockingCounts"
 
     /// Taille d'une tranche. Cent mille règles compilent en quelques secondes et passent
     /// sans discussion ; au-delà on s'approche de la limite pour rien, puisqu'il suffit
@@ -127,6 +130,42 @@ final class ContentBlocker {
         }
         guard !sources.isEmpty else { return apply([], state: .empty) }
 
+        // Rien n'a bougé depuis le dernier lancement ? Alors il n'y a rien à faire.
+        //
+        // **C'était le vrai coût du démarrage.** L'empreinte était calculée sur le
+        // résultat de la conversion : pour découvrir que rien n'avait changé, Wuji
+        // reconvertissait chaque fois un demi-million de règles — quelques secondes de
+        // calcul et six cents mégaoctets, pour aboutir aux tranches déjà compilées qui
+        // attendaient sagement dans le magasin de WebKit.
+        let source = Self.fingerprint(of: sources, userRules: lists.userRules,
+                                      exceptions: settings.blockingExceptions
+                                          + settings.privateBlockingExceptions)
+        if source == UserDefaults.standard.string(forKey: Self.sourceKey),
+           advanced.ruleCount > 0,
+           let stored = UserDefaults.standard.array(forKey: Self.countsKey) as? [Int],
+           stored.count == 2 {
+            let chunkCount = UserDefaults.standard.integer(forKey: Self.chunkKey)
+            Task { [weak self] in
+                var found: [WKContentRuleList] = []
+                for index in 0..<chunkCount {
+                    guard let list = try? await WKContentRuleListStore.default()?
+                        .contentRuleList(forIdentifier: Self.identifier(index)) else { break }
+                    found.append(list)
+                }
+                guard let self else { return }
+                guard found.count == chunkCount, chunkCount > 0 else {
+                    // Les tranches ont disparu du magasin : on refait le chemin long.
+                    UserDefaults.standard.removeObject(forKey: Self.sourceKey)
+                    self.compile()
+                    return
+                }
+                self.apply(found, state: .active(rules: stored[0], skipped: stored[1], dropped: 0))
+                self.onApplied?()
+            }
+            return
+        }
+
+        pendingSource = source
         state = .compiling
         onChange?()
 
@@ -286,6 +325,27 @@ final class ContentBlocker {
 
     // MARK: - Installation
 
+    /// L'empreinte de ce qui entre dans la conversion : les listes telles qu'elles sont
+    /// sur le disque, les règles de l'utilisateur, ses exceptions. Tout ce qui, en
+    /// changeant, doit refaire le travail — et rien d'autre.
+    nonisolated private static func fingerprint(of sources: [(FilterList, String)],
+                                                userRules: [String],
+                                                exceptions: [String]) -> String {
+        var hasher = SHA256()
+        for (list, text) in sources {
+            hasher.update(data: Data(list.id.uuidString.utf8))
+            hasher.update(data: Data(text.utf8))
+        }
+        hasher.update(data: Data(userRules.joined(separator: "\n").utf8))
+        hasher.update(data: Data(exceptions.joined(separator: "\n").utf8))
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// L'empreinte de la source en cours de conversion, à écrire une fois qu'elle a
+    /// abouti. Écrite avant, elle ferait sauter la conversion suivante alors que rien
+    /// n'aurait été installé.
+    private var pendingSource: String?
+
     private func install(chunks: [String], counts: (accepted: Int, rejected: Int, advanced: Int)) {
         guard !chunks.isEmpty else { return apply([], state: .empty) }
 
@@ -296,6 +356,8 @@ final class ContentBlocker {
         let done: ([WKContentRuleList]) -> Void = { [weak self] lists in
             UserDefaults.standard.set(signature, forKey: Self.signatureKey)
             UserDefaults.standard.set(chunks.count, forKey: Self.chunkKey)
+            UserDefaults.standard.set([counts.accepted, counts.rejected], forKey: Self.countsKey)
+            UserDefaults.standard.set(self?.pendingSource, forKey: Self.sourceKey)
             self?.apply(lists, state: .active(rules: counts.accepted, skipped: counts.rejected,
                                               dropped: 0))
         }
@@ -344,6 +406,13 @@ final class ContentBlocker {
             }
             UserDefaults.standard.set(signature, forKey: Self.signatureKey)
             UserDefaults.standard.set(chunks.count, forKey: Self.chunkKey)
+            // L'empreinte de la source n'est écrite que **si toutes** les tranches sont
+            // passées : une compilation amputée ne doit pas se faire reprendre telle
+            // quelle au lancement suivant, sans qu'on retente jamais ce qui a échoué.
+            if lost == 0 {
+                UserDefaults.standard.set([counts.accepted, counts.rejected], forKey: Self.countsKey)
+                UserDefaults.standard.set(pendingSource, forKey: Self.sourceKey)
+            }
             apply(built, state: .active(rules: counts.accepted, skipped: counts.rejected,
                                         dropped: lost))
         }
