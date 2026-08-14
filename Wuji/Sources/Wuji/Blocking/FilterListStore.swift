@@ -17,6 +17,10 @@ struct FilterList: Codable, Identifiable {
     /// que WebKit ne sait pas faire, et c'est une information honnête à afficher.
     var lines: Int
     var rules: Int
+    /// Ce que le serveur a répondu la dernière fois. Renvoyé tel quel à la requête
+    /// suivante : s'il n'a rien de neuf, il répond « 304 » et rien ne transite.
+    var etag: String?
+    var lastModified: String?
 
     init(title: String, source: URL, isEnabled: Bool = true, group: String = "other",
          parent: String? = nil) {
@@ -181,32 +185,11 @@ final class FilterListStore {
     ///
     /// Une liste qui échoue ne fait pas échouer les autres, et surtout n'efface pas ce
     /// qu'on avait déjà : sans réseau, l'ancienne copie protège toujours.
-    @discardableResult
-    func update(_ list: FilterList) async -> Bool {
-        var request = URLRequest(url: list.source)
-        request.timeoutInterval = 30
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
-        else { return false }
-
-        try? text.write(to: file(for: list), atomically: true, encoding: .utf8)
-        if let index = lists.firstIndex(where: { $0.id == list.id }) {
-            lists[index].updated = Date()
-            lists[index].lines = text.reduce(into: 1) { count, character in
-                if character == "\n" { count += 1 }
-            }
-        }
-        save()
-        return true
-    }
-
     /// Relit le catalogue d'uBlock et fond le résultat avec ce qu'on a.
     ///
     /// Les choix de l'utilisateur survivent : une liste déjà connue garde son état actif ou
-    /// inactif, et les listes ajoutées à la main ne sont jamais touchées. Une liste qui
-    /// disparaît du catalogue disparaît d'ici aussi, sauf si elle était active — auquel cas
-    /// la retirer sous les pieds de quelqu'un serait pire que de la garder.
+    /// inactif. Ce qu'il a ajouté lui-même n'est jamais touché ; ce qui sort du catalogue
+    /// s'en va avec son fichier.
     func refreshCatalog() async {
         var request = URLRequest(url: Self.catalogSource)
         request.timeoutInterval = 30
@@ -216,13 +199,12 @@ final class FilterListStore {
         let language = Locale.current.language.languageCode?.identifier ?? "en"
         var catalog: [FilterList] = []
 
-        for (key, value) in root {
+        for (_, value) in root {
             guard let entry = value as? [String: Any],
                   entry["content"] as? String == "filters",
                   let title = entry["title"] as? String else { continue }
 
-            // `contentURL` est tantôt une adresse, tantôt une liste de miroirs : on prend
-            // le premier qui parle http.
+            // `contentURL` est tantôt une adresse, tantôt une liste de miroirs.
             let urls: [String]
             switch entry["contentURL"] {
             case let one as String: urls = [one]
@@ -243,16 +225,14 @@ final class FilterListStore {
             // système. On fait pareil : proposer trente-huit régions toutes cochées serait
             // absurde, n'en proposer aucune le serait aussi.
             let languages = ((entry["lang"] as? String) ?? "").split(separator: " ").map(String.init)
-            let regional = !languages.isEmpty
-            let isDefault = (entry["off"] as? Bool) != true
-            let enabled = regional ? languages.contains(language) : isDefault
+            let enabled = languages.isEmpty ? (entry["off"] as? Bool) != true
+                                            : languages.contains(language)
 
             // Deux entrées du catalogue peuvent viser le même fichier — les avis de
             // cookies y sont référencés deux fois, par EasyList et par AdGuard.
             guard !catalog.contains(where: { $0.source == source }) else { continue }
             catalog.append(FilterList(title: title, source: source, isEnabled: enabled,
                                       group: group, parent: entry["parent"] as? String))
-            _ = key
         }
         guard !catalog.isEmpty else { return }
 
@@ -268,13 +248,11 @@ final class FilterListStore {
                 entry.updated = known.updated
                 entry.lines = known.lines
                 entry.rules = known.rules
+                entry.etag = known.etag
+                entry.lastModified = known.lastModified
             }
             merged.append(entry)
         }
-        // Ce que l'utilisateur a ajouté lui-même survit ; ce qui vient d'un ancien
-        // catalogue disparaît, fichier compris. Le garder « parce qu'il était actif »
-        // reviendrait à continuer d'interroger des hôtes qu'on a décidé de ne plus
-        // contacter.
         for known in lists {
             if merged.contains(where: { $0.source == known.source }) { continue }
             if known.group == "other" {
@@ -294,10 +272,73 @@ final class FilterListStore {
     }
 
     @discardableResult
-    func updateAll() async -> Int {
+    func update(_ list: FilterList) async -> Bool {
+        var request = URLRequest(url: list.source)
+        request.timeoutInterval = 30
+        // **Requête conditionnelle.** Une liste change une fois par jour au mieux ;
+        // retélécharger trente mégaoctets pour retrouver les mêmes octets est une dépense
+        // pour le réseau, pour les serveurs qui offrent ces listes, et pour l'attente.
+        if let etag = list.etag { request.setValue(etag, forHTTPHeaderField: "If-None-Match") }
+        if let modified = list.lastModified {
+            request.setValue(modified, forHTTPHeaderField: "If-Modified-Since")
+        }
+        // Sans ça, `URLSession` peut répondre depuis son propre cache et masquer le 304.
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              let index = lists.firstIndex(where: { $0.id == list.id }) else { return false }
+
+        // Rien de neuf : le fichier qu'on a est le bon, on note juste qu'on a vérifié.
+        if http.statusCode == 304, FileManager.default.fileExists(atPath: file(for: list).path) {
+            lists[index].updated = Date()
+            save()
+            return true
+        }
+        guard http.statusCode == 200,
+              let text = String(data: data, encoding: .utf8)
+                      ?? String(data: data, encoding: .isoLatin1) else { return false }
+
+        try? text.write(to: file(for: list), atomically: true, encoding: .utf8)
+        lists[index].updated = Date()
+        lists[index].etag = http.value(forHTTPHeaderField: "ETag")
+        lists[index].lastModified = http.value(forHTTPHeaderField: "Last-Modified")
+        lists[index].lines = text.reduce(into: 1) { count, character in
+            if character == "\n" { count += 1 }
+        }
+        save()
+        return true
+    }
+
+    /// Télécharge les listes actives **de front**, six à la fois.
+    ///
+    /// Une à une, trente-trois listes font trente-trois allers-retours mis bout à bout :
+    /// l'attente est celle de la latence, pas celle du débit. Six en parallèle suffisent à
+    /// saturer une connexion ordinaire sans se faire prendre pour une attaque par des
+    /// serveurs qui hébergent gratuitement ces fichiers.
+    @discardableResult
+    func updateAll(progress: @escaping (Int, Int) -> Void = { _, _ in }) async -> Int {
+        let targets = lists.filter(\.isEnabled)
+        guard !targets.isEmpty else { return 0 }
+
+        var done = 0
         var updated = 0
-        for list in lists where list.isEnabled {
-            if await update(list) { updated += 1 }
+        await withTaskGroup(of: Bool.self) { group in
+            var pending = targets.makeIterator()
+            for _ in 0..<min(6, targets.count) {
+                guard let list = pending.next() else { break }
+                group.addTask { await self.update(list) }
+            }
+            while let success = await group.next() {
+                done += 1
+                if success { updated += 1 }
+                progress(done, targets.count)
+                // Une requête part dès qu'une autre revient : la file reste pleine sans
+                // jamais dépasser six.
+                if let list = pending.next() {
+                    group.addTask { await self.update(list) }
+                }
+            }
         }
         return updated
     }

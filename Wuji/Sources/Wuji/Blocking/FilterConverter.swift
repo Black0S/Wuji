@@ -35,7 +35,7 @@ enum FilterConverter {
         "genericblock", "generichide", "specifichide", "elemhide", "header", "stealth",
         "permissions", "urltransform", "popup", "popunder", "webrtc", "important",
         "denyallow", "to", "method", "strict1p", "strict3p", "ipaddress", "from",
-        "match-case-any", "app", "network", "extension", "content", "jsinject", "urlblock",
+        "app", "network", "extension", "content", "jsinject", "urlblock",
         "document-blocked", "referrerpolicy", "cname", "object-subrequest"
     ]
 
@@ -82,6 +82,7 @@ enum FilterConverter {
     private enum Kind { case block, cosmetic, exception }
 
     private static func convert(_ line: String) -> ([String: Any], Kind)? {
+        if let rule = hosts(line) { return (rule, .block) }
         if let index = line.range(of: "#") {
             // Séparer un masquage d'une règle réseau qui contiendrait un `#` : seuls les
             // marqueurs de masquage comptent, et ils font deux caractères.
@@ -93,6 +94,27 @@ enum FilterConverter {
         }
         guard let (rule, isException) = network(line) else { return nil }
         return (rule, isException ? .exception : .block)
+    }
+
+    /// Format « hosts » : `0.0.0.0 domaine`.
+    ///
+    /// Plusieurs listes de référence sont publiées ainsi — celle de Peter Lowe, celle de
+    /// Dan Pollock. Sans cette lecture, chaque ligne devenait un motif littéral contenant
+    /// une adresse IP et une espace : trois mille cinq cents règles qui ne correspondaient
+    /// à rien et qui étaient comptées comme actives. Un compteur qui ment sur ce qu'il
+    /// protège est pire qu'un compteur absent.
+    private static func hosts(_ line: String) -> [String: Any]? {
+        let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
+        guard parts.count >= 2,
+              ["0.0.0.0", "127.0.0.1", "::1", "::"].contains(String(parts[0])) else { return nil }
+
+        let host = String(parts[1]).lowercased()
+        // La ligne qui redirige la machine vers elle-même n'est pas un blocage.
+        guard host != "localhost", host != "localhost.localdomain", host != "broadcasthost",
+              host.contains("."), host.allSatisfy(\.isASCII),
+              let filter = urlFilter("||\(host)^") else { return nil }
+
+        return ["trigger": ["url-filter": filter], "action": ["type": "block"]]
     }
 
     /// Masquage d'éléments : `domaine##sélecteur`.
@@ -253,8 +275,13 @@ enum FilterConverter {
         }
         if anchorEnd { result += "$" }
 
+        // Pas de validation par `NSRegularExpression` ici : le motif est construit
+        // caractère par caractère, chaque métacaractère y est soit traduit soit échappé.
+        // La compiler quand même coûtait la moitié du temps de conversion — trois cent
+        // mille expressions régulières fabriquées pour être aussitôt jetées.
+        //
         // `.*` seul ferait une règle qui bloque le web entier si une option manque.
-        guard result.count > 2, result != ".*", valid(result) else { return nil }
+        guard result.count > 2, result != ".*" else { return nil }
         return result
     }
 

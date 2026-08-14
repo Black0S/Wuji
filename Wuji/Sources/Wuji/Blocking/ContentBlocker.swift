@@ -18,7 +18,7 @@ final class ContentBlocker {
     enum State {
         case off
         case empty
-        case updating
+        case updating(done: Int, total: Int)
         case compiling
         case active(rules: Int, skipped: Int, dropped: Int)
         case failed(String)
@@ -27,7 +27,8 @@ final class ContentBlocker {
             switch self {
             case .off:       return "Désactivé"
             case .empty:     return "Aucune liste téléchargée"
-            case .updating:  return "Téléchargement…"
+            case .updating(let done, let total):
+                return total > 0 ? "Téléchargement… \(done)/\(total)" : "Téléchargement…"
             case .compiling: return "Compilation…"
             case .active(let rules, let skipped, let dropped):
                 var text = "\(format(rules)) règles actives"
@@ -129,7 +130,8 @@ final class ContentBlocker {
         onChange?()
 
         // La conversion coûte plusieurs secondes sur trois cent mille lignes : hors du fil
-        // principal, sinon l'interface se fige au démarrage.
+        // principal, sinon l'interface se fige au démarrage. Et **une liste par tâche** :
+        // elles ne se regardent pas, donc autant les traduire toutes en même temps.
         let userRules = lists.userRules.joined(separator: "\n")
         let hosts = settings.blockingExceptions
         Task.detached(priority: .userInitiated) {
@@ -143,19 +145,28 @@ final class ContentBlocker {
             // Ce que l'utilisateur a écrit doit valoir partout, donc être répété partout.
             let universal = mine.exceptions
 
+            let converted = await withTaskGroup(of: (Int, Batch).self) { group in
+                for (position, source) in sources.enumerated() {
+                    group.addTask {
+                        let output = FilterConverter.rules(from: source.1)
+                        return (position, Batch(output: output))
+                    }
+                }
+                // L'ordre du catalogue est rétabli à l'arrivée : les tâches finissent dans
+                // le désordre, et l'ordre des règles change ce qu'elles font.
+                var result = [Batch?](repeating: nil, count: sources.count)
+                for await (position, batch) in group { result[position] = batch }
+                return result.compactMap { $0 }
+            }
+
             var chunks: [[[String: Any]]] = []
             var accepted = universal.count
             var rejected = 0
             var perList: [(UUID, Int, Int)] = []
 
-            func serialize(_ rules: [[String: Any]]) {
-                guard !rules.isEmpty else { return }
-                chunks.append(rules)
-            }
-
-            for (list, text) in sources {
-                let output = FilterConverter.rules(from: text)
-                perList.append((list.id, output.accepted + output.rejected, output.accepted))
+            for (source, batch) in zip(sources, converted) {
+                let output = batch.output
+                perList.append((source.0.id, output.accepted + output.rejected, output.accepted))
                 rejected += output.rejected
                 accepted += output.accepted
 
@@ -166,10 +177,12 @@ final class ContentBlocker {
                 let room = max(1, Self.chunkSize - tail.count)
                 for start in stride(from: 0, to: max(body.count, 1), by: room) {
                     let slice = Array(body[start..<min(start + room, body.count)])
-                    serialize(slice + tail)
+                    guard !slice.isEmpty || !tail.isEmpty else { continue }
+                    chunks.append(slice + tail)
                 }
             }
-            serialize(mine.blocking + mine.cosmetic + universal)
+            let mineRules = mine.blocking + mine.cosmetic + universal
+            if !mineRules.isEmpty { chunks.append(mineRules) }
 
             let counts = (accepted: accepted, rejected: rejected, chunks: chunks.count)
             let sealed = chunks
@@ -180,18 +193,30 @@ final class ContentBlocker {
         }
     }
 
+    /// Le résultat d'une conversion, transporté d'une tâche à l'autre.
+    ///
+    /// `[String: Any]` n'est pas `Sendable` et ne le sera jamais : c'est un dictionnaire
+    /// hétérogène. Ici il est construit par une tâche, remis à une autre, et plus personne
+    /// n'y touche — un transfert sûr que le compilateur ne peut pas prouver seul.
+    private struct Batch: @unchecked Sendable {
+        let output: FilterConverter.Output
+    }
+
     /// Télécharge puis recompile.
     func update() {
         Task { await updateAndCompile() }
     }
 
     private func updateAndCompile() async {
-        state = .updating
+        state = .updating(done: 0, total: 0)
         onChange?()
         // Le catalogue d'abord : c'est lui qui dit quelles listes existent, et il change
         // plus souvent qu'on ne croit — les listes se scindent et se renomment.
         await lists.refreshCatalog()
-        await lists.updateAll()
+        await lists.updateAll { [weak self] done, total in
+            self?.state = .updating(done: done, total: total)
+            self?.onChange?()
+        }
         compile()
     }
 
