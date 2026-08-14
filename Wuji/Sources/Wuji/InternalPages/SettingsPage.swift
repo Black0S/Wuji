@@ -53,6 +53,8 @@ enum SettingsPage {
         var historyCount: Int
         var blockingEnabled: Bool
         var blockingSummary: String
+        /// Les autorisations accordées ou refusées, par site.
+        var permissions: [(host: String, kind: String, isAllowed: Bool)]
     }
 
     static func html(section: Section, state: State) -> String {
@@ -119,12 +121,46 @@ enum SettingsPage {
     }
 
     private static func websites(_ state: State) -> String {
-        row(title: "Zoom par défaut",
-            subtitle: "Appliqué à toutes les pages.",
-            control: """
-            <input type="range" name="zoom" min="50" max="200" step="5" value="\(Int(state.pageZoom * 100))">
-            <span class="readout" id="zoom-value">\(Int(state.pageZoom * 100)) %</span>
-            """)
+        let zoom = row(title: "Zoom par défaut",
+                       subtitle: "Appliqué à toutes les pages.",
+                       control: """
+                       <input type="range" name="zoom" min="50" max="200" step="5" value="\(Int(state.pageZoom * 100))">
+                       <span class="readout" id="zoom-value">\(Int(state.pageZoom * 100)) %</span>
+                       """)
+
+        // Les autorisations : une par site, révocable. Sans cette liste, une réponse donnée
+        // une fois deviendrait irrévocable — ce qui la rendrait dangereuse à donner.
+        let permissions = state.permissions.isEmpty
+            ? #"<p class="none">Aucun site n'a demandé la caméra ou le micro.</p>"#
+            : state.permissions.map { entry in
+                """
+                <div class="permission" data-host="\(escape(entry.host))" data-kind="\(entry.kind)">
+                  <span class="mono">\(escape(entry.host))</span>
+                  <span class="verdict \(entry.isAllowed ? "yes" : "no")">
+                    \(entry.isAllowed ? "autorisé" : "refusé") · \(label(entry.kind))
+                  </span>
+                  <button class="button" data-action="forget-permission">Oublier</button>
+                </div>
+                """
+            }.joined()
+
+        return zoom + """
+        <div class="row block">
+          <div class="labels">
+            <span class="title">Caméra et micro</span>
+            <span class="subtitle">Une réponse est retenue par site. L'oublier, c'est redemander à la prochaine visite.</span>
+          </div>
+        </div>
+        <div class="permissions">\(permissions)</div>
+        """
+    }
+
+    private static func label(_ kind: String) -> String {
+        switch kind {
+        case "camera":     return "caméra"
+        case "microphone": return "micro"
+        default:           return "caméra et micro"
+        }
     }
 
     // MARK: - Contrôles
@@ -213,6 +249,14 @@ enum SettingsPage {
     select:hover, .button:hover { border-color: var(--muted); }
     .button.danger:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
     input[type=range] { accent-color: var(--text); width: 180px; }
+    .row.block { border-bottom: 0; padding-bottom: 4px; }
+    .permissions { display: flex; flex-direction: column; gap: 6px; padding-bottom: 16px; }
+    .permission { display: flex; align-items: center; gap: 12px; }
+    .permission .mono { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                        font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .verdict { font-size: 12px; color: var(--muted); }
+    .verdict.no { color: var(--danger); }
+    .none { color: var(--muted); font-size: 12px; padding-bottom: 16px; }
     """
 
     private static let script = """
@@ -239,7 +283,11 @@ enum SettingsPage {
     document.addEventListener('click', (event) => {
       const button = event.target.closest('[data-action]');
       if (!button) return;
-      send({ action: button.dataset.action });
+      const row = button.closest('.permission');
+      send({ action: button.dataset.action,
+             host: row ? row.dataset.host : null,
+             kind: row ? row.dataset.kind : null });
+      if (row) row.remove();
     });
     """
 }

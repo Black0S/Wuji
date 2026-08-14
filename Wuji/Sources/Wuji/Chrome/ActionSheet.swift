@@ -199,14 +199,19 @@ final class ActionSheet: ThemedView {
     /// L'action destructrice est **en premier et nommée par son verbe** — « Supprimer »,
     /// pas « OK ». On lit ce qu'on est en train de faire, pas un acquiescement.
     func presentConfirmation(title: String, message: String, confirm: String,
+                             onCancel: (@MainActor () -> Void)? = nil,
                              onConfirm: @escaping @MainActor () -> Void) {
         titleLabel.stringValue = title
         messageLabel.stringValue = message
         hasHeader = true
         hasField = false
         isCentered = true
+        // Fermer sans choisir doit valoir « non », et pas laisser l'appelant attendre :
+        // une demande d'autorisation qui reste en suspens bloque la page qui l'a faite.
+        cancelAction = onCancel
         stack = [[
-            ActionItem(title: confirm, symbol: "trash", isDestructive: true, action: onConfirm),
+            ActionItem(title: confirm, symbol: "trash", isDestructive: true,
+                       action: { [weak self] in self?.cancelAction = nil; onConfirm() }),
             ActionItem(title: "Annuler", symbol: "xmark")
         ]]
         selection = 1
@@ -253,7 +258,13 @@ final class ActionSheet: ThemedView {
         guard isOpen else { return }
         isHidden = true
         stack = []
+        let cancel = cancelAction
+        cancelAction = nil
+        cancel?()
     }
+
+    /// Ce qu'il faut faire si la feuille se ferme sans qu'on ait choisi.
+    private var cancelAction: (@MainActor () -> Void)?
 
     // MARK: - Construction
 

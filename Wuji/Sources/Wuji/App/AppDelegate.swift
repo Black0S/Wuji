@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private let settings = Settings()
     private let filterLists = FilterListStore()
     private let userScripts = UserScriptStore()
+    private let permissions = Permissions()
     private lazy var blocker = ContentBlocker(settings: settings, lists: filterLists)
 
     /// Les onglets appartiennent à un espace, jamais à l'application. Tout ce qui suit
@@ -620,7 +621,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                            retention: settings.historyRetention,
                            historyCount: history.count,
                            blockingEnabled: settings.blockingEnabled,
-                           blockingSummary: blocker.state.summary)
+                           blockingSummary: blocker.state.summary,
+                           permissions: permissions.decisions.map {
+                               ($0.host, $0.kind.rawValue, $0.isAllowed)
+                           })
     }
 
     static let settingsPage = URL(string: "wuji://settings")!
@@ -648,6 +652,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         case "clear-history":
             history.clear()
             refreshSettingsPages()
+        case "forget-permission":
+            guard let host = payload["host"] as? String else { return }
+            permissions.forget(host: host, kind: payload["kind"] as? String)
         default:
             break
         }
@@ -915,6 +922,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             break
         }
     }
+
+    /// La demande de caméra ou de micro.
+    ///
+    /// **Elle passe par la feuille de l'application**, comme tout le reste : le panneau
+    /// système de WebKit arrive avec son matériau translucide et son vocabulaire, au moment
+    /// précis où l'on veut que la personne lise ce qu'elle accorde.
+    ///
+    /// Le refus est le défaut : fermer la feuille sans choisir, c'est refuser.
+    func webView(_ webView: WKWebView,
+                 requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo,
+                 type: WKMediaCaptureType) async -> WKPermissionDecision {
+        let host = origin.host
+        let kind: Permissions.Kind = switch type {
+        case .camera: .camera
+        case .microphone: .microphone
+        default: .both
+        }
+
+        // Déjà tranché pour ce site : on ne redemande pas.
+        if let known = permissions.decision(host: host, kind: kind) {
+            return known ? .grant : .deny
+        }
+
+        return await withCheckedContinuation { continuation in
+            layout.actionSheet.presentConfirmation(
+                title: "Autoriser \(kind.label) ?",
+                message: "« \(host) » demande l'accès à \(kind.label). Cette réponse sera retenue pour ce site, et modifiable dans les réglages.",
+                confirm: "Autoriser",
+                onCancel: { [weak self] in
+                    self?.permissions.remember(host: host, kind: kind, isAllowed: false)
+                    continuation.resume(returning: .deny)
+                },
+                onConfirm: { [weak self] in
+                    self?.permissions.remember(host: host, kind: kind, isAllowed: true)
+                    continuation.resume(returning: .grant)
+                })
+        }
+    }
+
+    /// Ce qu'il faut faire si la feuille d'autorisation se ferme sans reponse.
+    private var pendingPermission: (() -> Void)?
 
     /// `target="_blank"` et `window.open` : WebKit demande une nouvelle vue plutôt que de
     /// naviguer. Rendre `nil` reviendrait à avaler le lien en silence — c'est le défaut le
@@ -1864,6 +1913,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     /// Une adresse ou une recherche — la seule ambiguïté que l'omnibox doit lever.
     static func directURL(_ input: String) -> URL? {
+        // Les pages de l'application n'ont pas de point dans leur nom : « wuji://settings »
+        // partait en recherche, ce qui est le contraire de ce qu'on demande en le tapant.
+        if input.hasPrefix("\(InternalPageHandler.scheme)://") { return URL(string: input) }
+
         guard !input.contains(" "), input.contains(".") else { return nil }
         let candidate = input.contains("://") ? input : "https://\(input)"
         guard let url = URL(string: candidate), url.host != nil else { return nil }
