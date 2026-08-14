@@ -37,6 +37,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         config.userContentController.add(self, name: "wujiHistory")
         config.userContentController.add(self, name: "wujiDownloads")
         config.userContentController.add(self, name: "wujiError")
+        config.userContentController.add(self, name: PageContextMenu.handler)
+        config.userContentController.addUserScript(PageContextMenu.script)
         return config
     }()
 
@@ -731,6 +733,132 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         ]
     }
 
+    // MARK: - Menu contextuel de la page
+
+    /// Ancré sur le curseur, et non sur les coordonnées de l'événement : le clic vient
+    /// d'avoir lieu, la souris est encore dessus. C'est vrai jusque dans les cadres
+    /// imbriqués, où les coordonnées de la page ne sont plus celles de la fenêtre.
+    private func showPageMenu(_ target: PageContextMenu.Target) {
+        let items = contextItems(for: target)
+        guard !items.isEmpty, let window, let layout else { return }
+        let inWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        layout.actionSheet.present(items, at: layout.convert(inWindow, from: nil))
+    }
+
+    /// Le menu parle de ce qui est sous le curseur, et de rien d'autre. Sur un lien il
+    /// parle du lien ; sur une image, de l'image ; sur du vide, de la page. Un menu qui
+    /// dirait tout à chaque fois obligerait à chercher la seule ligne qui s'applique.
+    private func contextItems(for target: PageContextMenu.Target) -> [ActionItem] {
+        var items: [ActionItem] = []
+        func startGroup() {
+            if !items.isEmpty { items.append(.separator) }
+        }
+
+        if let link = target.link {
+            items.append(ActionItem(title: "Ouvrir dans un nouvel onglet", symbol: "square.on.square",
+                                    action: { [weak self] in self?.openInNewTab(link, activate: false) }))
+            items.append(ActionItem(title: "Copier l'adresse du lien", symbol: "link",
+                                    action: { Self.copy(link.absoluteString) }))
+        }
+
+        if let image = target.image, PageContextMenu.isAddressable(image) {
+            startGroup()
+            items.append(ActionItem(title: "Ouvrir l'image dans un nouvel onglet", symbol: "photo",
+                                    action: { [weak self] in self?.openInNewTab(image, activate: false) }))
+            items.append(ActionItem(title: "Copier l'adresse de l'image", symbol: "link",
+                                    action: { Self.copy(image.absoluteString) }))
+            items.append(ActionItem(title: "Enregistrer l'image…", symbol: "arrow.down.circle",
+                                    action: { [weak self] in self?.download(image) }))
+        }
+
+        if target.isEditable {
+            // Dans un champ, l'ordre est celui que tout le monde connaît. Ces trois-là
+            // passent par les actions standard plutôt que par le presse-papiers : c'est
+            // le champ de la page qui sait où insérer, pas nous.
+            var edit: [ActionItem] = []
+            if !target.selection.isEmpty {
+                edit.append(ActionItem(title: "Couper", symbol: "scissors", shortcut: "⌘X",
+                                       action: { NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil) }))
+                edit.append(ActionItem(title: "Copier", symbol: "doc.on.doc", shortcut: "⌘C",
+                                       action: { Self.copy(target.selection) }))
+            }
+            if NSPasteboard.general.string(forType: .string) != nil {
+                edit.append(ActionItem(title: "Coller", symbol: "doc.on.clipboard", shortcut: "⌘V",
+                                       action: { NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil) }))
+            }
+            if !edit.isEmpty {
+                startGroup()
+                items.append(contentsOf: edit)
+            }
+        } else if !target.selection.isEmpty {
+            startGroup()
+            items.append(ActionItem(title: "Copier", symbol: "doc.on.doc", shortcut: "⌘C",
+                                    action: { Self.copy(target.selection) }))
+            if let url = settings.searchEngine.url(for: target.selection) {
+                // La recherche part dans un nouvel onglet : on cherche un mot **en lisant**
+                // une page, et perdre la page serait perdre la raison de chercher.
+                items.append(ActionItem(title: Self.searchTitle(for: target.selection),
+                                        symbol: "magnifyingglass",
+                                        action: { [weak self] in self?.openInNewTab(url, activate: true) }))
+            }
+        }
+
+        guard items.isEmpty else { return items }
+
+        // Rien sous le curseur : le menu parle alors de la page elle-même. Précédent et
+        // suivant n'apparaissent que s'il y a quelque chose derrière ou devant — une
+        // entrée grisée en permanence est une entrée qu'on apprend à ne plus lire.
+        guard let tab = currentTab else { return [] }
+        if tab.webView.canGoBack {
+            items.append(ActionItem(title: "Précédent", symbol: "chevron.left",
+                                    action: { [weak self] in self?.goBack(nil) }))
+        }
+        if tab.webView.canGoForward {
+            items.append(ActionItem(title: "Suivant", symbol: "chevron.right",
+                                    action: { [weak self] in self?.goForward(nil) }))
+        }
+        items.append(ActionItem(title: "Recharger", symbol: "arrow.clockwise", shortcut: "⌘R",
+                                action: { [weak self] in self?.reload(nil) }))
+        if let url = tab.url, !isBlank(tab) {
+            items.append(.separator)
+            items.append(ActionItem(title: "Copier l'adresse de la page", symbol: "link",
+                                    action: { Self.copy(url.absoluteString) }))
+        }
+        return items
+    }
+
+    /// Assez de la sélection pour la reconnaître, jamais assez pour couper la ligne.
+    ///
+    /// La citation est raccourcie **jusqu'à ce qu'elle tienne**, et non à un nombre de
+    /// caractères choisi d'avance : une troncature par la feuille emporterait le guillemet
+    /// fermant, et on ne saurait plus où finit ce qu'on a sélectionné.
+    private static func searchTitle(for selection: String) -> String {
+        let flat = selection.replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        func title(_ quote: String) -> String { "Rechercher « \(quote) »" }
+        guard !ActionSheet.fits(title: title(flat)) else { return title(flat) }
+
+        var candidate = flat
+        while !candidate.isEmpty, !ActionSheet.fits(title: title(candidate + "…")) {
+            candidate.removeLast()
+        }
+        return title(candidate.trimmingCharacters(in: .whitespaces) + "…")
+    }
+
+    private static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// Télécharger sans naviguer : enregistrer une image ne doit pas quitter la page où
+    /// on l'a trouvée.
+    private func download(_ url: URL) {
+        guard let webView = currentTab?.webView else { return }
+        webView.startDownload(using: URLRequest(url: url)) { [weak self] download in
+            MainActor.assumeIsolated { self?.register(download, source: url) }
+        }
+    }
+
     @objc func showHistory(_ sender: Any?) {
         openInternal(URL(string: "wuji://history")!)
     }
@@ -751,6 +879,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                                            didReceive message: WKScriptMessage) {
         MainActor.assumeIsolated {
             guard let payload = message.body as? [String: Any] else { return }
+            if message.name == PageContextMenu.handler {
+                showPageMenu(PageContextMenu.Target(payload: payload))
+                return
+            }
             if message.name == "wujiError" {
                 guard let raw = payload["url"] as? String, let url = URL(string: raw) else { return }
                 currentTab?.webView.load(URLRequest(url: url))

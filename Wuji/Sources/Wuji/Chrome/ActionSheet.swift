@@ -50,9 +50,25 @@ final class ActionSheet: ThemedView {
     private var selection = 0
     private var anchor: NSPoint = .zero
 
-    private static let cardWidth: CGFloat = 264
+    /// La feuille s'ajuste à sa ligne la plus longue, entre ces deux bornes.
+    ///
+    /// Une largeur fixe obligeait à choisir entre couper « Ouvrir dans un nouvel onglet »
+    /// et laisser un vide sur un menu de trois mots. Le minimum garde une carte de
+    /// confirmation à une taille lisible ; le maximum empêche qu'un titre de page
+    /// transforme la feuille en bandeau.
+    private static let minWidth: CGFloat = 264
+    /// 348 et pas 340 : « Ouvrir l'image dans un nouvel onglet » en demande 345, et une
+    /// borne qui coupe le libellé le plus long de l'application ne borne rien, elle abîme.
+    private static let maxWidth: CGFloat = 348
     private static let rowHeight = Tokens.Row.compact
     private static let padding = Tokens.Card.padding
+    /// Colonne réservée au raccourci, à droite de chaque ligne. Les lignes la respectent
+    /// aussi : c'est elle qui garantit que les libellés s'arrêtent tous au même endroit.
+    static let shortcutColumn: CGFloat = 56
+
+    /// Largeur de la feuille affichée. Recalculée à chaque niveau : entrer dans un
+    /// sous-menu change la liste, donc la ligne la plus longue.
+    private var cardWidth = ActionSheet.minWidth
 
     var isOpen: Bool { !isHidden }
 
@@ -134,7 +150,42 @@ final class ActionSheet: ThemedView {
     /// en dessous et alignée à droite.
     func present(_ items: [ActionItem], below view: NSView) {
         let origin = convert(NSPoint(x: view.bounds.maxX, y: 0), from: view)
-        present(items, at: NSPoint(x: origin.x - Self.cardWidth, y: origin.y - Tokens.Space.xs))
+        present(items, at: NSPoint(x: origin.x - Self.width(for: items), y: origin.y - Tokens.Space.xs))
+    }
+
+    /// Assez large pour la ligne la plus longue, et pas davantage.
+    private static func width(for items: [ActionItem]) -> CGFloat {
+        let longest = items.lazy
+            .filter { !$0.isSeparator }
+            .map(\.title)
+            .map(labelWidth)
+            .max() ?? 0
+        return min(max(minWidth, chrome + longest), maxWidth)
+    }
+
+    /// Un libellé tient-il en entier ? La feuille est la seule à connaître ses marges,
+    /// c'est donc elle qui répond — un appelant qui compterait ses caractères se
+    /// tromperait au premier mot large.
+    static func fits(title: String) -> Bool {
+        chrome + labelWidth(title) <= maxWidth
+    }
+
+    /// Ce que la ligne dépense avant et après son libellé : glyphe, gouttières, colonne
+    /// du raccourci, et les marges de la carte.
+    private static let chrome = padding * 2 + Tokens.Space.s + Tokens.Row.glyph
+        + Tokens.Row.glyphGap + Tokens.Space.xs + shortcutColumn + Tokens.Space.s
+
+    /// Un champ de mesure, du même type que ceux des lignes.
+    ///
+    /// Mesurer la chaîne seule donnait quatre points de moins que la réalité :
+    /// `NSTextFieldCell` en ajoute deux de chaque côté, et ce cheveu suffisait à couper le
+    /// dernier caractère d'un libellé qu'on venait pourtant de déclarer à sa taille.
+    /// Le champ qui affiche est donc aussi celui qui mesure.
+    private static let probe = InsetTextField.label()
+
+    private static func labelWidth(_ title: String) -> CGFloat {
+        probe.stringValue = title
+        return ceil(probe.fittingSize.width)
     }
 
     /// Une confirmation : la question, sa conséquence, puis les deux issues.
@@ -201,6 +252,9 @@ final class ActionSheet: ThemedView {
     // MARK: - Construction
 
     private func rebuild() {
+        // Une carte de confirmation ou de saisie garde la largeur minimale : sa mesure
+        // viendrait de ses deux boutons, alors que c'est son texte qui l'occupe.
+        cardWidth = hasHeader ? Self.minWidth : Self.width(for: items)
         rows.forEach { $0.removeFromSuperview() }
         separators.forEach { $0.removeFromSuperview() }
         rows = []
@@ -248,7 +302,7 @@ final class ActionSheet: ThemedView {
         titleLabel.textColor = Tokens.textPrimary
         messageLabel.textColor = Tokens.textSecondary
 
-        let textWidth = Self.cardWidth - Tokens.Card.textInset * 2
+        let textWidth = cardWidth - Tokens.Card.textInset * 2
         let messageHeight: CGFloat
         if hasField {
             messageHeight = 34
@@ -267,12 +321,12 @@ final class ActionSheet: ThemedView {
         // Rabattue dans la fenêtre : une feuille qui déborde par le bas est une feuille
         // qu'on ne peut pas lire jusqu'au bout.
         let x = isCentered
-            ? (bounds.width - Self.cardWidth) / 2
-            : min(max(Tokens.Space.s, anchor.x), max(Tokens.Space.s, bounds.width - Self.cardWidth - Tokens.Space.s))
+            ? (bounds.width - cardWidth) / 2
+            : min(max(Tokens.Space.s, anchor.x), max(Tokens.Space.s, bounds.width - cardWidth - Tokens.Space.s))
         let y = isCentered
             ? (bounds.height - height) / 2
             : max(Tokens.Space.s, min(anchor.y - height, bounds.height - height - Tokens.Space.s))
-        card.frame = NSRect(x: x, y: y, width: Self.cardWidth, height: height)
+        card.frame = NSRect(x: x, y: y, width: cardWidth, height: height)
 
         var cursor = height - Self.padding
         if hasHeader {
@@ -293,14 +347,14 @@ final class ActionSheet: ThemedView {
                 cursor -= Tokens.Space.m
                 if separators.indices.contains(separatorIndex) {
                     separators[separatorIndex].frame = NSRect(x: 0, y: cursor + Tokens.Space.m / 2,
-                                                              width: Self.cardWidth, height: 1)
+                                                              width: cardWidth, height: 1)
                     separatorIndex += 1
                 }
                 continue
             }
             cursor -= Self.rowHeight
             rows[index].frame = NSRect(x: Self.padding, y: cursor,
-                                       width: Self.cardWidth - Self.padding * 2, height: Self.rowHeight)
+                                       width: cardWidth - Self.padding * 2, height: Self.rowHeight)
         }
     }
 
@@ -452,7 +506,7 @@ private final class ActionRow: ThemedView {
         glyph.frame = NSRect(x: Tokens.Space.s, y: (bounds.height - glyphSize) / 2,
                              width: glyphSize, height: glyphSize)
         let left = Tokens.Space.s + glyphSize + Tokens.Row.glyphGap
-        let rightWidth: CGFloat = 56
+        let rightWidth = ActionSheet.shortcutColumn
         shortcut.frame = NSRect(x: bounds.width - rightWidth - Tokens.Space.s, y: 0,
                                 width: rightWidth, height: bounds.height)
         chevron.frame = NSRect(x: bounds.width - 18, y: (bounds.height - 11) / 2, width: 11, height: 11)
