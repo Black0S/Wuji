@@ -2,12 +2,15 @@ import Foundation
 
 /// Une liste de filtres à laquelle on est abonné.
 struct FilterList: Codable, Identifiable {
-    let id: UUID
+    var id: UUID
     var title: String
     var source: URL
     var isEnabled: Bool
     /// Le rayon du catalogue d'uBlock Origin : « ads », « privacy », « regions »…
     var group: String = "other"
+    /// Le paquet auquel la liste appartient, quand uBlock en présente plusieurs sous un
+    /// même titre — « EasyList – Annoyances » et ses cinq morceaux.
+    var parent: String?
     /// Dernier téléchargement réussi.
     var updated: Date?
     /// Lignes reçues, et règles réellement traduites. Les deux comptent : l'écart dit ce
@@ -15,12 +18,14 @@ struct FilterList: Codable, Identifiable {
     var lines: Int
     var rules: Int
 
-    init(title: String, source: URL, isEnabled: Bool = true, group: String = "other") {
+    init(title: String, source: URL, isEnabled: Bool = true, group: String = "other",
+         parent: String? = nil) {
         id = UUID()
         self.title = title
         self.source = source
         self.isEnabled = isEnabled
         self.group = group
+        self.parent = parent
         lines = 0
         rules = 0
     }
@@ -84,6 +89,9 @@ final class FilterListStore {
     /// Les rayons, dans l'ordre où uBlock les présente.
     static let groupOrder = ["default", "ads", "privacy", "malware", "multipurpose",
                              "cookies", "social", "annoyances", "regions", "other"]
+
+    /// Les régions comptent trente-huit entrées : repliées par défaut, comme chez uBlock.
+    static let collapsedGroups: Set<String> = ["regions"]
 
     static func groupTitle(_ group: String) -> String {
         switch group {
@@ -221,16 +229,16 @@ final class FilterListStore {
             case let many as [String]: urls = many
             default: continue
             }
-            // **Seulement ce qu'uBlock héberge lui-même.** Leur dépôt `uAssets` sert la
-            // plupart des listes en miroir, y compris EasyList et EasyPrivacy. S'en tenir
-            // à ces adresses-là veut dire un seul hôte contacté au lieu de six, et des
-            // fichiers dont uBlock a vérifié le format avant de les republier. Les listes
-            // qui n'existent que chez leur auteur — AdGuard, les régionales — ne sont plus
-            // proposées ; elles restent ajoutables par leur adresse.
-            guard let address = urls.first(where: { $0.contains("ublockorigin.github.io/uAssets") }),
+            // Le miroir d'uBlock quand il existe, l'adresse de l'auteur sinon : `uAssets`
+            // republie une partie des listes, jamais toutes. Préférer le miroir, c'est un
+            // hôte de moins à contacter et un fichier qu'uBlock a relu.
+            guard let address = urls.first(where: { $0.contains("ublockorigin.github.io/uAssets") })
+                    ?? urls.first(where: { $0.hasPrefix("http") }),
                   let source = URL(string: address) else { continue }
 
-            let group = (entry["group"] as? String) ?? "other"
+            // `group2` est le rayon que montre uBlock quand il diffère du rangement
+            // interne : les avis de cookies et les widgets sociaux sortent des nuisances.
+            let group = (entry["group2"] as? String) ?? (entry["group"] as? String) ?? "other"
             // uBlock active une liste régionale quand elle correspond à la langue du
             // système. On fait pareil : proposer trente-huit régions toutes cochées serait
             // absurde, n'en proposer aucune le serait aussi.
@@ -242,19 +250,24 @@ final class FilterListStore {
             // Deux entrées du catalogue peuvent viser le même fichier — les avis de
             // cookies y sont référencés deux fois, par EasyList et par AdGuard.
             guard !catalog.contains(where: { $0.source == source }) else { continue }
-            catalog.append(FilterList(title: title, source: source,
-                                      isEnabled: enabled, group: group))
+            catalog.append(FilterList(title: title, source: source, isEnabled: enabled,
+                                      group: group, parent: entry["parent"] as? String))
             _ = key
         }
         guard !catalog.isEmpty else { return }
 
-        // Fusion : l'état connu l'emporte sur celui du catalogue.
+        // Fusion. **Le catalogue fait foi sur ce qu'il décrit** — titre, rayon, paquet —
+        // et l'utilisateur sur ce qui le regarde : active ou non. Le reste, ce sont les
+        // chiffres du dernier téléchargement, qu'on garde avec l'identifiant : c'est lui
+        // qui nomme le fichier sur le disque, et le changer ferait tout retélécharger.
         var merged: [FilterList] = []
         for var entry in catalog {
             if let known = lists.first(where: { $0.source == entry.source }) {
-                entry = known
-                entry.title = catalog.first { $0.source == known.source }?.title ?? known.title
-                entry.group = catalog.first { $0.source == known.source }?.group ?? known.group
+                entry.id = known.id
+                entry.isEnabled = known.isEnabled
+                entry.updated = known.updated
+                entry.lines = known.lines
+                entry.rules = known.rules
             }
             merged.append(entry)
         }
@@ -267,6 +280,7 @@ final class FilterListStore {
             if known.group == "other" {
                 merged.append(known)
             } else {
+                // Sortie du catalogue : son fichier n'a plus de raison de rester.
                 try? FileManager.default.removeItem(at: file(for: known))
             }
         }

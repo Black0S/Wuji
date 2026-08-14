@@ -107,18 +107,39 @@ enum AdBlockPage {
         """
     }
 
-    /// Rangées par rayon, comme dans uBlock : quarante listes à la file ne se lisent pas.
+    /// Rangées par rayon puis par paquet, comme dans uBlock : soixante-dix listes à la
+    /// file ne se lisent pas, et cinq morceaux d'« EasyList – Annoyances » se comprennent
+    /// mieux sous leur titre commun qu'éparpillés dans l'ordre alphabétique.
     private static func groups(_ lists: [FilterList]) -> String {
         FilterListStore.groupOrder.compactMap { group -> String? in
             let entries = lists.filter { $0.group == group }
             guard !entries.isEmpty else { return nil }
             let active = entries.filter(\.isEnabled).count
-            return """
-            <section>
-              <h3>\(escape(FilterListStore.groupTitle(group)))<span>\(active)/\(entries.count)</span></h3>
-              <ul>\(entries.map(row).joined())</ul>
-            </section>
+
+            let loose = entries.filter { $0.parent == nil }
+            var seen: Set<String> = []
+            let bundles = entries.compactMap(\.parent).filter { seen.insert($0).inserted }
+
+            let body = loose.map(row).joined() + bundles.map { name -> String in
+                let children = entries.filter { $0.parent == name }
+                let on = children.filter(\.isEnabled).count
+                return """
+                <li class="bundle"><span class="name">\(escape(name))</span>
+                  <span class="detail">\(on)/\(children.count)</span></li>
+                <ul class="children">\(children.map(row).joined())</ul>
+                """
+            }.joined()
+
+            // Les régions sont repliées : trente-huit lignes dont on n'en veut qu'une.
+            let collapsed = FilterListStore.collapsedGroups.contains(group)
+            let heading = """
+            <h3>\(escape(FilterListStore.groupTitle(group)))<span>\(active)/\(entries.count)</span></h3>
             """
+            return collapsed
+                ? """
+                  <section><details><summary>\(heading)</summary><ul>\(body)</ul></details></section>
+                  """
+                : "<section>\(heading)<ul>\(body)</ul></section>"
         }.joined()
     }
 
@@ -285,6 +306,17 @@ enum AdBlockPage {
       color: var(--muted);
     }
     h3 span { font-weight: 400; letter-spacing: 0; opacity: .7; }
+    /* Le titre d'un paquet n'est pas une liste : pas de case, et un texte en retrait
+       pour qu'on lise « ceci contient ce qui suit ». */
+    li.bundle { color: var(--muted); padding-top: 14px; gap: 8px; }
+    li.bundle:hover { background: transparent; }
+    li.bundle .name { font-size: 12px; font-weight: 600; flex: none; }
+    .children { padding-left: 20px; }
+    summary { cursor: pointer; list-style: none; }
+    summary::-webkit-details-marker { display: none; }
+    summary h3 { cursor: pointer; }
+    summary h3::after { content: '▸'; margin-left: 2px; opacity: .5; }
+    details[open] summary h3::after { content: '▾'; }
     .ghost:hover { color: var(--text); border-color: var(--muted); }
     .ghost:disabled { opacity: .5; cursor: default; }
     """
