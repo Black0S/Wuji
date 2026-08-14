@@ -130,6 +130,7 @@ final class SettingsWindow: NSWindow {
 
     /// Fourni par l'application : le panneau ne connaît pas l'historique, il déclenche.
     var onClearHistory: (() -> Void)?
+    var onOpenAdBlock: (() -> Void)?
     var historyCount: () -> Int = { 0 }
 
     /// Le bloqueur compile en arrière-plan : la ligne qui annonce le nombre de règles est
@@ -146,19 +147,15 @@ final class SettingsWindow: NSWindow {
                     subtitle: "\(blocker.state.summary). Liste écrite pour Wuji, jamais mise à jour dans votre dos.",
                     isOn: settings.blockingEnabled) { [weak self] isOn in
             self?.settings.blockingEnabled = isOn
-            self?.blocker.reload()
+            self?.blocker.start()
             self?.refreshBlocking()
         }
-        if !settings.blockingExceptions.isEmpty {
-            let hosts = settings.blockingExceptions
-            pane.button(title: "Sites sans protection",
-                        subtitle: hosts.joined(separator: ", "),
-                        action: "Réactiver") { [weak self] in
-                self?.settings.blockingExceptions = []
-                self?.blocker.reload()
-                self?.select(.privacy)
-            }
-        }
+        // Les listes, les exceptions et les règles écrites à la main vivent sur
+        // `wuji://ad-block` : une fenêtre de réglages sait montrer un interrupteur, pas
+        // gérer une collection. Ici on dit l'état et on ouvre la porte.
+        pane.button(title: "Listes de filtres",
+                    subtitle: "Abonnements, sites sans protection et règles à vous.",
+                    action: "Ouvrir") { [weak self] in self?.onOpenAdBlock?() }
         pane.slider(title: "Conserver l'historique",
                     subtitle: "Au-delà, les pages sont effacées au lancement suivant.",
                     value: CGFloat(settings.historyRetention), range: 7...365, unit: "j") { [weak self] in

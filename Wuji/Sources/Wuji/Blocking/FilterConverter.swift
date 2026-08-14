@@ -10,91 +10,142 @@ import Foundation
 /// moteur, avant même que la requête parte.
 ///
 /// **Ce que la traduction perd, elle le compte.** Le format Adblock a vingt ans d'options
-/// dont WebKit n'a pas l'équivalent : `$redirect`, `$csp`, `$removeparam`, le masquage
-/// d'exception `#@#`. Les règles concernées sont écartées et comptées, jamais approximées :
-/// une règle traduite « à peu près » casse des pages, et on ne saurait pas pourquoi.
+/// et d'extensions dont WebKit n'a pas l'équivalent : `$redirect`, `$csp`, les scriptlets
+/// `##+js(…)`, les sélecteurs étendus `:has()`. Les règles concernées sont écartées et
+/// comptées, jamais approximées — une règle traduite « à peu près » casse des pages, et on
+/// ne saurait pas pourquoi. Sur les listes de référence, l'écart tourne autour de 5 %.
 enum FilterConverter {
 
+    /// Les règles d'une liste, rangées par nature. Elles ne sont pas encore mises bout à
+    /// bout : c'est l'assemblage final, toutes listes confondues, qui décide de l'ordre et
+    /// de ce qui tient dans le budget.
     struct Output {
-        var rules: [[String: Any]] = []
-        /// Règles traduites, règles écartées faute d'équivalent.
+        var blocking: [[String: Any]] = []
+        var cosmetic: [[String: Any]] = []
+        var exceptions: [[String: Any]] = []
         var accepted = 0
         var rejected = 0
+    }
+
+    /// WebKit refuse en bloc au-delà d'un certain volume — et « en bloc » veut dire zéro
+    /// protection, pas une protection partielle. Le plafond est donc **global** : quatre
+    /// listes de trente mille règles font cent vingt mille règles, pas quatre listes
+    /// acceptées séparément. On s'arrête avant, et on le dit.
+    /// 145 000 : WebKit s'arrête à 150 000, et les listes grossissent entre deux mises à
+    /// jour. La marge évite de découvrir la limite un matin, sans protection.
+    static let limit = 145_000
+
+    /// Met les listes bout à bout dans l'ordre que WebKit exige, en tenant le budget.
+    ///
+    /// L'ordre de sacrifice quand ça déborde : le masquage d'abord. Une publicité visible
+    /// mais non chargée reste préférable à une publicité chargée, et les exceptions doivent
+    /// survivre — sans elles, des sites entiers cassent.
+    static func assemble(_ outputs: [Output]) -> (rules: [[String: Any]], dropped: Int) {
+        let blocking = outputs.flatMap(\.blocking)
+        let exceptions = outputs.flatMap(\.exceptions)
+        var cosmetic = outputs.flatMap(\.cosmetic)
+
+        let room = limit - blocking.count - exceptions.count
+        var dropped = 0
+        if room < cosmetic.count {
+            dropped = cosmetic.count - max(0, room)
+            cosmetic = Array(cosmetic.prefix(max(0, room)))
+        }
+        // `ignore-previous-rules` n'annule que ce qui le précède : les exceptions ferment
+        // la marche, sinon elles ne servent à rien.
+        return (blocking + cosmetic + exceptions, dropped)
     }
 
     /// Options qu'on ne sait pas rendre. Une règle qui en porte une est écartée en entier :
     /// l'appliquer sans son option ferait autre chose que ce que son auteur a écrit.
     private static let unsupported: Set<String> = [
-        "redirect", "redirect-rule", "csp", "removeparam", "rewrite", "badfilter",
-        "replace", "cookie", "empty", "mp4", "inline-script", "inline-font",
-        "genericblock", "generichide", "elemhide", "specifichide", "header", "stealth",
-        "permissions", "urltransform", "all", "popup", "popunder", "webrtc"
+        "redirect", "redirect-rule", "csp", "removeparam", "queryprune", "rewrite",
+        "badfilter", "replace", "cookie", "empty", "mp4", "inline-script", "inline-font",
+        "genericblock", "generichide", "specifichide", "elemhide", "header", "stealth",
+        "permissions", "urltransform", "popup", "popunder", "webrtc", "important",
+        "denyallow", "to", "method", "strict1p", "strict3p", "ipaddress", "from",
+        "match-case-any", "app", "network", "extension", "content", "jsinject", "urlblock",
+        "document-blocked", "referrerpolicy", "cname", "object-subrequest"
     ]
 
-    /// Correspondance des types de ressource. WebKit en connaît une poignée ; ce qui n'y
-    /// entre pas est rangé dans `raw`, qui couvre le reste des requêtes réseau.
+    /// Correspondance des types de ressource.
     private static let resourceTypes: [String: String] = [
         "script": "script", "image": "image", "stylesheet": "style-sheet",
-        "font": "font", "media": "media", "object": "media",
-        "xmlhttprequest": "raw", "websocket": "raw", "ping": "raw", "other": "raw",
-        "subdocument": "document", "document": "document"
+        "css": "style-sheet", "font": "font", "media": "media", "object": "media",
+        "xmlhttprequest": "raw", "xhr": "raw", "websocket": "raw", "ping": "raw",
+        "beacon": "raw", "other": "raw", "subdocument": "document", "frame": "document",
+        "document": "document", "doc": "document"
+    ]
+
+    /// Marqueurs de sélecteurs étendus : uBlock et AdGuard les comprennent, pas WebKit.
+    private static let extendedSelectors = [
+        ":has(", ":has-text(", ":matches-css", ":xpath(", ":upward(", ":nth-ancestor(",
+        ":remove(", ":style(", ":watch-attr(", ":min-text-length(", ":matches-attr(",
+        ":matches-path(", ":others(", ":contains("
     ]
 
     static func rules(from text: String) -> Output {
         var output = Output()
-        // Les exceptions passent après : `ignore-previous-rules` n'annule que ce qui le
-        // précède. Traduites dans l'ordre du fichier, elles ne serviraient à rien.
-        var blocking: [[String: Any]] = []
-        var exceptions: [[String: Any]] = []
 
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            guard !line.isEmpty, !line.hasPrefix("!"), !line.hasPrefix("[") else { continue }
+        text.enumerateLines { line, _ in
+            let line = line.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, !line.hasPrefix("!"), !line.hasPrefix("["),
+                  !line.hasPrefix("#") || line.hasPrefix("##") else { return }
 
-            guard let rule = convert(line) else {
+            guard let (rule, kind) = convert(line) else {
                 output.rejected += 1
-                continue
+                return
             }
             output.accepted += 1
-            if (rule["action"] as? [String: Any])?["type"] as? String == "ignore-previous-rules" {
-                exceptions.append(rule)
-            } else {
-                blocking.append(rule)
+            switch kind {
+            case .block:     output.blocking.append(rule)
+            case .cosmetic:  output.cosmetic.append(rule)
+            case .exception: output.exceptions.append(rule)
             }
         }
-
-        output.rules = blocking + exceptions
         return output
     }
 
     // MARK: - Une ligne
 
-    private static func convert(_ line: String) -> [String: Any]? {
-        if line.contains("##") || line.contains("#@#") || line.contains("#?#") {
-            return cosmetic(line)
+    private enum Kind { case block, cosmetic, exception }
+
+    private static func convert(_ line: String) -> ([String: Any], Kind)? {
+        if let index = line.range(of: "#") {
+            // Séparer un masquage d'une règle réseau qui contiendrait un `#` : seuls les
+            // marqueurs de masquage comptent, et ils font deux caractères.
+            let rest = line[index.lowerBound...]
+            for marker in ["##", "#@#", "#?#", "#$#", "#%#", "#@?#", "#@$#"] where rest.hasPrefix(marker) {
+                guard marker == "##", let rule = cosmetic(line, at: index.lowerBound) else { return nil }
+                return (rule, .cosmetic)
+            }
         }
-        return network(line)
+        guard let (rule, isException) = network(line) else { return nil }
+        return (rule, isException ? .exception : .block)
     }
 
     /// Masquage d'éléments : `domaine##sélecteur`.
-    private static func cosmetic(_ line: String) -> [String: Any]? {
-        // `#@#` retire un masquage sur un domaine et `#?#` s'appuie sur des sélecteurs
-        // étendus : WebKit n'a ni l'un ni l'autre.
-        guard !line.contains("#@#"), !line.contains("#?#"),
-              let range = line.range(of: "##") else { return nil }
-
-        let selector = String(line[range.upperBound...])
-        guard !selector.isEmpty else { return nil }
+    private static func cosmetic(_ line: String, at marker: String.Index) -> [String: Any]? {
+        let selector = String(line[line.index(marker, offsetBy: 2)...])
+        guard !selector.isEmpty,
+              // Les scriptlets injectent du code, ce que les règles de contenu ne font pas.
+              !selector.hasPrefix("+js("), !selector.hasPrefix("script:"),
+              !extendedSelectors.contains(where: selector.contains),
+              selector.allSatisfy(\.isASCII) else { return nil }
 
         var trigger: [String: Any] = ["url-filter": ".*"]
-        let scope = String(line[..<range.lowerBound])
+        let scope = String(line[..<marker])
         if !scope.isEmpty {
             let (included, excluded) = domains(scope)
-            // Un sélecteur sans domaine s'applique partout ; c'est voulu par le format,
-            // mais on refuse ceux qui excluent seulement — la règle serait ingérable.
-            if !included.isEmpty { trigger["if-domain"] = included }
-            if !excluded.isEmpty { trigger["unless-domain"] = excluded }
-            if included.isEmpty && excluded.isEmpty { return nil }
+            // WebKit refuse les deux à la fois. On garde l'inclusion, qui restreint ;
+            // l'exclusion seule ferait une règle plus large que ce qui est écrit.
+            if !included.isEmpty {
+                trigger["if-domain"] = included
+            } else if !excluded.isEmpty {
+                trigger["unless-domain"] = excluded
+            } else {
+                return nil
+            }
         }
 
         return ["trigger": trigger,
@@ -102,7 +153,7 @@ enum FilterConverter {
     }
 
     /// Règle réseau : un motif, puis d'éventuelles options après `$`.
-    private static func network(_ line: String) -> [String: Any]? {
+    private static func network(_ line: String) -> ([String: Any], Bool)? {
         var body = line
         let isException = body.hasPrefix("@@")
         if isException { body.removeFirst(2) }
@@ -112,16 +163,18 @@ enum FilterConverter {
         // un motif peut contenir un `$` de fin d'ancrage dans une expression régulière.
         if let index = body.lastIndex(of: "$") {
             let tail = String(body[body.index(after: index)...])
-            if !tail.isEmpty, tail.allSatisfy({ "abcdefghijklmnopqrstuvwxyz0123456789,~=|.:/_-".contains($0) }) {
+            if !tail.isEmpty,
+               tail.allSatisfy({ "abcdefghijklmnopqrstuvwxyz0123456789,~=|.:/_-*".contains($0) }) {
                 options = tail.split(separator: ",").map(String.init)
                 body = String(body[..<index])
             }
         }
 
-        guard !body.isEmpty, let filter = urlFilter(body) else { return nil }
+        guard !body.isEmpty, body.allSatisfy(\.isASCII), let filter = urlFilter(body) else { return nil }
 
         var trigger: [String: Any] = ["url-filter": filter]
         var types: [String] = []
+        var excludedTypes: [String] = []
 
         for option in options {
             let negated = option.hasPrefix("~")
@@ -129,31 +182,46 @@ enum FilterConverter {
 
             if name.hasPrefix("domain=") {
                 let (included, excluded) = domains(String(name.dropFirst("domain=".count)))
-                if !included.isEmpty { trigger["if-domain"] = included }
-                if !excluded.isEmpty { trigger["unless-domain"] = excluded }
+                if !included.isEmpty {
+                    trigger["if-domain"] = included
+                } else if !excluded.isEmpty {
+                    trigger["unless-domain"] = excluded
+                }
                 continue
             }
             switch name {
-            case "third-party":
+            case "third-party", "3p":
                 trigger["load-type"] = [negated ? "first-party" : "third-party"]
+            case "first-party", "1p":
+                trigger["load-type"] = [negated ? "third-party" : "first-party"]
             case "match-case":
                 trigger["url-filter-is-case-sensitive"] = true
+            case "all":
+                continue
             case _ where unsupported.contains(name):
                 return nil
             case _ where resourceTypes[name] != nil:
-                // Une négation de type demanderait de lister tous les autres : on écarte
-                // plutôt que d'inventer une liste qui vieillira mal.
-                if negated { return nil }
-                types.append(resourceTypes[name]!)
+                if negated { excludedTypes.append(resourceTypes[name]!) }
+                else { types.append(resourceTypes[name]!) }
             default:
                 return nil
             }
         }
 
-        if !types.isEmpty { trigger["resource-type"] = Array(Set(types)) }
+        if !types.isEmpty {
+            trigger["resource-type"] = Array(Set(types)).sorted()
+        } else if !excludedTypes.isEmpty {
+            // Une négation de type se rend en listant les autres. C'est verbeux mais
+            // exact, alors qu'ignorer l'option élargirait la règle.
+            let all = Set(resourceTypes.values)
+            let kept = all.subtracting(excludedTypes)
+            guard !kept.isEmpty else { return nil }
+            trigger["resource-type"] = kept.sorted()
+        }
 
-        return ["trigger": trigger,
-                "action": ["type": isException ? "ignore-previous-rules" : "block"]]
+        return (["trigger": trigger,
+                 "action": ["type": isException ? "ignore-previous-rules" : "block"]],
+                isException)
     }
 
     // MARK: - Traduction du motif
@@ -166,7 +234,7 @@ enum FilterConverter {
     private static func urlFilter(_ pattern: String) -> String? {
         if pattern.hasPrefix("/"), pattern.hasSuffix("/"), pattern.count > 2 {
             let regex = String(pattern.dropFirst().dropLast())
-            return valid(regex) ? regex : nil
+            return valid(regex) && webKitCompatible(regex) ? regex : nil
         }
 
         var source = Substring(pattern)
@@ -203,7 +271,8 @@ enum FilterConverter {
         }
         if anchorEnd { result += "$" }
 
-        guard !result.isEmpty, valid(result) else { return nil }
+        // `.*` seul ferait une règle qui bloque le web entier si une option manque.
+        guard result.count > 2, result != ".*", valid(result) else { return nil }
         return result
     }
 
@@ -214,7 +283,9 @@ enum FilterConverter {
         var excluded: [String] = []
         for entry in list.split(separator: "|") {
             let value = entry.trimmingCharacters(in: .whitespaces).lowercased()
-            guard !value.isEmpty else { continue }
+            // Les domaines non ASCII devraient être convertis en punycode ; on les écarte
+            // plutôt que d'écrire une règle que WebKit refusera.
+            guard !value.isEmpty, value.allSatisfy(\.isASCII), !value.contains("*") else { continue }
             if value.hasPrefix("~") {
                 excluded.append("*" + value.dropFirst())
             } else {
@@ -228,5 +299,39 @@ enum FilterConverter {
     /// la liste : on écarte la règle plutôt que de perdre les autres.
     private static func valid(_ regex: String) -> Bool {
         (try? NSRegularExpression(pattern: regex)) != nil
+    }
+
+    /// `NSRegularExpression` est un juge trop indulgent.
+    ///
+    /// WebKit n'implémente qu'un **sous-ensemble** des expressions régulières : le point,
+    /// les classes, les groupes, l'alternance, et les quantificateurs `* + ?`. Une seule
+    /// règle qui dépasse ce sous-ensemble — un `{4,22}` venu d'une liste publique — fait
+    /// échouer la compilation de la liste entière, donc zéro protection. Ces règles-là
+    /// passaient la validation de Foundation sans problème : c'est exactement le genre de
+    /// vérification qui rassure sans rien vérifier.
+    private static func webKitCompatible(_ regex: String) -> Bool {
+        // Paresseux, groupes non capturants, assertions : hors sous-ensemble.
+        for pattern in ["*?", "+?", "??", "(?"] where regex.contains(pattern) { return false }
+
+        var escaped = false
+        for character in regex {
+            if escaped {
+                // Les raccourcis de classe (\w, \d, \s…) et les références arrière
+                // n'existent pas non plus. Un caractère spécial échappé, si.
+                if "wWdDsSbBAZzGnrtfv0123456789".contains(character) { return false }
+                escaped = false
+                continue
+            }
+            switch character {
+            case "\\": escaped = true
+            // Répétition bornée : « arbitrary atom repetitions are not supported ».
+            case "{", "}": return false
+            // Alternance : « disjunctions are not supported yet ». Le sous-ensemble est
+            // plus étroit qu'il n'y paraît, et chaque écart coûte la liste entière.
+            case "|": return false
+            default: break
+            }
+        }
+        return true
     }
 }

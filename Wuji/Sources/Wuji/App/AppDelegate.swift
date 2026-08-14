@@ -15,7 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private let downloads = DownloadStore()
     private let favorites = FavoritesStore()
     private let settings = Settings()
-    private lazy var blocker = ContentBlocker(settings: settings)
+    private let filterLists = FilterListStore()
+    private lazy var blocker = ContentBlocker(settings: settings, lists: filterLists)
     private var settingsWindow: SettingsWindow?
 
     /// Les onglets appartiennent à un espace, jamais à l'application. Tout ce qui suit
@@ -45,12 +46,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         config.applicationNameForUserAgent = "Version/26.6 Safari/605.1.15"
         // Le gestionnaire doit être posé avant la création de la moindre vue web : une
         // configuration déjà utilisée ne l'accepte plus.
-        config.setURLSchemeHandler(InternalPageHandler(history: history, downloads: downloads,
-                                                      favorites: favorites, icons: favicons),
-                                   forURLScheme: InternalPageHandler.scheme)
+        let pages = InternalPageHandler(history: history, downloads: downloads,
+                                        favorites: favorites, icons: favicons)
+        pages.adBlock = { [unowned self] in
+            AdBlockPage.html(state: blocker.state.summary,
+                             lists: filterLists.lists,
+                             userRules: filterLists.userRules,
+                             exceptions: settings.blockingExceptions,
+                             isBusy: blocker.state.isBusy)
+        }
+        config.setURLSchemeHandler(pages, forURLScheme: InternalPageHandler.scheme)
         config.userContentController.add(self, name: "wujiHistory")
         config.userContentController.add(self, name: "wujiDownloads")
         config.userContentController.add(self, name: "wujiFavorites")
+        config.userContentController.add(self, name: "wujiAdBlock")
+        config.userContentController.add(self, name: ElementPicker.handler)
         config.userContentController.add(self, name: "wujiError")
         config.userContentController.add(self, name: PageContextMenu.handler)
         config.userContentController.addUserScript(PageContextMenu.script)
@@ -96,8 +106,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
         // Le bloqueur compile ses règles au démarrage : la première page ouverte doit
         // déjà être protégée, pas la deuxième.
-        blocker.onChange = { [weak self] in self?.settingsWindow?.refreshBlocking() }
-        blocker.reload()
+        // Recharger seulement quand la nouvelle liste est réellement en place : la
+        // compilation de cent quarante mille règles prend quelques secondes.
+        blocker.onApplied = { [weak self] in
+            guard let self, self.reloadAfterBlocking else { return }
+            self.reloadAfterBlocking = false
+            self.currentTab?.webView.reload()
+        }
+        blocker.onChange = { [weak self] in
+            self?.settingsWindow?.refreshBlocking()
+            self?.syncBlockingButton()
+            self?.refreshAdBlockPages()
+        }
+        blocker.start()
 
         history.purge(olderThan: settings.historyRetention)
         restoreSession()
@@ -219,6 +240,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             let window = SettingsWindow(settings: settings, blocker: blocker)
             window.historyCount = { [weak self] in self?.history.count ?? 0 }
             window.onClearHistory = { [weak self] in self?.history.clear() }
+            window.onOpenAdBlock = { [weak self] in
+                self?.showAdBlock(nil)
+                self?.window.makeKeyAndOrderFront(nil)
+            }
             settingsWindow = window
         }
         settingsWindow?.makeKeyAndOrderFront(nil)
@@ -454,19 +479,129 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         openInternal(Self.downloadsPage)
     }
 
+    // MARK: - Blocage
+
+    static let adBlockPage = URL(string: "wuji://ad-block")!
+
+    @objc func showAdBlock(_ sender: Any?) {
+        openInternal(Self.adBlockPage)
+    }
+
+    /// Ce que le bouclier de la barre doit montrer.
+    ///
+    /// Le bloqueur prévient dès qu'il change d'état, y compris avant que la session soit
+    /// restaurée : d'où les gardes. Sans elles, la compilation qui se termine pendant le
+    /// démarrage va chercher un onglet courant dans une liste d'espaces encore vide.
+    private var blockingBadge: ContentTopBar.Blocking {
+        guard settings.blockingEnabled else { return .off }
+        guard !spaces.isEmpty else { return .active }
+        return blocker.isExcepted(currentTab?.url) ? .excepted : .active
+    }
+
+    private func syncBlockingButton() {
+        guard layout != nil else { return }
+        layout.topBar.setBlocking(blockingBadge)
+    }
+
+    private func refreshAdBlockPages() {
+        spaces.flatMap(\.allTabs)
+            .filter { $0.url == Self.adBlockPage }
+            .forEach { $0.webView.reload() }
+    }
+
+    /// Le menu du bouclier : l'état ici, l'outil pour corriger, la porte vers les listes.
+    private func blockingMenu() -> [ActionItem] {
+        var items: [ActionItem] = []
+        let url = currentTab.flatMap(favoritableURL(of:))
+
+        if let url {
+            let excepted = blocker.isExcepted(url)
+            items.append(ActionItem(title: excepted ? "Réactiver sur ce site" : "Désactiver sur ce site",
+                                    symbol: excepted ? "shield" : "shield.slash",
+                                    action: { [weak self] in self?.toggleBlocking(for: url) }))
+            if !excepted {
+                items.append(ActionItem(title: "Bloquer un élément…", symbol: "scope",
+                                        action: { [weak self] in self?.pickElement() }))
+            }
+        }
+        if !items.isEmpty { items.append(.separator) }
+        items.append(ActionItem(title: blocker.state.summary, symbol: "info.circle", isEnabled: false))
+        items.append(ActionItem(title: "Gérer les listes…", symbol: "list.bullet",
+                                action: { [weak self] in self?.showAdBlock(nil) }))
+        return items
+    }
+
+    /// Arme le sélecteur d'élément sur la page courante.
+    private func pickElement() {
+        currentTab?.webView.evaluateJavaScript(ElementPicker.script)
+    }
+
+    /// La règle produite par le sélecteur, rangée avec le domaine où on l'a prise.
+    ///
+    /// Le domaine est indispensable : `##.promo` sans domaine masquerait les promos de tout
+    /// le web. Une règle écrite en un clic doit rester bornée à l'endroit où on l'a écrite.
+    private func addPickedRule(_ selector: String) {
+        guard let host = currentTab?.url?.host(), !selector.isEmpty else { return }
+        blocker.addUserRule("\(host)##\(selector)")
+        // L'élément disparaît tout de suite, sans attendre la compilation : on vient de le
+        // désigner, le voir survivre quelques secondes ferait douter du clic. La règle,
+        // elle, prendra le relais au prochain chargement.
+        let escaped = selector.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        currentTab?.webView.evaluateJavaScript(
+            "document.querySelectorAll('\(escaped)').forEach(n => n.style.setProperty('display','none','important'))")
+        layout.toast.show("Élément masqué sur \(host)") { [weak self] in self?.showAdBlock(nil) }
+    }
+
+    private func handleAdBlockAction(_ action: String, payload: [String: Any]) {
+        switch action {
+        case "update":
+            blocker.update()
+        case "add":
+            guard let raw = payload["url"] as? String, let url = URL(string: raw),
+                  url.scheme == "https" || url.scheme == "http" else { return }
+            // Le nom vient de l'hôte tant que la liste n'a pas été lue : mieux vaut une
+            // étiquette exacte et pauvre qu'un titre inventé.
+            filterLists.add(title: url.host() ?? raw, source: url)
+            blocker.update()
+        case "enable":
+            guard let id = (payload["id"] as? String).flatMap(UUID.init(uuidString:)),
+                  let value = payload["value"] as? Bool else { return }
+            filterLists.setEnabled(value, for: id)
+            blocker.compile()
+        case "remove":
+            guard let id = (payload["id"] as? String).flatMap(UUID.init(uuidString:)) else { return }
+            filterLists.remove(id: id)
+            blocker.compile()
+        case "unexcept":
+            guard let host = payload["host"] as? String else { return }
+            settings.blockingExceptions.removeAll { $0 == host }
+            blocker.compile()
+        case "unrule":
+            guard let rule = payload["rule"] as? String else { return }
+            filterLists.userRules.removeAll { $0 == rule }
+            blocker.compile()
+        default:
+            break
+        }
+    }
+
     /// Éteindre ou rallumer la protection sur un site, puis recharger.
     ///
     /// Le rechargement n'est pas une politesse : les règles de contenu s'appliquent au
     /// moment où la requête part. Sans lui, la page reste exactement telle qu'elle était
     /// et on croit que le réglage n'a rien fait.
     private func toggleBlocking(for url: URL) {
+        reloadAfterBlocking = true
         blocker.toggleException(for: url)
         let host = url.host() ?? ""
         layout.toast.show(blocker.isExcepted(url)
                           ? "Protection désactivée sur \(host)"
                           : "Protection réactivée sur \(host)")
-        currentTab?.webView.reload()
     }
+
+    /// Une page à recharger dès que la liste compilée sera en place.
+    private var reloadAfterBlocking = false
 
     // MARK: - Favoris
 
@@ -676,6 +811,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                            canGoBack: tab.webView.canGoBack,
                            canGoForward: tab.webView.canGoForward)
         window.title = tab.title
+        syncBlockingButton()
         syncSidebar()
     }
 
@@ -862,6 +998,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         case .back:    currentTab?.webView.goBack()
         case .forward: currentTab?.webView.goForward()
         case .menu:    layout.actionSheet.present(mainMenu(), below: bar.menuButton)
+        case .blocking: layout.actionSheet.present(blockingMenu(), below: bar.blockingButton)
         }
     }
 
@@ -895,15 +1032,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         }
         items.append(ActionItem(title: "Favoris", symbol: "star.square", shortcut: "⇧⌘B",
                                 action: { [weak self] in self?.showFavorites(nil) }))
-
-        // La protection s'éteint par site et depuis le site : c'est là qu'on se rend
-        // compte qu'une page est cassée, pas dans une fenêtre de réglages.
-        if settings.blockingEnabled, let tab = currentTab, let url = favoritableURL(of: tab) {
-            let excepted = blocker.isExcepted(url)
-            items.append(ActionItem(title: excepted ? "Bloquer sur ce site" : "Ne pas bloquer ici",
-                                    symbol: excepted ? "shield" : "shield.slash",
-                                    action: { [weak self] in self?.toggleBlocking(for: url) }))
-        }
 
         items.append(contentsOf: [
             ActionItem(title: "Historique", symbol: "clock", shortcut: "⌘Y",
@@ -1069,6 +1197,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                                            didReceive message: WKScriptMessage) {
         MainActor.assumeIsolated {
             guard let payload = message.body as? [String: Any] else { return }
+            if message.name == ElementPicker.handler {
+                addPickedRule(payload["selector"] as? String ?? "")
+                return
+            }
             if message.name == PageContextMenu.handler {
                 showPageMenu(PageContextMenu.Target(payload: payload))
                 return
@@ -1089,6 +1221,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             }
             if message.name == "wujiFavorites" {
                 handleFavoriteAction(action, id: payload["id"] as? String)
+                return
+            }
+            if message.name == "wujiAdBlock" {
+                handleAdBlockAction(action, payload: payload)
                 return
             }
             switch action {
@@ -1499,6 +1635,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                                        keyEquivalent: "B")
         favoritesItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(favoritesItem)
+        viewMenu.addItem(withTitle: "Blocage", action: #selector(showAdBlock(_:)), keyEquivalent: "")
         viewMenu.addItem(withTitle: "Historique", action: #selector(showHistory(_:)), keyEquivalent: "y")
         viewMenu.addItem(withTitle: "Téléchargements", action: #selector(showDownloads(_:)), keyEquivalent: "j")
         viewMenu.addItem(withTitle: "Rechercher dans la page…", action: #selector(findInPage(_:)), keyEquivalent: "f")

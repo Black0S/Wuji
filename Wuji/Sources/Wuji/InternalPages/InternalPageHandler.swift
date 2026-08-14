@@ -20,6 +20,10 @@ final class InternalPageHandler: NSObject, WKURLSchemeHandler {
     private unowned let downloads: DownloadStore
     private unowned let favorites: FavoritesStore
     private unowned let icons: FaviconStore
+    /// Fourni par l'application. Le bloqueur a plus d'état qu'un magasin de données —
+    /// des listes, une compilation en cours, des règles écrites à la main : c'est
+    /// l'application qui sait les assembler, pas ce gestionnaire.
+    var adBlock: (() -> String)?
 
     init(history: HistoryStore, downloads: DownloadStore, favorites: FavoritesStore,
          icons: FaviconStore) {
@@ -53,6 +57,7 @@ final class InternalPageHandler: NSObject, WKURLSchemeHandler {
         case "history":   return HistoryPage.html(entries: history.recent(), icons: icons)
         case "downloads": return DownloadsPage.html(items: downloads.items)
         case "favorites": return FavoritesPage.html(items: favorites.items, icons: icons)
+        case "ad-block":  return adBlock?() ?? NewTabPage.html
         default:          return NewTabPage.html
         }
     }

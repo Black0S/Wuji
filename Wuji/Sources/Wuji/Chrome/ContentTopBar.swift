@@ -13,13 +13,25 @@ protocol ContentTopBarDelegate: AnyObject {
 @MainActor
 final class ContentTopBar: ThemedView {
 
-    enum Action { case back, forward, menu }
+    enum Action { case back, forward, menu, blocking }
+
+    /// Ce que l'icône de blocage doit dire. Trois états, trois formes — jamais une
+    /// couleur seule : « Différencier sans couleur » vaut ici comme ailleurs.
+    enum Blocking {
+        /// Le bloqueur est éteint partout : l'icône disparaît. Un bouton qui ne pilote
+        /// rien de visible n'a pas à occuper la barre.
+        case off
+        case active
+        case excepted
+    }
 
     weak var delegate: ContentTopBarDelegate?
 
     private let back = NSButton()
     private let forward = NSButton()
     private let more = NSButton()
+    private let shield = NSButton()
+    private var blocking: Blocking = .off
     private let lock = NSImageView()
     private let address = NSTextField(labelWithString: "")
 
@@ -35,6 +47,7 @@ final class ContentTopBar: ThemedView {
         // Le seul bouton à droite, et il n'est pas un doublon : les actions qu'il expose
         // n'ont aucune autre porte d'entrée que la barre de menus du système.
         configure(more, symbol: "ellipsis", label: "Menu")
+        configure(shield, symbol: "shield", label: "Blocage")
 
         lock.imageScaling = .scaleProportionallyDown
         addSubview(lock)
@@ -64,13 +77,14 @@ final class ContentTopBar: ThemedView {
         // Même fond que la sidebar : les deux forment un seul cadre, pas deux surfaces
         // empilées. C'est la courbe du contenu qui fait la jonction, pas un filet.
         layer?.backgroundColor = Tokens.sidebarBackground.cgColor
-        [back, forward, more].forEach { $0.contentTintColor = Tokens.textPrimary }
+        [back, forward, more, shield].forEach { $0.contentTintColor = Tokens.textPrimary }
 
         let size: CGFloat = 24
         let y = (bounds.height - size) / 2
         back.frame = NSRect(x: Tokens.Space.l, y: y, width: size, height: size)
         forward.frame = NSRect(x: Tokens.Space.l + size + Tokens.Space.xs, y: y, width: size, height: size)
         more.frame = NSRect(x: bounds.width - Tokens.Space.l - size, y: y, width: size, height: size)
+        shield.frame = NSRect(x: more.frame.minX - size - Tokens.Space.s, y: y, width: size, height: size)
 
         let addressWidth = min(360, bounds.width - 260)
         address.frame = NSRect(x: (bounds.width - addressWidth) / 2, y: (bounds.height - 16) / 2,
@@ -95,8 +109,21 @@ final class ContentTopBar: ThemedView {
         forward.alphaValue = canGoForward ? 1 : 0.35
     }
 
+    /// L'état du blocage, tel que la barre doit le montrer.
+    func setBlocking(_ state: Blocking) {
+        blocking = state
+        shield.isHidden = state == .off
+        // Un bouclier barré pour « éteint ici » : la forme change, pas seulement la
+        // teinte, donc l'information passe aussi sans couleur.
+        shield.image = NSImage(systemSymbolName: state == .excepted ? "shield.slash" : "shield",
+                               accessibilityDescription: state == .excepted
+                                   ? "Blocage désactivé sur ce site" : "Blocage actif")
+        shield.alphaValue = state == .excepted ? 0.5 : 1
+    }
+
     /// Pour ancrer la feuille d'action sous le bouton.
     var menuButton: NSView { more }
+    var blockingButton: NSView { shield }
 
     @objc private func openOmnibox() { delegate?.topBarDidRequestOmnibox(self) }
 
@@ -105,6 +132,7 @@ final class ContentTopBar: ThemedView {
         case back:    delegate?.topBar(self, didTrigger: .back)
         case forward: delegate?.topBar(self, didTrigger: .forward)
         case more:    delegate?.topBar(self, didTrigger: .menu)
+        case shield:  delegate?.topBar(self, didTrigger: .blocking)
         default:      break
         }
     }
