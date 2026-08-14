@@ -155,7 +155,7 @@ enum SettingsPage {
         return zoom + agent + """
         <div class="row block">
           <div class="labels">
-            <span class="title">Caméra et micro</span>
+            <span class="title">Autorisations des sites</span>
             <span class="subtitle">Une réponse est retenue par site. L'oublier, c'est redemander à la prochaine visite.</span>
           </div>
         </div>

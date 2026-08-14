@@ -149,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             // scriptlet : on la recharge une fois, maintenant qu'il est là.
             if self.loadedWithoutAdvancedRules, self.blocker.advanced.ruleCount > 0 {
                 self.loadedWithoutAdvancedRules = false
-                self.currentTab?.webView.reload()
+                self.catchUpAdvancedRules()
                 return
             }
             guard self.reloadAfterBlocking else { return }
@@ -621,20 +621,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // Les sélecteurs étendus ensuite, avec leur bibliothèque : ils regardent le DOM,
         // donc ils attendent qu'il existe.
         if !payload.extendedSelectors.isEmpty {
-            let rules = payload.extendedSelectors
-                .map { $0 + "{display:none!important;}" }
-                .joined(separator: "\n")
-                .replacingOccurrences(of: "`", with: "\\`")
-            let source = Self.extendedCss + """
+            controller.addUserScript(
+                WKUserScript(source: extendedCssSource(for: payload.extendedSelectors),
+                             injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+        }
+    }
 
-            (function(){try{
-              var engine = new ExtendedCss.ExtendedCss({ cssRules: `RULES` });
-              engine.apply();
-            }catch(e){}})();
-            """.replacingOccurrences(of: "RULES", with: rules)
-            + (blockLogWindow.isOpen ? BlockLogWatcher.report(selectors: payload.extendedSelectors) : "")
-            controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd,
-                                                  forMainFrameOnly: false))
+    /// La bibliothèque des sélecteurs étendus et les règles à lui donner.
+    ///
+    /// Une seule fabrique pour les deux usages — posée avant la navigation, ou évaluée sur
+    /// une page déjà ouverte. Deux versions divergeraient au premier correctif.
+    private func extendedCssSource(for selectors: [String]) -> String {
+        let rules = selectors
+            .map { $0 + "{display:none!important;}" }
+            .joined(separator: "\n")
+            .replacingOccurrences(of: "`", with: "\\`")
+        return Self.extendedCss + """
+
+        (function(){try{
+          var engine = new ExtendedCss.ExtendedCss({ cssRules: `RULES` });
+          engine.apply();
+        }catch(e){}})();
+        """.replacingOccurrences(of: "RULES", with: rules)
+        + (blockLogWindow.isOpen ? BlockLogWatcher.report(selectors: selectors) : "")
+    }
+
+    /// Rattrape les pages déjà ouvertes quand l'index des règles avancées arrive après
+    /// elles — au premier lancement, ou après un changement de listes.
+    ///
+    /// **On ne recharge que ce qui l'exige.** Un scriptlet doit remplacer des fonctions du
+    /// navigateur avant que la page s'en serve : arrivé après coup, il ne sert à rien, donc
+    /// il faut repartir du début. Un masquage, lui, s'applique très bien à un DOM déjà là.
+    /// Recharger dans les deux cas faisait clignoter toutes les pages ouvertes à chaque
+    /// changement de règles, pour un résultat identique dans la plupart des cas.
+    private func catchUpAdvancedRules() {
+        guard settings.blockingEnabled else { return }
+        for tab in spaces.flatMap(\.allTabs) where !tab.isSleeping {
+            guard let url = tab.url, !blocker.isExcepted(url) else { continue }
+            let payload = blocker.advanced.payload(for: url)
+            guard !payload.isEmpty else { continue }
+            // Les navigations suivantes de cet onglet, dans tous les cas.
+            installAdvancedRules(for: url, in: tab.webView)
+            if !payload.scriptlets.isEmpty {
+                tab.webView.reload()
+            } else {
+                tab.webView.evaluateJavaScript(extendedCssSource(for: payload.extendedSelectors))
+            }
         }
     }
 

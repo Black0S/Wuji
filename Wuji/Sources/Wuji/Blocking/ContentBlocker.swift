@@ -321,26 +321,33 @@ final class ContentBlocker {
     var isPrivate: () -> Bool = { false }
 
     func isExcepted(_ url: URL?) -> Bool {
-        guard let host = url?.host() else { return false }
-        return settings.blockingExceptions.contains(host)
-            || settings.privateBlockingExceptions.contains(host)
+        guard let site = Site.name(of: url) else { return false }
+        // La comparaison passe des deux côtés par le nom du site : les exceptions posées
+        // avant qu'on sache lire la liste des suffixes sont des hôtes entiers, et elles
+        // doivent continuer à valoir.
+        return (settings.blockingExceptions + settings.privateBlockingExceptions)
+            .contains { Site.name(ofHost: $0) == site }
     }
 
     /// Le bloqueur casse parfois une page — un lecteur vidéo, une banque, un mur de
     /// paiement. Pouvoir l'éteindre **sur ce site seulement** évite d'avoir à choisir
     /// entre la page et la protection partout ailleurs.
     func toggleException(for url: URL?) {
-        guard let host = url?.host() else { return }
+        guard let host = Site.name(of: url) else { return }
         // En privé, l'exception va dans le registre éphémère : elle vaut pour la session
         // et ne suit pas l'utilisateur dans ses espaces normaux.
+        // Retirer se fait sur le nom du site, donc emporte aussi les vieilles entrées
+        // écrites en hôte complet : sans ça, « réactiver » laisserait derrière lui une
+        // exception invisible qui continuerait de s'appliquer.
+        let matches = { (entry: String) in Site.name(ofHost: entry) == host }
         if isPrivate() {
-            if let index = settings.privateBlockingExceptions.firstIndex(of: host) {
-                settings.privateBlockingExceptions.remove(at: index)
+            if settings.privateBlockingExceptions.contains(where: matches) {
+                settings.privateBlockingExceptions.removeAll(where: matches)
             } else {
                 settings.privateBlockingExceptions.append(host)
             }
-        } else if let index = settings.blockingExceptions.firstIndex(of: host) {
-            settings.blockingExceptions.remove(at: index)
+        } else if settings.blockingExceptions.contains(where: matches) {
+            settings.blockingExceptions.removeAll(where: matches)
         } else {
             settings.blockingExceptions.append(host)
         }

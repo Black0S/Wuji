@@ -25,6 +25,11 @@ cp ".build/$CONFIG/Wuji" "$APP/Contents/MacOS/Wuji"
 # des règles, les sélecteurs étendus s'exécutent dans la page.
 cp Resources/JS/*.js "$APP/Contents/Resources/"
 
+# La liste des suffixes publics, telle que SwiftPM l'empaquette. Elle est cherchée à côté
+# de l'application et **pas** dans ses ressources, et son absence est fatale au lancement :
+# la bibliothèque appelle `fatalError` plutôt que de se passer de ses données.
+cp -R ".build/arm64-apple-macosx/$CONFIG/swift-psl_PublicSuffixList.bundle" "$APP/"
+
 # Signature ad-hoc : suffit pour que macOS accorde les permissions localement.
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 
