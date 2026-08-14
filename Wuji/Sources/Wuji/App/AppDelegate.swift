@@ -4,7 +4,7 @@ import WebKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate, OmniboxDelegate, FindBarDelegate, SpacesPanelDelegate,
                        WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler,
-                       WKDownloadDelegate {
+                       WKDownloadDelegate, NSMenuItemValidation {
 
     private var window: BrowserWindow!
     private var layout: BrowserLayout!
@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private let session = SessionStore()
     private let history = HistoryStore()
     private let downloads = DownloadStore()
+    private let favorites = FavoritesStore()
     private let settings = Settings()
     private var settingsWindow: SettingsWindow?
 
@@ -32,10 +33,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         // Le gestionnaire doit être posé avant la création de la moindre vue web : une
         // configuration déjà utilisée ne l'accepte plus.
-        config.setURLSchemeHandler(InternalPageHandler(history: history, downloads: downloads),
+        config.setURLSchemeHandler(InternalPageHandler(history: history, downloads: downloads,
+                                                      favorites: favorites),
                                    forURLScheme: InternalPageHandler.scheme)
         config.userContentController.add(self, name: "wujiHistory")
         config.userContentController.add(self, name: "wujiDownloads")
+        config.userContentController.add(self, name: "wujiFavorites")
         config.userContentController.add(self, name: "wujiError")
         config.userContentController.add(self, name: PageContextMenu.handler)
         config.userContentController.addUserScript(PageContextMenu.script)
@@ -206,13 +209,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     /// Le libellé du menu suit ce que la touche va réellement faire. « Fermer l'onglet »
-    /// affiché alors que ⌘W fermera les Réglages serait un mensonge, même bref.
+    /// affiché alors que ⌘W fermera les Réglages serait un mensonge, même bref. Et une
+    /// entrée qui n'a rien à faire — rien à rouvrir, rien à mettre de côté — se désactive
+    /// plutôt que d'attendre un clic sans effet.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        if item.action == #selector(closeTab(_:)) {
+        switch item.action {
+        case #selector(closeTab(_:)):
             let auxiliary = NSApp.keyWindow != nil && NSApp.keyWindow !== window
             item.title = auxiliary ? "Fermer la fenêtre" : "Fermer l'onglet"
+            return true
+        case #selector(toggleFavorite(_:)):
+            guard let tab = currentTab, let url = favoritableURL(of: tab) else { return false }
+            item.title = favorites.contains(url) ? "Retirer des favoris" : "Ajouter aux favoris"
+            return true
+        case #selector(reopenClosedTab(_:)):
+            return !closedTabs.isEmpty
+        default:
+            return true
         }
-        return true
     }
 
 
@@ -420,6 +434,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     @objc func showDownloads(_ sender: Any?) {
         openInternal(Self.downloadsPage)
+    }
+
+    // MARK: - Favoris
+
+    static let favoritesPage = URL(string: "wuji://favorites")!
+
+    @objc func showFavorites(_ sender: Any?) {
+        openInternal(Self.favoritesPage)
+    }
+
+    /// `⌘D` met la page de côté, ou l'en retire si elle y est déjà.
+    ///
+    /// Un seul raccourci pour les deux sens : `⌘D` sur une page déjà en favori ne peut
+    /// vouloir dire que « finalement, non ». Le retour est un toast et non un panneau —
+    /// mettre de côté est un geste qu'on fait en passant, pas une opération à confirmer.
+    @objc func toggleFavorite(_ sender: Any?) {
+        guard let tab = currentTab, let url = favoritableURL(of: tab) else { return }
+        let added = favorites.toggle(url: url, title: tab.title)
+        layout.toast.show(added ? "Ajouté aux favoris" : "Retiré des favoris") { [weak self] in
+            self?.showFavorites(nil)
+        }
+        refreshFavorites()
+    }
+
+    /// L'adresse qu'on peut mettre de côté, s'il y en a une.
+    ///
+    /// Ni une page vierge — elle ne mène nulle part — ni une page de l'application :
+    /// mettre `wuji://favorites` dans les favoris ferait une liste qui se contient
+    /// elle-même, et ces pages ont déjà leur raccourci.
+    private func favoritableURL(of tab: Tab) -> URL? {
+        guard let url = tab.url, !isBlank(tab),
+              url.scheme != InternalPageHandler.scheme else { return nil }
+        return url
+    }
+
+    /// Les pages ouvertes sur la liste doivent refléter ce qui vient de changer ailleurs.
+    private func refreshFavorites() {
+        spaces.flatMap(\.allTabs)
+            .filter { $0.url == Self.favoritesPage }
+            .forEach { $0.webView.reload() }
+    }
+
+    private func handleFavoriteAction(_ action: String, id: String?) {
+        switch action {
+        case "delete":
+            favorites.remove(id: id)
+            // Pas de rechargement : la page a déjà retiré la ligne, et la recharger
+            // remonterait le défilement pour rien.
+        case "rename":
+            guard let item = favorites.item(id: id), let id else { return }
+            layout.actionSheet.presentPrompt(title: "Renommer le favori", value: item.title,
+                                             confirm: "Renommer") { [weak self] name in
+                self?.favorites.rename(id: id, to: name)
+                self?.refreshFavorites()
+            }
+        default:
+            break
+        }
     }
 
     /// `target="_blank"` et `window.open` : WebKit demande une nouvelle vue plutôt que de
@@ -779,8 +851,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                                     shortcut: "⇧⌘T",
                                     action: { [weak self] in self?.reopenClosedTab(nil) }))
         }
+        items.append(.separator)
+
+        // Le libellé dit dans quel sens ça va, et la ligne n'existe que si la page peut
+        // être mise de côté : une page vierge n'a rien à garder.
+        if let tab = currentTab, let url = favoritableURL(of: tab) {
+            let known = favorites.contains(url)
+            items.append(ActionItem(title: known ? "Retirer des favoris" : "Ajouter aux favoris",
+                                    symbol: known ? "star.fill" : "star", shortcut: "⌘D",
+                                    action: { [weak self] in self?.toggleFavorite(nil) }))
+        }
+        items.append(ActionItem(title: "Favoris", symbol: "star.square", shortcut: "⇧⌘B",
+                                action: { [weak self] in self?.showFavorites(nil) }))
+
         items.append(contentsOf: [
-            .separator,
             ActionItem(title: "Historique", symbol: "clock", shortcut: "⌘Y",
                        action: { [weak self] in self?.showHistory(nil) }),
             ActionItem(title: "Téléchargements", symbol: "arrow.down.circle", shortcut: "⌘J",
@@ -956,6 +1040,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             guard let action = payload["action"] as? String else { return }
             if message.name == "wujiDownloads" {
                 handleDownloadAction(action, id: payload["id"] as? String)
+                return
+            }
+            if message.name == "wujiFavorites" {
+                handleFavoriteAction(action, id: payload["id"] as? String)
                 return
             }
             switch action {
@@ -1360,6 +1448,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         viewMenu.addItem(withTitle: "Omnibox", action: #selector(focusOmnibox(_:)), keyEquivalent: "l")
         viewMenu.addItem(withTitle: "Recharger", action: #selector(reload(_:)), keyEquivalent: "r")
         viewMenu.addItem(.separator())
+        viewMenu.addItem(withTitle: "Ajouter aux favoris", action: #selector(toggleFavorite(_:)),
+                         keyEquivalent: "d")
+        let favoritesItem = NSMenuItem(title: "Favoris", action: #selector(showFavorites(_:)),
+                                       keyEquivalent: "B")
+        favoritesItem.keyEquivalentModifierMask = [.command, .shift]
+        viewMenu.addItem(favoritesItem)
         viewMenu.addItem(withTitle: "Historique", action: #selector(showHistory(_:)), keyEquivalent: "y")
         viewMenu.addItem(withTitle: "Téléchargements", action: #selector(showDownloads(_:)), keyEquivalent: "j")
         viewMenu.addItem(withTitle: "Rechercher dans la page…", action: #selector(findInPage(_:)), keyEquivalent: "f")

@@ -100,6 +100,12 @@ final class ActionSheet: ThemedView {
         field.contentInset = Tokens.Space.m
         field.focusRingType = .none
         field.font = .systemFont(ofSize: 13, weight: .regular)
+        // Une seule ligne, qui défile. Un titre de page renommé débordait sinon de son
+        // cadre en s'enroulant sur deux lignes, par-dessus le filet qui le délimite.
+        field.usesSingleLineMode = true
+        field.cell?.wraps = false
+        field.cell?.isScrollable = true
+        field.lineBreakMode = .byTruncatingTail
         field.isHidden = true
         field.target = self
         field.action = #selector(commitField)

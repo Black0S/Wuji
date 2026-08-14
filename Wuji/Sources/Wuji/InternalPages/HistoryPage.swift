@@ -42,7 +42,7 @@ enum HistoryPage {
           <header>
             <div class="titles">
               <h1>Historique</h1>
-              <p>\(entries.count) page\(entries.count > 1 ? "s" : "") · conservées sur cette machine</p>
+              <p id="count">\(entries.count) page\(entries.count > 1 ? "s" : "") · conservées sur cette machine</p>
             </div>
             <input id="q" type="search" placeholder="Rechercher" autocomplete="off" spellcheck="false">
             <button id="clear" class="ghost">Tout effacer</button>
@@ -148,6 +148,11 @@ enum HistoryPage {
       const row = button.closest('li');
       send({ action: 'delete', url: row.dataset.url });
       row.remove();
+      // Le compte suit la ligne retirée : sans ça l'en-tête annonce une page de plus
+      // qu'il n'en reste, jusqu'au prochain rechargement.
+      const total = document.querySelectorAll('li').length;
+      document.getElementById('count').textContent =
+        `${total} page${total > 1 ? 's' : ''} · conservées sur cette machine`;
     });
 
     // Filtrage dans la page plutôt qu'un aller-retour vers l'application : la liste est
