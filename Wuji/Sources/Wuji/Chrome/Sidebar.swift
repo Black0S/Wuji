@@ -50,6 +50,14 @@ final class Sidebar: ThemedView {
 
     private let spaceSwitcher = SpaceSwitcher()
     private let list = NSView()
+
+    /// Décalage de défilement de la liste, en points. Zéro = première ligne en haut.
+    ///
+    /// Un `NSScrollView` aurait été le réflexe, et il aurait fallu lui apprendre le
+    /// glisser-déposer maison : les lignes se placent à la main, avec des emplacements
+    /// figés au début du déplacement. Un décalage à ajouter au curseur coûte trois lignes
+    /// et laisse tout le reste intact.
+    private var scrollOffset: CGFloat = 0
     private let newTabButton = FooterButton(symbol: "plus", title: "Nouvel onglet", shortcut: "⌘T")
     private let downloadsButton = DownloadButton()
 
@@ -141,6 +149,11 @@ final class Sidebar: ThemedView {
                 return row
             }
         }
+        // La ligne active doit rester sous les yeux, y compris quand la liste dépasse.
+        if let selected, let index = newItems.firstIndex(where: { $0.id == selected }) {
+            layoutSubtreeIfNeeded()
+            reveal(index: index)
+        }
         needsLayout = true
     }
 
@@ -175,7 +188,60 @@ final class Sidebar: ThemedView {
 
         let bottom = Tokens.Space.s + footer + Tokens.Space.s
         list.frame = NSRect(x: 0, y: bottom, width: width, height: max(0, top - bottom))
+        // La liste coupe ce qui dépasse : sans ça, les onglets en trop descendaient
+        // par-dessus le bouton des téléchargements, qui restait cliquable en dessous.
+        list.wantsLayer = true
+        list.layer?.masksToBounds = true
+        clampScroll()
         positionRows(animated: false)
+    }
+
+    // MARK: - Défilement
+
+    /// Hauteur qu'occuperaient toutes les lignes, trou de dépôt compris.
+    private var contentHeight: CGFloat {
+        CGFloat(rows.count + (gapIndex == nil ? 0 : 1)) * Tokens.Row.height
+    }
+
+    private var maximumScroll: CGFloat {
+        max(0, contentHeight - list.bounds.height)
+    }
+
+    private func clampScroll() {
+        scrollOffset = min(max(0, scrollOffset), maximumScroll)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard maximumScroll > 0 else { return super.scrollWheel(with: event) }
+        // Un trackpad compte en points, une molette compte en lignes — et une ligne, ici,
+        // c'est une ligne d'onglet. Sans cette conversion, un cran de molette déplaçait la
+        // liste d'un point : le défilement existait, mais ne se voyait pas.
+        //
+        // `scrollingDeltaY` est nul sur certains événements — souris anciennes, événements
+        // synthétiques — et il faut alors retomber sur `deltaY`, qui compte en lignes.
+        let precise = event.hasPreciseScrollingDeltas && event.scrollingDeltaY != 0
+        let raw = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.deltaY
+        scrollOffset += precise ? raw : raw * Tokens.Row.height
+        clampScroll()
+        positionRows(animated: false)
+    }
+
+    /// Ramène une ligne dans la partie visible.
+    ///
+    /// Sans ça, changer d'onglet au clavier dans une longue liste sélectionnait une ligne
+    /// qu'on ne voyait pas : la sidebar disait le contraire de ce que montrait la page.
+    private func reveal(index: Int) {
+        guard maximumScroll > 0, rows.indices.contains(index) else { return }
+        let rowHeight = Tokens.Row.height
+        let top = CGFloat(index) * rowHeight
+        let bottom = top + rowHeight
+
+        if top < scrollOffset {
+            scrollOffset = top
+        } else if bottom > scrollOffset + list.bounds.height {
+            scrollOffset = bottom - list.bounds.height
+        }
+        clampScroll()
     }
 
     /// Pose les lignes de haut en bas, en sautant celle qu'on glisse et en ouvrant un trou
@@ -186,7 +252,7 @@ final class Sidebar: ThemedView {
         let inset = Tokens.Space.s
         let rowHeight = Tokens.Row.height
 
-        var cursor = list.bounds.height
+        var cursor = list.bounds.height + scrollOffset
         var frames: [(NSView, NSRect)] = []
 
         for (index, row) in rows.enumerated() {

@@ -49,10 +49,15 @@ enum FilterConverter {
     ]
 
     /// Marqueurs de sélecteurs étendus : uBlock et AdGuard les comprennent, pas WebKit.
+    ///
+    /// **`:has()` n'y est plus.** Il a été inventé par les bloqueurs, puis normalisé, et
+    /// WebKit le sait depuis Safari 16.4 : le laisser passer récupère près de cinq mille
+    /// règles de masquage qu'on écartait par habitude.
     private static let extendedSelectors = [
-        ":has(", ":has-text(", ":matches-css", ":xpath(", ":upward(", ":nth-ancestor(",
+        ":has-text(", ":matches-css", ":xpath(", ":upward(", ":nth-ancestor(",
         ":remove(", ":style(", ":watch-attr(", ":min-text-length(", ":matches-attr(",
-        ":matches-path(", ":others(", ":contains("
+        ":matches-path(", ":others(", ":contains(", ":if(", ":if-not(", ":matches-media(",
+        ":shadow(", ":min-text-length("
     ]
 
     static func rules(from text: String) -> Output {
@@ -129,7 +134,7 @@ enum FilterConverter {
         var trigger: [String: Any] = ["url-filter": ".*"]
         let scope = String(line[..<marker])
         if !scope.isEmpty {
-            let (included, excluded) = domains(scope)
+            guard let (included, excluded) = domains(scope) else { return nil }
             // WebKit refuse les deux à la fois. On garde l'inclusion, qui restreint ;
             // l'exclusion seule ferait une règle plus large que ce qui est écrit.
             if !included.isEmpty {
@@ -179,7 +184,8 @@ enum FilterConverter {
             let name = String(negated ? option.dropFirst() : Substring(option))
 
             if name.hasPrefix("domain=") {
-                let (included, excluded) = domains(String(name.dropFirst("domain=".count)))
+                guard let (included, excluded) = domains(String(name.dropFirst("domain=".count)))
+                else { return nil }
                 if !included.isEmpty {
                     trigger["if-domain"] = included
                 } else if !excluded.isEmpty {
@@ -287,19 +293,29 @@ enum FilterConverter {
 
     /// `domaine|~autre` → inclus, exclus. Le `*` en tête est la façon dont WebKit dit
     /// « ce domaine et ses sous-domaines ».
-    private static func domains(_ list: String) -> ([String], [String]) {
+    ///
+    /// Rend `nil` quand la portée n'est pas faite de noms de domaine — c'est le cas des
+    /// règles dont le champ d'application est une expression régulière, comme
+    /// `/cimcime\d+\.(com|live)/##.pub`. Découpée sur ses barres verticales, une telle
+    /// portée donnait deux morceaux qui ne sont plus rien : WebKit refusait la règle, et
+    /// avec elle toute la tranche où elle se trouvait. Neuf règles de ce genre coûtaient
+    /// deux mille règles voisines, emportées par la dichotomie de secours.
+    private static func domains(_ list: String) -> ([String], [String])? {
         var included: [String] = []
         var excluded: [String] = []
         for entry in list.split(separator: "|") {
-            let value = entry.trimmingCharacters(in: .whitespaces).lowercased()
-            // Les domaines non ASCII devraient être convertis en punycode ; on les écarte
-            // plutôt que d'écrire une règle que WebKit refusera.
-            guard !value.isEmpty, value.allSatisfy(\.isASCII), !value.contains("*") else { continue }
-            if value.hasPrefix("~") {
-                excluded.append("*" + value.dropFirst())
-            } else {
-                included.append("*" + value)
-            }
+            var value = entry.trimmingCharacters(in: .whitespaces).lowercased()
+            guard !value.isEmpty else { continue }
+            let negated = value.hasPrefix("~")
+            if negated { value.removeFirst() }
+
+            // Un nom de domaine, et rien d'autre. Les non-ASCII demanderaient un passage
+            // en punycode ; on les écarte plutôt que d'écrire une règle refusée.
+            guard value.contains("."), value.allSatisfy(\.isASCII),
+                  value.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" || $0 == "_" })
+            else { return nil }
+
+            if negated { excluded.append("*" + value) } else { included.append("*" + value) }
         }
         return (included, excluded)
     }
