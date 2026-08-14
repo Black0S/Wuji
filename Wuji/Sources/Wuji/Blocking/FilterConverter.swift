@@ -27,35 +27,6 @@ enum FilterConverter {
         var rejected = 0
     }
 
-    /// WebKit refuse en bloc au-delà d'un certain volume — et « en bloc » veut dire zéro
-    /// protection, pas une protection partielle. Le plafond est donc **global** : quatre
-    /// listes de trente mille règles font cent vingt mille règles, pas quatre listes
-    /// acceptées séparément. On s'arrête avant, et on le dit.
-    /// 145 000 : WebKit s'arrête à 150 000, et les listes grossissent entre deux mises à
-    /// jour. La marge évite de découvrir la limite un matin, sans protection.
-    static let limit = 145_000
-
-    /// Met les listes bout à bout dans l'ordre que WebKit exige, en tenant le budget.
-    ///
-    /// L'ordre de sacrifice quand ça déborde : le masquage d'abord. Une publicité visible
-    /// mais non chargée reste préférable à une publicité chargée, et les exceptions doivent
-    /// survivre — sans elles, des sites entiers cassent.
-    static func assemble(_ outputs: [Output]) -> (rules: [[String: Any]], dropped: Int) {
-        let blocking = outputs.flatMap(\.blocking)
-        let exceptions = outputs.flatMap(\.exceptions)
-        var cosmetic = outputs.flatMap(\.cosmetic)
-
-        let room = limit - blocking.count - exceptions.count
-        var dropped = 0
-        if room < cosmetic.count {
-            dropped = cosmetic.count - max(0, room)
-            cosmetic = Array(cosmetic.prefix(max(0, room)))
-        }
-        // `ignore-previous-rules` n'annule que ce qui le précède : les exceptions ferment
-        // la marche, sinon elles ne servent à rien.
-        return (blocking + cosmetic + exceptions, dropped)
-    }
-
     /// Options qu'on ne sait pas rendre. Une règle qui en porte une est écartée en entier :
     /// l'appliquer sans son option ferait autre chose que ce que son auteur a écrit.
     private static let unsupported: Set<String> = [
@@ -170,6 +141,11 @@ enum FilterConverter {
             }
         }
 
+        // Un `$` qui reste, c'est une option qu'on n'a pas su lire — `$header=server:/…/`
+        // par exemple. Traiter la ligne entière comme une adresse produisait un motif
+        // absurde que WebKit refusait, et cette règle-là faisait tomber toute la tranche.
+        guard !body.contains("$") else { return nil }
+
         guard !body.isEmpty, body.allSatisfy(\.isASCII), let filter = urlFilter(body) else { return nil }
 
         var trigger: [String: Any] = ["url-filter": filter]
@@ -239,6 +215,12 @@ enum FilterConverter {
 
         var source = Substring(pattern)
         var result = ""
+
+        // Un motif littéral qui contient de la syntaxe d'expression régulière est un motif
+        // qu'on ne sait pas lire : `||/^kiryuu\\d+\\.com/` mélange les deux notations. Les
+        // échapper caractère par caractère fabriquait des expressions déséquilibrées que
+        // WebKit refusait — et un refus coûte la tranche entière, pas la règle.
+        if source.dropFirst(2).contains(where: { "\\(){}".contains($0) }) { return nil }
 
         if source.hasPrefix("||") {
             source = source.dropFirst(2)

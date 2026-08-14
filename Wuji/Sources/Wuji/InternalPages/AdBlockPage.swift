@@ -1,77 +1,171 @@
 import Foundation
 
-/// La page `wuji://ad-block`.
+/// Les pages `wuji://ad-block`.
 ///
-/// Elle montre ce qui protège réellement : les listes, leur date, ce que chacune a donné
+/// Trois sujets, trois adresses, une colonne pour passer de l'un à l'autre — la même
+/// grammaire que la fenêtre de réglages, en HTML. Les empiler sur une seule page marchait
+/// tant qu'il y avait six listes ; à vingt-trois, les règles de l'utilisateur se retrouvent
+/// sous deux écrans de défilement.
+///
+/// Elles montrent ce qui protège réellement : les listes, leur date, ce que chacune a donné
 /// après traduction. Un bloqueur qui affiche « Protection active » et rien d'autre demande
 /// qu'on lui fasse confiance ; celui-ci montre ses chiffres, y compris ceux qui l'arrangent
-/// mal — les règles sans équivalent WebKit et celles écartées faute de place.
+/// mal — les règles sans équivalent WebKit.
 @MainActor
 enum AdBlockPage {
 
-    static func html(state: String, lists: [FilterList], userRules: [String],
-                     exceptions: [String], isBusy: Bool) -> String {
-        """
+    enum Section: String {
+        case rules, unactive, myRules
+
+        static func from(path: String) -> Section {
+            switch path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) {
+            case "unactive": return .unactive
+            case "my-rules": return .myRules
+            default:         return .rules
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .rules:    return "Ad-Block Règles"
+            case .unactive: return "Sans Protection"
+            case .myRules:  return "Mes Règles"
+            }
+        }
+
+        var address: String {
+            switch self {
+            case .rules:    return "wuji://ad-block"
+            case .unactive: return "wuji://ad-block/unactive"
+            case .myRules:  return "wuji://ad-block/my-rules"
+            }
+        }
+    }
+
+    static func html(section: Section, state: String, lists: [FilterList],
+                     userRules: [String], exceptions: [String], isBusy: Bool) -> String {
+        let body: String
+        switch section {
+        case .rules:    body = listsSection(lists, isBusy: isBusy)
+        case .unactive: body = exceptionsSection(exceptions)
+        case .myRules:  body = rulesSection(userRules)
+        }
+
+        let nav = [Section.rules, .unactive, .myRules].map { item in
+            """
+            <a class="tab\(item == section ? " current" : "")" href="\(item.address)">\(item.title)</a>
+            """
+        }.joined()
+
+        return """
         <!doctype html>
         <html lang="fr">
         <head>
         <meta charset="utf-8">
         \(InternalStyle.meta)
-        <title>Blocage</title>
+        <title>\(escape(section.title))</title>
         <style>\(InternalStyle.shared)\(style)</style>
         </head>
         <body>
-          <header>
-            <div class="titles">
+          <div class="frame">
+            <nav>
               <h1>Blocage</h1>
-              <p>\(escape(state))</p>
-            </div>
-            <button id="update" class="ghost"\(isBusy ? " disabled" : "")>
-              \(isBusy ? "En cours…" : "Mettre à jour")
-            </button>
-          </header>
-
-          <main>
-            <section>
-              <h2>Listes</h2>
-              <ul>\(lists.map(row).joined())</ul>
-              <form id="add">
-                <input id="url" type="url" placeholder="https://…/liste.txt" spellcheck="false">
-                <button type="submit" class="ghost">Ajouter</button>
-              </form>
-              <p class="note">
-                Les listes appartiennent à leurs auteurs — uBlock Origin, EasyList, AdGuard.
-                Wuji n'en entretient aucune : une liste maison serait périmée le mois suivant
-                et donnerait une fausse impression de protection. Elles ne sont téléchargées
-                que sur cette page, jamais en arrière-plan.
-              </p>
-            </section>
-
-            <section>
-              <h2>Sites sans protection</h2>
-              \(exceptions.isEmpty
-                ? #"<p class="empty small">Aucun. La protection s'éteint site par site depuis l'icône de la barre.</p>"#
-                : "<ul>\(exceptions.map(exception).joined())</ul>")
-            </section>
-
-            <section>
-              <h2>Mes règles</h2>
-              \(userRules.isEmpty
-                ? #"<p class="empty small">Aucune. « Bloquer un élément » dans le menu de l'icône en écrit une.</p>"#
-                : "<ul>\(userRules.map(userRule).joined())</ul>")
-              <p class="note">
-                Ce sont les seules règles que Wuji garde en propre. Elles passent après les
-                listes, donc elles peuvent les corriger. Format Adblock&nbsp;:
-                <code>site.com##.selecteur</code> pour masquer,
-                <code>@@||site.com^</code> pour laisser passer.
-              </p>
-            </section>
-          </main>
+              \(nav)
+              <p class="state">\(escape(state))</p>
+            </nav>
+            <div class="pane">\(body)</div>
+          </div>
           <script>\(script)</script>
         </body>
         </html>
         """
     }
+
+    // MARK: - Sections
+
+    private static func listsSection(_ lists: [FilterList], isBusy: Bool) -> String {
+        let active = lists.filter(\.isEnabled).count
+        return """
+        <header>
+          <div class="titles">
+            <h2 class="big">Ad-Block Règles</h2>
+            <p>\(active) liste\(active > 1 ? "s" : "") active\(active > 1 ? "s" : "") sur \(lists.count)</p>
+          </div>
+          <button id="update" class="ghost"\(isBusy ? " disabled" : "")>\(isBusy ? "En cours…" : "Mettre à jour")</button>
+        </header>
+        \(groups(lists))
+        <form id="add">
+          <input id="url" type="url" placeholder="https://…/liste.txt" spellcheck="false">
+          <button type="submit" class="ghost">Ajouter</button>
+        </form>
+        <p class="note">
+          Les listes appartiennent à leurs auteurs — uBlock Origin, EasyList, AdGuard,
+          Peter Lowe. Wuji n'en entretient aucune : une liste maison serait périmée le mois
+          suivant et donnerait une fausse impression de protection. Elles ne sont
+          téléchargées que depuis cette page, jamais en arrière-plan.
+        </p>
+        """
+    }
+
+    /// Rangées par rayon, comme dans uBlock : quarante listes à la file ne se lisent pas.
+    private static func groups(_ lists: [FilterList]) -> String {
+        FilterListStore.groupOrder.compactMap { group -> String? in
+            let entries = lists.filter { $0.group == group }
+            guard !entries.isEmpty else { return nil }
+            let active = entries.filter(\.isEnabled).count
+            return """
+            <section>
+              <h3>\(escape(FilterListStore.groupTitle(group)))<span>\(active)/\(entries.count)</span></h3>
+              <ul>\(entries.map(row).joined())</ul>
+            </section>
+            """
+        }.joined()
+    }
+
+    private static func exceptionsSection(_ hosts: [String]) -> String {
+        """
+        <header>
+          <div class="titles">
+            <h2 class="big">Sans Protection</h2>
+            <p>\(hosts.count) site\(hosts.count > 1 ? "s" : "")</p>
+          </div>
+        </header>
+        \(hosts.isEmpty
+          ? #"<p class="empty">Aucun site exclu.<br>Le bouclier de la barre éteint la protection sur la page ouverte.</p>"#
+          : "<ul>\(hosts.map(exception).joined())</ul>")
+        <p class="note">
+          Un site exclu ne voit plus aucune règle s'appliquer — ni les listes, ni les
+          vôtres. C'est fait pour les pages qu'un filtre casse : un lecteur vidéo, une
+          banque, un mur de paiement.
+        </p>
+        """
+    }
+
+    private static func rulesSection(_ rules: [String]) -> String {
+        """
+        <header>
+          <div class="titles">
+            <h2 class="big">Mes Règles</h2>
+            <p>\(rules.count) règle\(rules.count > 1 ? "s" : "")</p>
+          </div>
+        </header>
+        \(rules.isEmpty
+          ? #"<p class="empty">Aucune règle.<br>« Bloquer un élément » dans le menu du bouclier en écrit une.</p>"#
+          : "<ul>\(rules.map(userRule).joined())</ul>")
+        <form id="addRule">
+          <input id="rule" type="text" placeholder="site.com##.selecteur" spellcheck="false">
+          <button type="submit" class="ghost">Ajouter</button>
+        </form>
+        <p class="note">
+          Ce sont les seules règles que Wuji garde en propre. Elles s'appliquent en plus des
+          listes et sont recopiées dans chaque tranche compilée, donc vos exceptions valent
+          partout. Format Adblock&nbsp;: <code>site.com##.selecteur</code> pour masquer,
+          <code>@@||site.com^</code> pour laisser passer.
+        </p>
+        """
+    }
+
+    // MARK: - Lignes
 
     private static func row(_ list: FilterList) -> String {
         let detail: String
@@ -79,9 +173,7 @@ enum AdBlockPage {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "fr_FR")
             formatter.dateFormat = "d MMMM 'à' HH:mm"
-            let converted = list.rules > 0
-                ? " · \(list.rules) règles sur \(list.lines) lignes"
-                : ""
+            let converted = list.rules > 0 ? " · \(list.rules) règles sur \(list.lines) lignes" : ""
             detail = "Mise à jour le \(formatter.string(from: updated))\(converted)"
         } else {
             detail = "Jamais téléchargée"
@@ -130,7 +222,36 @@ enum AdBlockPage {
             .replacingOccurrences(of: "\"", with: "&quot;")
     }
 
+    // MARK: - Style
+
+    /// La colonne de gauche reprend celle du navigateur : même fond en retrait, mêmes
+    /// lignes, même sélection. Deux colonnes de navigation qui ne se ressembleraient pas
+    /// feraient deux applications.
     private static let style = """
+    body { height: 100vh; overflow: hidden; }
+    .frame { display: flex; height: 100vh; }
+    nav {
+      width: 208px; flex: none; padding: 48px 12px 12px;
+      display: flex; flex-direction: column; gap: 3px;
+      border-right: 1px solid var(--hairline);
+    }
+    nav h1 { font-size: 13px; font-weight: 600; margin: 0 12px 12px; color: var(--muted);
+             letter-spacing: .4px; text-transform: uppercase; }
+    .tab {
+      display: block; height: 34px; line-height: 34px; padding: 0 12px;
+      border-radius: 8px; color: var(--text); text-decoration: none; font-size: 13px;
+    }
+    .tab:hover { background: var(--hover); }
+    .tab.current { background: var(--raised); }
+    .state { margin-top: auto; padding: 0 12px; color: var(--muted); font-size: 11px;
+             line-height: 1.5; }
+    .pane { flex: 1; overflow-y: auto; padding: 0 0 64px; }
+    header { max-width: 720px; margin: 0 auto; padding: 48px 24px 16px; }
+    h2.big { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.3px;
+             text-transform: none; padding: 0; color: var(--text); }
+    header p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    ul, form, .note, .empty { max-width: 720px; margin-left: auto; margin-right: auto;
+                              padding-left: 24px; padding-right: 24px; }
     li { height: auto; padding: 10px 12px; align-items: center; gap: 12px; }
     .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
     .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -147,15 +268,23 @@ enum AdBlockPage {
     }
     li:hover > button { opacity: 1; }
     li > button:hover { background: var(--danger); color: #fff; }
-    form { display: flex; gap: 8px; margin: 10px 12px 0; }
-    input[type=url] {
+    form { display: flex; gap: 8px; margin-top: 12px; }
+    form input {
       flex: 1; height: 32px; padding: 0 12px; background: transparent; color: var(--text);
       border: 1px solid var(--hairline); border-radius: 8px; font: inherit; outline: none;
     }
-    input[type=url]:focus { border-color: var(--muted); }
-    .note { margin: 12px 12px 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+    form input:focus { border-color: var(--muted); }
+    .note { margin-top: 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
     .note code { font-size: 11px; background: var(--hover); padding: 1px 5px; border-radius: 4px; }
-    .empty.small { padding: 16px 12px; text-align: left; }
+    .empty { text-align: left; padding-top: 24px; padding-bottom: 8px; }
+    section { margin-top: 20px; }
+    h3 {
+      display: flex; align-items: baseline; gap: 8px;
+      max-width: 720px; margin: 0 auto 4px; padding: 0 36px;
+      font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+      color: var(--muted);
+    }
+    h3 span { font-weight: 400; letter-spacing: 0; opacity: .7; }
     .ghost:hover { color: var(--text); border-color: var(--muted); }
     .ghost:disabled { opacity: .5; cursor: default; }
     """
@@ -163,17 +292,28 @@ enum AdBlockPage {
     private static let script = """
     const send = (payload) => window.webkit.messageHandlers.wujiAdBlock.postMessage(payload);
 
-    document.getElementById('update').addEventListener('click', (event) => {
-      event.target.disabled = true;
-      event.target.textContent = 'En cours…';
+    const update = document.getElementById('update');
+    if (update) update.addEventListener('click', () => {
+      update.disabled = true;
+      update.textContent = 'En cours…';
       send({ action: 'update' });
     });
 
-    document.getElementById('add').addEventListener('submit', (event) => {
+    const add = document.getElementById('add');
+    if (add) add.addEventListener('submit', (event) => {
       event.preventDefault();
       const field = document.getElementById('url');
       if (!field.value.trim()) return;
       send({ action: 'add', url: field.value.trim() });
+      field.value = '';
+    });
+
+    const addRule = document.getElementById('addRule');
+    if (addRule) addRule.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const field = document.getElementById('rule');
+      if (!field.value.trim()) return;
+      send({ action: 'rule', rule: field.value.trim() });
       field.value = '';
     });
 

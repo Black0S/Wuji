@@ -6,6 +6,8 @@ struct FilterList: Codable, Identifiable {
     var title: String
     var source: URL
     var isEnabled: Bool
+    /// Le rayon du catalogue d'uBlock Origin : « ads », « privacy », « regions »…
+    var group: String = "other"
     /// Dernier téléchargement réussi.
     var updated: Date?
     /// Lignes reçues, et règles réellement traduites. Les deux comptent : l'écart dit ce
@@ -13,11 +15,12 @@ struct FilterList: Codable, Identifiable {
     var lines: Int
     var rules: Int
 
-    init(title: String, source: URL, isEnabled: Bool = true) {
+    init(title: String, source: URL, isEnabled: Bool = true, group: String = "other") {
         id = UUID()
         self.title = title
         self.source = source
         self.isEnabled = isEnabled
+        self.group = group
         lines = 0
         rules = 0
     }
@@ -50,23 +53,52 @@ final class FilterListStore {
     private let directory: URL
     private let index: URL
 
-    /// Les abonnements proposés au départ. Ce sont les listes de référence du domaine ;
-    /// on les cite par leur nom pour qu'on sache ce qu'on télécharge.
-    private static let defaults: [FilterList] = [
-        FilterList(title: "uBlock Origin — filtres",
-                   source: URL(string: "https://ublockorigin.github.io/uAssets/filters/filters.txt")!),
-        FilterList(title: "uBlock Origin — vie privée",
-                   source: URL(string: "https://ublockorigin.github.io/uAssets/filters/privacy.txt")!),
+    /// Le catalogue vient d'uBlock Origin, pas de nous.
+    ///
+    /// `assets.json` est le fichier qui décrit leurs abonnements : titres, rayons, adresses,
+    /// et lesquels sont actifs par défaut. Le recopier à la main aurait vieilli en trois
+    /// mois — les listes se scindent, se renomment et déménagent. On lit donc la source.
+    ///
+    /// Tant qu'il n'a jamais été lu, on part avec les quatre listes que tout le monde
+    /// connaît : un bloqueur doit protéger avant d'avoir parlé au réseau.
+    /// Le fichier vit dans le dépôt de l'extension, pas dans celui des filtres — l'adresse
+    /// « évidente » côté uAssets rend un 404.
+    static let catalogSource =
+        URL(string: "https://raw.githubusercontent.com/gorhill/uBlock/master/assets/assets.json")!
+
+    private static let seeds: [FilterList] = [
+        FilterList(title: "uBlock filters — Ads",
+                   source: URL(string: "https://ublockorigin.github.io/uAssets/filters/filters.txt")!,
+                   group: "default"),
+        FilterList(title: "uBlock filters — Privacy",
+                   source: URL(string: "https://ublockorigin.github.io/uAssets/filters/privacy.txt")!,
+                   group: "default"),
         FilterList(title: "EasyList",
-                   source: URL(string: "https://easylist.to/easylist/easylist.txt")!),
+                   source: URL(string: "https://easylist.to/easylist/easylist.txt")!,
+                   group: "ads"),
         FilterList(title: "EasyPrivacy",
-                   source: URL(string: "https://easylist.to/easylist/easyprivacy.txt")!),
-        FilterList(title: "Liste FR",
-                   source: URL(string: "https://easylist-downloads.adblockplus.org/liste_fr.txt")!),
-        FilterList(title: "AdGuard — base",
-                   source: URL(string: "https://filters.adtidy.org/extension/ublock/filters/2.txt")!,
-                   isEnabled: false)
+                   source: URL(string: "https://easylist.to/easylist/easyprivacy.txt")!,
+                   group: "privacy")
     ]
+
+    /// Les rayons, dans l'ordre où uBlock les présente.
+    static let groupOrder = ["default", "ads", "privacy", "malware", "multipurpose",
+                             "cookies", "social", "annoyances", "regions", "other"]
+
+    static func groupTitle(_ group: String) -> String {
+        switch group {
+        case "default":      return "uBlock filters"
+        case "ads":          return "Publicités"
+        case "privacy":      return "Confidentialité"
+        case "malware":      return "Protection anti-malware et sécurité"
+        case "multipurpose": return "Tout usage"
+        case "cookies":      return "Bannières de cookie"
+        case "social":       return "Widgets de réseaux sociaux"
+        case "annoyances":   return "Nuisances"
+        case "regions":      return "Régions, langues"
+        default:             return "Ajoutées par vous"
+        }
+    }
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory,
@@ -82,7 +114,7 @@ final class FilterListStore {
             lists = stored.lists
             userRules = stored.userRules
         } else {
-            lists = Self.defaults
+            lists = Self.seeds
         }
     }
 
@@ -159,6 +191,75 @@ final class FilterListStore {
         }
         save()
         return true
+    }
+
+    /// Relit le catalogue d'uBlock et fond le résultat avec ce qu'on a.
+    ///
+    /// Les choix de l'utilisateur survivent : une liste déjà connue garde son état actif ou
+    /// inactif, et les listes ajoutées à la main ne sont jamais touchées. Une liste qui
+    /// disparaît du catalogue disparaît d'ici aussi, sauf si elle était active — auquel cas
+    /// la retirer sous les pieds de quelqu'un serait pire que de la garder.
+    func refreshCatalog() async {
+        var request = URLRequest(url: Self.catalogSource)
+        request.timeoutInterval = 30
+        guard let (data, _) = try? await URLSession.shared.data(for: request),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+
+        let language = Locale.current.language.languageCode?.identifier ?? "en"
+        var catalog: [FilterList] = []
+
+        for (key, value) in root {
+            guard let entry = value as? [String: Any],
+                  entry["content"] as? String == "filters",
+                  let title = entry["title"] as? String else { continue }
+
+            // `contentURL` est tantôt une adresse, tantôt une liste de miroirs : on prend
+            // le premier qui parle http.
+            let urls: [String]
+            switch entry["contentURL"] {
+            case let one as String: urls = [one]
+            case let many as [String]: urls = many
+            default: continue
+            }
+            guard let address = urls.first(where: { $0.hasPrefix("http") }),
+                  let source = URL(string: address) else { continue }
+
+            let group = (entry["group"] as? String) ?? "other"
+            // uBlock active une liste régionale quand elle correspond à la langue du
+            // système. On fait pareil : proposer trente-huit régions toutes cochées serait
+            // absurde, n'en proposer aucune le serait aussi.
+            let languages = ((entry["lang"] as? String) ?? "").split(separator: " ").map(String.init)
+            let regional = !languages.isEmpty
+            let isDefault = (entry["off"] as? Bool) != true
+            let enabled = regional ? languages.contains(language) : isDefault
+
+            catalog.append(FilterList(title: title, source: source,
+                                      isEnabled: enabled, group: group))
+            _ = key
+        }
+        guard !catalog.isEmpty else { return }
+
+        // Fusion : l'état connu l'emporte sur celui du catalogue.
+        var merged: [FilterList] = []
+        for var entry in catalog {
+            if let known = lists.first(where: { $0.source == entry.source }) {
+                entry = known
+                entry.title = catalog.first { $0.source == known.source }?.title ?? known.title
+                entry.group = catalog.first { $0.source == known.source }?.group ?? known.group
+            }
+            merged.append(entry)
+        }
+        // Ce que l'utilisateur a ajouté lui-même, ou ce qu'il gardait actif.
+        for known in lists where !merged.contains(where: { $0.source == known.source }) {
+            if known.group == "other" || known.isEnabled { merged.append(known) }
+        }
+
+        lists = merged.sorted {
+            let left = Self.groupOrder.firstIndex(of: $0.group) ?? Self.groupOrder.count
+            let right = Self.groupOrder.firstIndex(of: $1.group) ?? Self.groupOrder.count
+            return left == right ? $0.title < $1.title : left < right
+        }
+        save()
     }
 
     @discardableResult

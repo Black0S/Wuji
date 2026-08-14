@@ -48,8 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // configuration déjà utilisée ne l'accepte plus.
         let pages = InternalPageHandler(history: history, downloads: downloads,
                                         favorites: favorites, icons: favicons)
-        pages.adBlock = { [unowned self] in
-            AdBlockPage.html(state: blocker.state.summary,
+        pages.adBlock = { [unowned self] path in
+            AdBlockPage.html(section: AdBlockPage.Section.from(path: path),
+                             state: blocker.state.summary,
                              lists: filterLists.lists,
                              userRules: filterLists.userRules,
                              exceptions: settings.blockingExceptions,
@@ -505,7 +506,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private func refreshAdBlockPages() {
         spaces.flatMap(\.allTabs)
-            .filter { $0.url == Self.adBlockPage }
+            .filter { $0.url?.host() == "ad-block" }
             .forEach { $0.webView.reload() }
     }
 
@@ -577,6 +578,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             guard let host = payload["host"] as? String else { return }
             settings.blockingExceptions.removeAll { $0 == host }
             blocker.compile()
+        case "rule":
+            guard let rule = payload["rule"] as? String else { return }
+            blocker.addUserRule(rule)
         case "unrule":
             guard let rule = payload["rule"] as? String else { return }
             filterLists.userRules.removeAll { $0 == rule }
