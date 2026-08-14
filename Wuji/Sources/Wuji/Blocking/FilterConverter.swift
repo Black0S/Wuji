@@ -63,12 +63,38 @@ enum FilterConverter {
     static func rules(from text: String) -> Output {
         var output = Output()
 
+        // **Deux passes.** Une liste peut se corriger elle-même : `#@#` retire un masquage
+        // sur un domaine, `$badfilter` annule une règle écrite plus haut. Les deux parlent
+        // de règles qu'on n'a pas encore lues, donc il faut d'abord les recueillir.
+        var unhide: [String: Set<String>] = [:]   // sélecteur → domaines à épargner
+        var cancelled: Set<String> = []            // règles réseau annulées
+        text.enumerateLines { line, _ in
+            let line = line.trimmingCharacters(in: .whitespaces)
+            if let range = line.range(of: "#@#") {
+                let selector = String(line[range.upperBound...])
+                let scope = String(line[..<range.lowerBound])
+                guard !selector.isEmpty, !scope.isEmpty else { return }
+                unhide[selector, default: []].formUnion(
+                    scope.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() })
+            } else if line.contains("$badfilter") || line.contains(",badfilter") {
+                cancelled.insert(line.replacingOccurrences(of: "$badfilter", with: "")
+                                     .replacingOccurrences(of: ",badfilter", with: ""))
+            }
+        }
+
         text.enumerateLines { line, _ in
             let line = line.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty, !line.hasPrefix("!"), !line.hasPrefix("["),
                   !line.hasPrefix("#") || line.hasPrefix("##") else { return }
+            // Annulée par un `$badfilter` de la même liste : elle n'a jamais existé.
+            guard !cancelled.contains(line) else { return }
+            // Les lignes de la première passe ont déjà agi — elles ont retiré un masquage
+            // ou annulé une règle. Les compter comme « sans équivalent » ferait passer
+            // pour une perte ce qui est un travail fait.
+            guard !line.contains("#@#"), !line.contains("$badfilter"),
+                  !line.contains(",badfilter") else { return }
 
-            guard let (rule, kind) = convert(line) else {
+            guard let (rule, kind) = convert(line, unhide: unhide) else {
                 output.rejected += 1
                 return
             }
@@ -86,14 +112,16 @@ enum FilterConverter {
 
     private enum Kind { case block, cosmetic, exception }
 
-    private static func convert(_ line: String) -> ([String: Any], Kind)? {
+    private static func convert(_ line: String,
+                                unhide: [String: Set<String>]) -> ([String: Any], Kind)? {
         if let rule = hosts(line) { return (rule, .block) }
         if let index = line.range(of: "#") {
             // Séparer un masquage d'une règle réseau qui contiendrait un `#` : seuls les
             // marqueurs de masquage comptent, et ils font deux caractères.
             let rest = line[index.lowerBound...]
             for marker in ["##", "#@#", "#?#", "#$#", "#%#", "#@?#", "#@$#"] where rest.hasPrefix(marker) {
-                guard marker == "##", let rule = cosmetic(line, at: index.lowerBound) else { return nil }
+                guard marker == "##",
+                      let rule = cosmetic(line, at: index.lowerBound, unhide: unhide) else { return nil }
                 return (rule, .cosmetic)
             }
         }
@@ -123,7 +151,8 @@ enum FilterConverter {
     }
 
     /// Masquage d'éléments : `domaine##sélecteur`.
-    private static func cosmetic(_ line: String, at marker: String.Index) -> [String: Any]? {
+    private static func cosmetic(_ line: String, at marker: String.Index,
+                                 unhide: [String: Set<String>]) -> [String: Any]? {
         let selector = String(line[line.index(marker, offsetBy: 2)...])
         guard !selector.isEmpty,
               // Les scriptlets injectent du code, ce que les règles de contenu ne font pas.
@@ -132,18 +161,28 @@ enum FilterConverter {
               selector.allSatisfy(\.isASCII) else { return nil }
 
         var trigger: [String: Any] = ["url-filter": ".*"]
+        // Les domaines où ce masquage a été explicitement retiré par un `#@#`.
+        let spared = unhide[selector] ?? []
         let scope = String(line[..<marker])
+
         if !scope.isEmpty {
             guard let (included, excluded) = domains(scope) else { return nil }
-            // WebKit refuse les deux à la fois. On garde l'inclusion, qui restreint ;
-            // l'exclusion seule ferait une règle plus large que ce qui est écrit.
-            if !included.isEmpty {
-                trigger["if-domain"] = included
-            } else if !excluded.isEmpty {
+            // Une exception sur un domaine visé retire ce domaine de la portée : la règle
+            // continue de s'appliquer ailleurs, ce qui est exactement ce qu'elle dit.
+            let kept = included.filter { !spared.contains($0.dropFirst().lowercased()) }
+            if !kept.isEmpty {
+                trigger["if-domain"] = kept
+            } else if included.isEmpty, !excluded.isEmpty {
+                // WebKit refuse les deux à la fois : on garde l'exclusion seule.
                 trigger["unless-domain"] = excluded
             } else {
+                // Plus aucun domaine où masquer : la règle n'a plus d'objet.
                 return nil
             }
+        } else if !spared.isEmpty {
+            // Masquage global épargné sur quelques sites : c'est précisément ce que
+            // `unless-domain` sait dire, et qu'on jetait faute de l'avoir lu.
+            trigger["unless-domain"] = spared.map { "*" + $0 }.sorted()
         }
 
         return ["trigger": trigger,
