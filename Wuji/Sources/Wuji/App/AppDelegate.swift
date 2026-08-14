@@ -454,6 +454,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private func close(tabID: UUID) {
         guard let tab = currentSpace.tab(with: tabID) else { return }
+        remember(tab, in: currentSpace)
         currentSpace.remove(tab)
         if currentSpace.isEmpty {
             newTab(url: nil)
@@ -480,6 +481,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
         guard let tab = currentSpace.current else { return }
         close(tabID: tab.id)
+    }
+
+    // MARK: - Rouvrir un onglet fermé
+
+    /// Un onglet fermé, et de quoi le rendre **là où il était**.
+    ///
+    /// L'espace et le dossier sont désignés par leur identité, la place par un rang :
+    /// entre la fermeture et la reprise, un voisin a pu disparaître, mais un conteneur
+    /// nommé et un rang borné retombent toujours sur quelque chose de vrai.
+    private struct ClosedTab {
+        let url: URL
+        let title: String
+        let space: UUID
+        let folder: UUID?
+        let index: Int
+    }
+
+    /// Le plus récent en dernier : fermer puis rouvrir doit rendre ce qu'on vient de
+    /// fermer, pas ce qu'on avait fermé ce matin.
+    private var closedTabs: [ClosedTab] = []
+
+    private func remember(_ tab: Tab, in space: Space) {
+        // Une page vierge n'a rien à rendre : la rouvrir donnerait une page vierge de plus.
+        guard let url = tab.url, !isBlank(tab) else { return }
+        let folder = space.folders.first { $0.tabs.contains { $0 === tab } }
+        let index = folder.flatMap { $0.tabs.firstIndex { $0 === tab } }
+            ?? space.loose.firstIndex { $0 === tab }
+            ?? space.loose.count
+
+        closedTabs.append(ClosedTab(url: url, title: tab.title, space: space.id,
+                                    folder: folder?.id, index: index))
+        // Borné : au-delà d'une poignée, ce n'est plus « rouvrir ce que je viens de
+        // fermer », c'est un second historique — et il en existe déjà un vrai.
+        if closedTabs.count > 12 { closedTabs.removeFirst() }
+    }
+
+    /// `⇧⌘T` rend le dernier onglet fermé, dans son espace et à sa place.
+    ///
+    /// Il revient chargé en différé, comme au démarrage : on rouvre souvent par réflexe,
+    /// et une requête réseau immédiate pour un onglet qu'on regardera peut-être serait
+    /// payée à chaque fois.
+    @objc func reopenClosedTab(_ sender: Any?) {
+        guard let closed = closedTabs.popLast() else { return }
+
+        // L'espace d'origine s'il existe encore, celui d'aujourd'hui sinon : rendre
+        // l'onglet ailleurs vaut mieux que ne rien rendre.
+        if let index = spaces.firstIndex(where: { $0.id == closed.space }) {
+            currentSpaceIndex = index
+        }
+        let space = currentSpace
+        let tab = makeTab(pendingURL: closed.url, pendingTitle: closed.title)
+        space.restore(tab, folder: closed.folder, index: closed.index)
+        space.current = tab
+        activateCurrentTab()
     }
 
     @objc func nextTab(_ sender: Any?) { step(by: 1) }
@@ -711,11 +766,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// n'existent pas encore, et les afficher grisés donnerait l'illusion d'un produit
     /// plus avancé qu'il ne l'est.
     private func mainMenu() -> [ActionItem] {
-        [
+        var items: [ActionItem] = [
             ActionItem(title: "Nouvel onglet", symbol: "plus", shortcut: "⌘T",
                        action: { [weak self] in self?.newTab(nil) }),
             ActionItem(title: "Nouveau dossier", symbol: "folder.badge.plus", shortcut: "⇧⌘N",
-                       action: { [weak self] in self?.newFolder(nil) }),
+                       action: { [weak self] in self?.newFolder(nil) })
+        ]
+        // Seulement quand il y a quelque chose à rouvrir : une entrée grisée en
+        // permanence apprend à ne plus lire cette ligne.
+        if !closedTabs.isEmpty {
+            items.append(ActionItem(title: "Rouvrir l'onglet fermé", symbol: "arrow.uturn.left",
+                                    shortcut: "⇧⌘T",
+                                    action: { [weak self] in self?.reopenClosedTab(nil) }))
+        }
+        items.append(contentsOf: [
             .separator,
             ActionItem(title: "Historique", symbol: "clock", shortcut: "⌘Y",
                        action: { [weak self] in self?.showHistory(nil) }),
@@ -730,7 +794,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                        action: { [weak self] in self?.openSettings(nil) }),
             ActionItem(title: "À propos de Wuji", symbol: "info.circle",
                        action: { NSApp.orderFrontStandardAboutPanel(nil) })
-        ]
+        ])
+        return items
     }
 
     // MARK: - Menu contextuel de la page
@@ -1271,6 +1336,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         folderItem.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(folderItem)
         fileMenu.addItem(withTitle: "Fermer l'onglet", action: #selector(closeTab(_:)), keyEquivalent: "w")
+        let reopenItem = NSMenuItem(title: "Rouvrir l'onglet fermé",
+                                    action: #selector(reopenClosedTab(_:)), keyEquivalent: "T")
+        reopenItem.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(reopenItem)
         fileItem.submenu = fileMenu
         main.addItem(fileItem)
 

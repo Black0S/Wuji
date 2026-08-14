@@ -100,6 +100,21 @@ final class Space {
         }
     }
 
+    /// Réinsère un onglet à une place connue — la reprise d'un onglet fermé.
+    ///
+    /// `place(_:at:)` ne sait viser qu'un voisin, et un voisin peut avoir disparu entre
+    /// la fermeture et la reprise. Ici la place est un rang dans un conteneur nommé, borné
+    /// à ce qui existe encore : l'onglet revient où il était, ou au plus près.
+    func restore(_ tab: Tab, folder folderID: UUID?, index: Int) {
+        detach(tab)
+        if let folder = folderID.flatMap(folder(with:)) {
+            folder.tabs.insert(tab, at: min(max(0, index), folder.tabs.count))
+            folder.isExpanded = true
+        } else {
+            loose.insert(tab, at: min(max(0, index), loose.count))
+        }
+    }
+
     @discardableResult
     func addFolder(named name: String) -> TabFolder {
         let folder = TabFolder(name: name)
