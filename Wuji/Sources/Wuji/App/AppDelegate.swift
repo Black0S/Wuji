@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                                    forURLScheme: InternalPageHandler.scheme)
         config.userContentController.add(self, name: "wujiHistory")
         config.userContentController.add(self, name: "wujiDownloads")
+        config.userContentController.add(self, name: "wujiError")
         return config
     }()
 
@@ -286,6 +287,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
               let url = navigationAction.request.url else { return .allow }
         openInNewTab(url, activate: navigationAction.modifierFlags.contains(.shift))
         return .cancel
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+                 withError error: any Error) {
+        present(error, in: webView)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
+        present(error, in: webView)
+    }
+
+    /// Affiche l'échec **à l'adresse demandée**, et non sous `wuji://` : l'URL reste dans
+    /// la barre, le bouton précédent fonctionne, et réessayer a un sens.
+    private func present(_ error: any Error, in webView: WKWebView) {
+        let error = error as NSError
+
+        // Deux échecs qui n'en sont pas : une navigation qu'on a annulée nous-mêmes — le
+        // ⌘clic — et une navigation devenue téléchargement. Les afficher accuserait le
+        // réseau de ce que nous venons de faire.
+        guard error.code != NSURLErrorCancelled,
+              !(error.domain == "WebKitErrorDomain" && error.code == 102) else { return }
+
+        guard let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL ?? webView.url else { return }
+        webView.loadSimulatedRequest(URLRequest(url: url),
+                                     responseHTML: ErrorPage.html(url: url, error: error))
     }
 
     /// Une page vue est une page arrivée. Enregistrer au départ de la navigation
@@ -719,13 +745,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         }
     }
 
-    /// Les actions de la page d'historique. Elle ne touche pas la base elle-même : elle
-    /// demande, l'application décide.
+    /// Les actions des pages internes. Elles ne touchent à rien elles-mêmes : elles
+    /// demandent, l'application décide.
     nonisolated func userContentController(_ controller: WKUserContentController,
                                            didReceive message: WKScriptMessage) {
         MainActor.assumeIsolated {
-            guard let payload = message.body as? [String: Any],
-                  let action = payload["action"] as? String else { return }
+            guard let payload = message.body as? [String: Any] else { return }
+            if message.name == "wujiError" {
+                guard let raw = payload["url"] as? String, let url = URL(string: raw) else { return }
+                currentTab?.webView.load(URLRequest(url: url))
+                return
+            }
+            guard let action = payload["action"] as? String else { return }
             if message.name == "wujiDownloads" {
                 handleDownloadAction(action, id: payload["id"] as? String)
                 return
