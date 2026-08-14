@@ -235,6 +235,10 @@ enum InternalStyle {
     }
     ul { list-style: none; margin: 0; padding: 0; }
     li { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; }
+    /* `[hidden]` vient de la feuille du navigateur, et **toute** règle d'auteur la bat,
+       quelle que soit sa spécificité. Notre « li { display: flex } » annulait donc
+       l'attribut : la recherche filtrait bien, et rien ne disparaissait. */
+    [hidden] { display: none !important; }
     /* Même gabarit pour l'icône d'un site et pour son repli : sans ça, les titres ne
        s'alignent plus d'une ligne à l'autre. */
     .ico { width: 16px; height: 16px; flex: none; border-radius: 3px; }

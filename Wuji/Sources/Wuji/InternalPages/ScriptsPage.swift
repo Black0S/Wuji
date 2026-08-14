@@ -58,10 +58,21 @@ enum ScriptsPage {
             <span class="detail">\(escape(item.descriptionText))</span>
             <span class="detail mono">\(escape(scope))</span>
           </div>
+          \(item.source != nil
+            ? #"<button data-action="update" title="Mettre à jour" aria-label="Mettre à jour">"# + arrow + "</button>"
+            : "")
           <button data-action="remove" title="Supprimer" aria-label="Supprimer">\(cross)</button>
         </li>
         """
     }
+
+    /// La flèche de mise à jour n'apparaît que sur un script venu d'une adresse : un
+    /// script collé à la main n'a nulle part où aller chercher une version plus récente.
+    private static let arrow = """
+    <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" \
+    stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">\
+    <path d="M12.8 8a4.8 4.8 0 1 1-1.5-3.5"/><path d="M12.8 2.9v3.3H9.5"/></svg>
+    """
 
     private static let cross = """
     <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" \
@@ -123,7 +134,9 @@ enum ScriptsPage {
       if (!button) return;
       const row = button.closest('li');
       send({ action: button.dataset.action, id: row.dataset.id });
-      row.remove();
+      // Seule la suppression retire la ligne : une mise à jour la garde, et la page se
+      // recharge quand le nouveau script est arrivé.
+      if (button.dataset.action === 'remove') row.remove();
     });
     """
 }

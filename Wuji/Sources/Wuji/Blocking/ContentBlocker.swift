@@ -135,7 +135,7 @@ final class ContentBlocker {
         // convertisseur d'AdGuard s'arrête de lui-même au plafond de Safari, donc le
         // découper par liste est aussi ce qui évite qu'il écarte le surplus.
         let userRules = lists.userRules
-        let hosts = settings.blockingExceptions
+        let hosts = settings.blockingExceptions + settings.privateBlockingExceptions
         Task.detached(priority: .userInitiated) {
             // Les règles de l'utilisateur valent partout, donc sont recopiées dans chaque
             // tranche : `ignore-previous-rules` n'annule que ce qui le précède dans la
@@ -316,9 +316,14 @@ final class ContentBlocker {
 
     // MARK: - Exceptions par site
 
+    /// L'espace courant est-il privé ? Fourni par l'application : le bloqueur ne connaît
+    /// pas les espaces, mais il doit savoir dans quel registre écrire.
+    var isPrivate: () -> Bool = { false }
+
     func isExcepted(_ url: URL?) -> Bool {
         guard let host = url?.host() else { return false }
         return settings.blockingExceptions.contains(host)
+            || settings.privateBlockingExceptions.contains(host)
     }
 
     /// Le bloqueur casse parfois une page — un lecteur vidéo, une banque, un mur de
@@ -326,7 +331,15 @@ final class ContentBlocker {
     /// entre la page et la protection partout ailleurs.
     func toggleException(for url: URL?) {
         guard let host = url?.host() else { return }
-        if let index = settings.blockingExceptions.firstIndex(of: host) {
+        // En privé, l'exception va dans le registre éphémère : elle vaut pour la session
+        // et ne suit pas l'utilisateur dans ses espaces normaux.
+        if isPrivate() {
+            if let index = settings.privateBlockingExceptions.firstIndex(of: host) {
+                settings.privateBlockingExceptions.remove(at: index)
+            } else {
+                settings.privateBlockingExceptions.append(host)
+            }
+        } else if let index = settings.blockingExceptions.firstIndex(of: host) {
             settings.blockingExceptions.remove(at: index)
         } else {
             settings.blockingExceptions.append(host)

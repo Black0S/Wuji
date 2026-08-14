@@ -52,6 +52,7 @@ enum SettingsPage {
         var retention: Int
         var historyCount: Int
         var blockingEnabled: Bool
+        var agent: String
         var blockingSummary: String
         /// Les autorisations accordées ou refusées, par site.
         var permissions: [(host: String, kind: String, isAllowed: Bool)]
@@ -144,7 +145,14 @@ enum SettingsPage {
                 """
             }.joined()
 
-        return zoom + """
+        let agent = row(title: "Se présenter comme",
+                        subtitle: "Des sites refusent ce qu'ils ne reconnaissent pas. Le moteur reste WebKit quoi qu'on déclare.",
+                        control: select(name: "agent",
+                                        options: [("safari", "Safari"), ("chrome", "Chrome"),
+                                                  ("firefox", "Firefox")],
+                                        selected: state.agent))
+
+        return zoom + agent + """
         <div class="row block">
           <div class="labels">
             <span class="title">Caméra et micro</span>

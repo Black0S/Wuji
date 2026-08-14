@@ -54,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // Et c'est aussi le choix le plus discret : un agent « Wuji/0.4 » serait unique au
         // monde et suffirait à nous suivre d'un site à l'autre. Le meilleur endroit où se
         // cacher, c'est la foule des Safari.
-        config.applicationNameForUserAgent = "Version/26.6 Safari/605.1.15"
+        config.applicationNameForUserAgent = settings.agent.applicationName
         // Le gestionnaire doit être posé avant la création de la moindre vue web : une
         // configuration déjà utilisée ne l'accepte plus.
         let pages = InternalPageHandler(history: history, downloads: downloads,
@@ -80,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         config.userContentController.add(self, name: ElementPicker.handler)
         config.userContentController.add(self, name: "wujiScripts")
         config.userContentController.add(self, name: "wujiSettings")
+        config.userContentController.add(self, name: MediaWatcher.handler)
         config.userContentController.add(self, name: "wujiError")
         config.userContentController.add(self, name: PageContextMenu.handler)
         config.userContentController.addUserScript(PageContextMenu.script)
@@ -150,6 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         }
         // L'index des règles avancées d'abord : il vient du disque, et il doit être prêt
         // avant que la session restaurée ne charge sa première page.
+        blocker.isPrivate = { [weak self] in self?.isPrivateSpace ?? false }
         blocker.advanced.restore()
         blocker.start()
 
@@ -268,6 +270,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
         for tab in spaces.flatMap(\.allTabs) {
             tab.webView.pageZoom = settings.pageZoom
+            tab.webView.customUserAgent = settings.agent == .safari ? nil
+                : "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+                  + "(KHTML, like Gecko) " + settings.agent.applicationName
             tab.webView.isInspectable = settings.safariInspection
             // Une couleur dynamique posée sur WebKit est résolue à l'affectation : il faut
             // la réécrire quand le thème change.
@@ -558,6 +563,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
         controller.addUserScript(PageContextMenu.script)
+        controller.addUserScript(MediaWatcher.script)
 
         // Les scripts de l'utilisateur passent avant le blocage : ils sont à lui, et ils
         // s'appliquent même sur un site où la protection est levée.
@@ -621,6 +627,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                            retention: settings.historyRetention,
                            historyCount: history.count,
                            blockingEnabled: settings.blockingEnabled,
+                           agent: settings.agent.rawValue,
                            blockingSummary: blocker.state.summary,
                            permissions: permissions.decisions.map {
                                ($0.host, $0.kind.rawValue, $0.isAllowed)
@@ -644,6 +651,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             case "inspection": settings.safariInspection = (value == "true")
             case "retention":  settings.historyRetention = Int(value) ?? 90
             case "zoom":       settings.pageZoom = (Double(value) ?? 100) / 100
+            case "agent":      settings.agent = Settings.Agent(rawValue: value) ?? .safari
             case "blocking":
                 settings.blockingEnabled = (value == "true")
                 blocker.start()
@@ -706,6 +714,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         case "enable":
             guard let value = payload["value"] as? Bool else { return }
             userScripts.setEnabled(value, id: payload["id"] as? String)
+        case "update":
+            // On retélécharge à la même adresse : c'est le script lui-même qui dit sa
+            // version, et son en-tête sera relu comme à l'installation.
+            guard let id = payload["id"] as? String,
+                  let script = userScripts.scripts.first(where: { $0.id.uuidString == id }),
+                  let source = script.source else { return }
+            Task { [weak self] in
+                guard let (data, _) = try? await URLSession.shared.data(from: source),
+                      let text = String(data: data, encoding: .utf8) else {
+                    self?.layout.toast.show("Mise à jour impossible")
+                    return
+                }
+                let updated = self?.userScripts.add(text: text, source: source)
+                self?.layout.toast.show(updated.map {
+                    $0.version.isEmpty ? "« \($0.name) » mis à jour"
+                                       : "« \($0.name) » en v\($0.version)"
+                } ?? "Mise à jour impossible")
+                self?.refreshScriptsPages()
+            }
         case "remove":
             userScripts.remove(id: payload["id"] as? String)
         default:
@@ -999,6 +1026,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         guard let tab = currentSpace.tab(with: tabID) else { return }
         remember(tab, in: currentSpace)
         currentSpace.remove(tab)
+        // Ce que l'onglet faisait s'arrête avec lui : sans ce démontage, le son d'une
+        // vidéo continuait après la fermeture.
+        tab.tearDown()
         if currentSpace.isEmpty {
             newTab(url: nil)
             openOmnibox()
@@ -1096,11 +1126,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private func activateCurrentTab() {
         guard let tab = currentSpace.current ?? currentSpace.allTabs.first else { return }
         currentSpace.current = tab
+        tab.lastSeen = Date()
+        tab.wake()
         // C'est ici que le chargement différé se dénoue : un onglet restauré ne va
         // chercher sa page qu'au moment où on le regarde.
         tab.loadIfPending()
         layout.content.attach(tab.webView)
         syncChrome()
+        scheduleSleep()
+    }
+
+    /// Endort les onglets qu'on ne regarde plus depuis un moment.
+    ///
+    /// **Un onglet en veille rend son processus de rendu et sa mémoire.** Une vue web
+    /// invisible les garde : WebKit n'offre aucune API pour l'endormir, la seule façon est
+    /// de vider la page en conservant de quoi la reconstruire. Dix minutes, parce que
+    /// revenir sur un onglet après dix minutes coûte un rechargement qu'on accepte, alors
+    /// qu'après trente secondes il surprendrait.
+    private static let sleepDelay: TimeInterval = 600
+
+    private func scheduleSleep() {
+        sleepTimer?.invalidate()
+        sleepTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.sleepIdleTabs() }
+        }
+    }
+
+    private var sleepTimer: Timer?
+
+    private func sleepIdleTabs() {
+        let now = Date()
+        for space in spaces {
+            for tab in space.allTabs where tab !== space.current {
+                guard now.timeIntervalSince(tab.lastSeen) > Self.sleepDelay else { continue }
+                tab.sleep()
+            }
+        }
+        syncSidebar()
     }
 
     private func syncChrome() {
@@ -1143,10 +1205,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private func item(for tab: Tab, depth: Int) -> SidebarItem {
         .tab(id: tab.id, title: tab.title, host: tab.url?.host() ?? "",
-             isLoading: tab.webView.isLoading, favicon: favicons.icon(for: tab.url), depth: depth)
+             isLoading: tab.webView.isLoading, favicon: favicons.icon(for: tab.url),
+             depth: depth, isPlaying: tab.isPlayingMedia, isSleeping: tab.isSleeping)
     }
 
     // MARK: - Dossiers et déplacements
+
+    /// Un espace privé neuf, et on y va.
+    @objc func newPrivateSpace(_ sender: Any?) {
+        let space = Space(name: "Privé", symbol: Space.privateSymbol)
+        space.isPrivate = true
+        spaces.append(space)
+        currentSpaceIndex = spaces.count - 1
+        newTab(url: nil)
+        openOmnibox()
+        layout.toast.show("Espace privé : rien ne sera enregistré")
+    }
 
     @objc func newFolder(_ sender: Any?) {
         let folder = currentSpace.addFolder(named: "Dossier \(currentSpace.folders.count + 1)")
@@ -1270,6 +1344,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     @objc func focusOmnibox(_ sender: Any?) { openOmnibox() }
     @objc func reload(_ sender: Any?) { currentTab?.webView.reload() }
+    /// Le zoom est un réglage de l'application, pas de l'onglet.
+    ///
+    /// Régler la taille du texte page par page obligerait à le refaire partout ; c'est une
+    /// question de vue, pas de site. Le raccourci modifie donc le même réglage que la page
+    /// « Sites web », et toutes les pages suivent.
+    @objc func zoomIn(_ sender: Any?)  { setZoom(settings.pageZoom + 0.1) }
+    @objc func zoomOut(_ sender: Any?) { setZoom(settings.pageZoom - 0.1) }
+    @objc func zoomReset(_ sender: Any?) { setZoom(1) }
+
+    private func setZoom(_ value: CGFloat) {
+        let clamped = min(max(0.5, (value * 10).rounded() / 10), 2)
+        guard clamped != settings.pageZoom else { return }
+        settings.pageZoom = clamped
+        layout.toast.show("Zoom \(Int(clamped * 100)) %")
+    }
+
     @objc func goBack(_ sender: Any?) { currentTab?.webView.goBack() }
     @objc func goForward(_ sender: Any?) { currentTab?.webView.goForward() }
 
@@ -1501,6 +1591,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                                            didReceive message: WKScriptMessage) {
         MainActor.assumeIsolated {
             guard let payload = message.body as? [String: Any] else { return }
+            if message.name == MediaWatcher.handler {
+                // La page dit ce qu'elle joue ; l'onglet le retient pour la sidebar.
+                let playing = payload["playing"] as? Bool ?? false
+                if let tab = spaces.flatMap(\.allTabs).first(where: { $0.webView === message.webView }),
+                   tab.isPlayingMedia != playing {
+                    tab.isPlayingMedia = playing
+                    syncSidebar()
+                }
+                return
+            }
             if message.name == ElementPicker.handler {
                 addPickedRule(payload["selector"] as? String ?? "")
                 return
@@ -1946,9 +2046,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         let fileItem = NSMenuItem()
         let fileMenu = NSMenu(title: "Fichier")
         fileMenu.addItem(withTitle: "Nouvel onglet", action: #selector(newTab(_:)), keyEquivalent: "t")
+        // ⇧⌘N est le raccourci de la navigation privée partout ailleurs : le dossier lui
+        // cède la place et passe sur ⌥⌘N.
+        let privateItem = NSMenuItem(title: "Nouvel espace privé",
+                                     action: #selector(newPrivateSpace(_:)), keyEquivalent: "N")
+        privateItem.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(privateItem)
         let folderItem = NSMenuItem(title: "Nouveau dossier",
                                     action: #selector(newFolder(_:)), keyEquivalent: "n")
-        folderItem.keyEquivalentModifierMask = [.command, .shift]
+        folderItem.keyEquivalentModifierMask = [.command, .option]
         fileMenu.addItem(folderItem)
         fileMenu.addItem(withTitle: "Fermer l'onglet", action: #selector(closeTab(_:)), keyEquivalent: "w")
         let reopenItem = NSMenuItem(title: "Rouvrir l'onglet fermé",
@@ -1974,6 +2080,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         let viewMenu = NSMenu(title: "Présentation")
         viewMenu.addItem(withTitle: "Omnibox", action: #selector(focusOmnibox(_:)), keyEquivalent: "l")
         viewMenu.addItem(withTitle: "Recharger", action: #selector(reload(_:)), keyEquivalent: "r")
+        viewMenu.addItem(.separator())
+        viewMenu.addItem(withTitle: "Agrandir", action: #selector(zoomIn(_:)), keyEquivalent: "+")
+        viewMenu.addItem(withTitle: "Réduire", action: #selector(zoomOut(_:)), keyEquivalent: "-")
+        viewMenu.addItem(withTitle: "Taille réelle", action: #selector(zoomReset(_:)), keyEquivalent: "0")
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Ajouter aux favoris", action: #selector(toggleFavorite(_:)),
                          keyEquivalent: "d")

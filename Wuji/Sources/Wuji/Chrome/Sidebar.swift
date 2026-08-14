@@ -9,12 +9,13 @@ struct SpaceSnapshot {
 /// Une ligne de la sidebar. Volontairement pauvre : ni `Tab`, ni `TabFolder`, ni index —
 /// une **identité** et de quoi dessiner. C'est la frontière entre le modèle et son rendu.
 enum SidebarItem {
-    case tab(id: UUID, title: String, host: String, isLoading: Bool, favicon: NSImage?, depth: Int)
+    case tab(id: UUID, title: String, host: String, isLoading: Bool, favicon: NSImage?,
+             depth: Int, isPlaying: Bool, isSleeping: Bool)
     case folder(id: UUID, name: String, isExpanded: Bool, count: Int)
 
     var id: UUID? {
         switch self {
-        case .tab(let id, _, _, _, _, _): return id
+        case .tab(let id, _, _, _, _, _, _, _): return id
         case .folder(let id, _, _, _):    return id
         }
     }
@@ -128,8 +129,10 @@ final class Sidebar: ThemedView {
         rows.forEach { $0.removeFromSuperview() }
         rows = newItems.map { item in
             switch item {
-            case .tab(let id, let title, let host, let isLoading, let favicon, let depth):
+            case .tab(let id, let title, let host, let isLoading, let favicon, let depth,
+                      let isPlaying, let isSleeping):
                 let row = TabRow(title: title, host: host, isLoading: isLoading,
+                                 isPlaying: isPlaying, isSleeping: isSleeping,
                                  favicon: favicon, depth: depth, isSelected: id == selected)
                 row.onMouseDown = { [weak self] event in
                     self?.beginTracking(id: id, isFolder: false, event: event)
@@ -423,7 +426,7 @@ final class Sidebar: ThemedView {
     /// ligne glissée elle-même, et en tombant sur la fin de liste quand il n'y a plus rien.
     private func insertion(from index: Int) -> SidebarDrop {
         for item in items.dropFirst(index) {
-            if case .tab(let id, _, _, _, _, _) = item, id != draggingID { return .before(id) }
+            if case .tab(let id, _, _, _, _, _, _, _) = item, id != draggingID { return .before(id) }
         }
         return .end
     }
@@ -727,7 +730,8 @@ private final class TabRow: ThemedView {
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
 
-    init(title: String, host: String, isLoading: Bool, favicon: NSImage?,
+    init(title: String, host: String, isLoading: Bool, isPlaying: Bool = false,
+         isSleeping: Bool = false, favicon: NSImage?,
          depth: Int, isSelected: Bool) {
         self.isSelected = isSelected
         self.depth = depth
@@ -745,7 +749,12 @@ private final class TabRow: ThemedView {
         icon.imageScaling = .scaleProportionallyDown
         addSubview(icon)
 
-        label.stringValue = isLoading ? "· \(title)" : title
+        // Un préfixe plutôt qu'une icône de plus : la ligne est déjà chargée d'un glyphe,
+        // d'un titre et d'une croix. Le haut-parleur dit « ça joue », le point dit « ça
+        // charge », et rien ne dit « en veille » — un onglet endormi doit se comporter
+        // comme les autres, il se réveille au clic.
+        label.stringValue = isPlaying ? "♪ \(title)" : (isLoading ? "· \(title)" : title)
+        label.alphaValue = isSleeping ? 0.55 : 1
         label.font = .systemFont(ofSize: 13, weight: .regular)
         label.lineBreakMode = .byTruncatingTail
         addSubview(label)

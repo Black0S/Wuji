@@ -84,6 +84,36 @@ final class Settings {
         didSet { store.set(historyRetention, forKey: Key.retention); changed() }
     }
 
+    /// L'agent que Wuji annonce aux sites.
+    ///
+    /// **Se faire passer pour un autre navigateur est parfois la seule façon d'entrer.**
+    /// Des sites refusent tout ce qu'ils ne reconnaissent pas, et le moteur reste WebKit
+    /// quoi qu'on déclare — on ne gagne pas les capacités de Chrome en portant son nom, on
+    /// gagne le droit d'essayer.
+    enum Agent: String, CaseIterable {
+        case safari, chrome, firefox
+
+        var label: String {
+            switch self {
+            case .safari:  return "Safari"
+            case .chrome:  return "Chrome"
+            case .firefox: return "Firefox"
+            }
+        }
+
+        /// Ce qui est ajouté à l'agent que WebKit compose lui-même. Safari est le défaut,
+        /// et le plus discret : c'est la foule dans laquelle on se cache.
+        var applicationName: String {
+            switch self {
+            case .safari:  return "Version/26.6 Safari/605.1.15"
+            case .chrome:  return "Version/26.6 Safari/605.1.15 Chrome/131.0.0.0"
+            case .firefox: return "Version/26.6 Safari/605.1.15 Firefox/133.0"
+            }
+        }
+    }
+
+    var agent: Agent { didSet { store.set(agent.rawValue, forKey: Key.agent); changed() } }
+
     // MARK: - Protection
 
     var blockingEnabled: Bool {
@@ -94,6 +124,14 @@ final class Settings {
     var blockingExceptions: [String] {
         didSet { store.set(blockingExceptions, forKey: Key.blockingExceptions); changed() }
     }
+
+    /// Les exceptions posées depuis un espace privé.
+    ///
+    /// **Elles ne sont pas écrites sur le disque et meurent avec la session.** Lever la
+    /// protection sur un site en privé la levait aussi en normal : la décision d'un moment
+    /// où l'on demande explicitement à ne rien laisser survivait à ce moment-là, ce qui est
+    /// le contraire de ce que « privé » promet.
+    var privateBlockingExceptions: [String] = [] { didSet { changed() } }
 
     var onChange: (() -> Void)?
 
@@ -109,6 +147,7 @@ final class Settings {
         static let retention = "historyRetention"
         static let blocking = "blockingEnabled"
         static let blockingExceptions = "blockingExceptions"
+        static let agent = "agent"
     }
 
     init() {
@@ -121,6 +160,7 @@ final class Settings {
         historyRetention = store.object(forKey: Key.retention) as? Int ?? 90
         blockingEnabled = store.object(forKey: Key.blocking) as? Bool ?? true
         blockingExceptions = store.stringArray(forKey: Key.blockingExceptions) ?? []
+        agent = Agent(rawValue: store.string(forKey: Key.agent) ?? "") ?? .safari
     }
 
     private func changed() { onChange?() }
