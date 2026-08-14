@@ -110,7 +110,7 @@ enum HistoryPage {
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     li:hover a { text-decoration: underline; }
-    .host { color: var(--muted); font-size: 12px; max-width: 200px;
+    .host { color: var(--muted); font-size: 12px; max-width: 220px;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
     .remove {

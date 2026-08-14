@@ -209,10 +209,11 @@ enum InternalStyle {
       margin: 0; background: var(--bg); color: var(--text);
       font: 13px -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased;
     }
-    header {
-      display: flex; align-items: center; gap: 12px;
-      max-width: 760px; margin: 0 auto; padding: 48px 24px 16px;
-    }
+    /* La mise en page — largeurs et marges — appartient à `InternalShell`, et à lui seul.
+       Chaque page qui redéfinissait « header » décalait son titre de quelques points par
+       rapport à la colonne de gauche : invisible page par page, criant en passant de
+       l'une a l'autre. */
+    header { display: flex; align-items: center; gap: 12px; }
     .titles { flex: 1; }
     h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -.4px; }
     header p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
@@ -227,7 +228,6 @@ enum InternalStyle {
       border: 1px solid var(--hairline); border-radius: 8px; font: inherit; cursor: pointer;
     }
     .ghost:hover { color: var(--danger); border-color: var(--danger); }
-    main { max-width: 760px; margin: 0 auto; padding: 0 24px 64px; }
     section { margin-top: 24px; }
     h2 {
       margin: 0 0 6px; padding: 0 12px; font-size: 10px; font-weight: 600;

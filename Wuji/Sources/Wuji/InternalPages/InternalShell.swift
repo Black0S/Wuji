@@ -85,9 +85,11 @@ enum InternalShell {
     private static let shellStyle = """
     body { height: 100vh; overflow: hidden; }
     .frame { display: flex; height: 100vh; }
+    /* Pas de filet entre le sommaire et le contenu : les deux sont sur le même fond, et
+       une ligne verticale y dessinerait une frontière qui n'existe pas. C'est l'écart qui
+       sépare, comme dans la colonne du navigateur. */
     nav {
       width: 202px; flex: none; padding: 44px 12px 12px; overflow-y: auto;
-      border-right: 1px solid var(--hairline);
     }
     nav section { margin: 0 0 18px; }
     nav h4 {

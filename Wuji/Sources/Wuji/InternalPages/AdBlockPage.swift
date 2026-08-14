@@ -64,7 +64,7 @@ enum AdBlockPage {
         return """
         <header>
           <div class="titles">
-            <h2 class="big">Ad-Block Règles</h2>
+            <h1>Ad-Block Règles</h1>
             <p>\(active) liste\(active > 1 ? "s" : "") active\(active > 1 ? "s" : "") sur \(lists.count)</p>
           </div>
           <button id="update" class="ghost"\(isBusy ? " disabled" : "")>\(isBusy ? "En cours…" : "Mettre à jour")</button>
@@ -123,7 +123,7 @@ enum AdBlockPage {
         """
         <header>
           <div class="titles">
-            <h2 class="big">Sans Protection</h2>
+            <h1>Sans Protection</h1>
             <p>\(hosts.count) site\(hosts.count > 1 ? "s" : "")</p>
           </div>
         </header>
@@ -142,7 +142,7 @@ enum AdBlockPage {
         """
         <header>
           <div class="titles">
-            <h2 class="big">Mes Règles</h2>
+            <h1>Mes Règles</h1>
             <p>\(rules.count) règle\(rules.count > 1 ? "s" : "")</p>
           </div>
         </header>
@@ -225,30 +225,6 @@ enum AdBlockPage {
     /// lignes, même sélection. Deux colonnes de navigation qui ne se ressembleraient pas
     /// feraient deux applications.
     private static let style = """
-    body { height: 100vh; overflow: hidden; }
-    .frame { display: flex; height: 100vh; }
-    nav {
-      width: 208px; flex: none; padding: 48px 12px 12px;
-      display: flex; flex-direction: column; gap: 3px;
-      border-right: 1px solid var(--hairline);
-    }
-    nav h1 { font-size: 13px; font-weight: 600; margin: 0 12px 12px; color: var(--muted);
-             letter-spacing: .4px; text-transform: uppercase; }
-    .tab {
-      display: block; height: 34px; line-height: 34px; padding: 0 12px;
-      border-radius: 8px; color: var(--text); text-decoration: none; font-size: 13px;
-    }
-    .tab:hover { background: var(--hover); }
-    .tab.current { background: var(--raised); }
-    .state { margin-top: auto; padding: 0 12px; color: var(--muted); font-size: 11px;
-             line-height: 1.5; }
-    .pane { flex: 1; overflow-y: auto; padding: 0 0 64px; }
-    header { max-width: 720px; margin: 0 auto; padding: 48px 24px 16px; }
-    h2.big { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.3px;
-             text-transform: none; padding: 0; color: var(--text); }
-    header p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
-    ul, form, .note, .empty { max-width: 720px; margin-left: auto; margin-right: auto;
-                              padding-left: 24px; padding-right: 24px; }
     li { height: auto; padding: 10px 12px; align-items: center; gap: 12px; }
     .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
     .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -276,8 +252,7 @@ enum AdBlockPage {
     .empty { text-align: left; padding-top: 24px; padding-bottom: 8px; }
     section { margin-top: 20px; }
     h3 {
-      display: flex; align-items: baseline; gap: 8px;
-      max-width: 720px; margin: 0 auto 4px; padding: 0 36px;
+      display: flex; align-items: baseline; gap: 8px; margin: 0 0 4px; padding: 0 12px;
       font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
       color: var(--muted);
     }
@@ -290,11 +265,8 @@ enum AdBlockPage {
     .children { padding-left: 20px; }
     summary { cursor: pointer; list-style: none; }
     summary::-webkit-details-marker { display: none; }
-    summary h3 { cursor: pointer; }
     summary h3::after { content: '▸'; margin-left: 2px; opacity: .5; }
     details[open] summary h3::after { content: '▾'; }
-    .ghost:hover { color: var(--text); border-color: var(--muted); }
-    .ghost:disabled { opacity: .5; cursor: default; }
     """
 
     private static let script = """
