@@ -221,7 +221,13 @@ final class FilterListStore {
             case let many as [String]: urls = many
             default: continue
             }
-            guard let address = urls.first(where: { $0.hasPrefix("http") }),
+            // **Seulement ce qu'uBlock héberge lui-même.** Leur dépôt `uAssets` sert la
+            // plupart des listes en miroir, y compris EasyList et EasyPrivacy. S'en tenir
+            // à ces adresses-là veut dire un seul hôte contacté au lieu de six, et des
+            // fichiers dont uBlock a vérifié le format avant de les republier. Les listes
+            // qui n'existent que chez leur auteur — AdGuard, les régionales — ne sont plus
+            // proposées ; elles restent ajoutables par leur adresse.
+            guard let address = urls.first(where: { $0.contains("ublockorigin.github.io/uAssets") }),
                   let source = URL(string: address) else { continue }
 
             let group = (entry["group"] as? String) ?? "other"
@@ -233,6 +239,9 @@ final class FilterListStore {
             let isDefault = (entry["off"] as? Bool) != true
             let enabled = regional ? languages.contains(language) : isDefault
 
+            // Deux entrées du catalogue peuvent viser le même fichier — les avis de
+            // cookies y sont référencés deux fois, par EasyList et par AdGuard.
+            guard !catalog.contains(where: { $0.source == source }) else { continue }
             catalog.append(FilterList(title: title, source: source,
                                       isEnabled: enabled, group: group))
             _ = key
@@ -249,9 +258,17 @@ final class FilterListStore {
             }
             merged.append(entry)
         }
-        // Ce que l'utilisateur a ajouté lui-même, ou ce qu'il gardait actif.
-        for known in lists where !merged.contains(where: { $0.source == known.source }) {
-            if known.group == "other" || known.isEnabled { merged.append(known) }
+        // Ce que l'utilisateur a ajouté lui-même survit ; ce qui vient d'un ancien
+        // catalogue disparaît, fichier compris. Le garder « parce qu'il était actif »
+        // reviendrait à continuer d'interroger des hôtes qu'on a décidé de ne plus
+        // contacter.
+        for known in lists {
+            if merged.contains(where: { $0.source == known.source }) { continue }
+            if known.group == "other" {
+                merged.append(known)
+            } else {
+                try? FileManager.default.removeItem(at: file(for: known))
+            }
         }
 
         lists = merged.sorted {
