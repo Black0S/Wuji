@@ -149,7 +149,7 @@ final class ContentBlocker {
                 for (position, source) in sources.enumerated() {
                     group.addTask {
                         let result = ContentBlockerConverter().convertArray(
-                            rules: source.1.components(separatedBy: "\n"),
+                            rules: source.1.components(separatedBy: "\n").map(Self.withoutInertRedirect),
                             safariVersion: SafariVersion.autodetect(),
                             advancedBlocking: true, maxJsonSizeBytes: nil, progress: nil)
                         return (position, Converted(result: result))
@@ -202,6 +202,52 @@ final class ContentBlocker {
     /// Le convertisseur rend une chaîne, et ces chaînes pèsent des mégaoctets : les
     /// désérialiser pour ajouter trois exceptions coûterait plus cher que toute la
     /// conversion. On coupe le crochet fermant et on aboute.
+    /// Les cibles de `$redirect` qui ne sont **rien** : un script vide, un pixel
+    /// transparent, un silence d'une seconde.
+    ///
+    /// La distinction fait tout. Rediriger vers un faux `googletag` évite qu'une page
+    /// s'arrête d'attendre — bloquer à la place casserait la mise en page. Rediriger vers
+    /// un script vide, en revanche, ne diffère du blocage que par l'évènement d'erreur.
+    nonisolated private static let inertRedirects: Set<String> = [
+        "noop.js", "noopjs", "noop.txt", "nooptext", "noop.html", "noopframe",
+        "noop.json", "noopjson", "noop.css", "noopcss", "noop.svg",
+        "noop-1s.mp4", "noopmp4-1s", "noop-0.1s.mp3", "noopmp3-0.1s",
+        "1x1.gif", "1x1-transparent.gif", "2x2.png", "2x2-transparent.png",
+        "3x2.png", "3x2-transparent.png", "32x32.png", "32x32-transparent.png",
+        "noopvast-2.0", "noopvast-3.0", "noopvast-4.0",
+        "noopvmap-1.0", "noop-vmap1.0.xml", "empty"
+    ]
+
+    /// Rend à une règle `$redirect` inerte son pouvoir de bloquer.
+    ///
+    /// **Mesuré, pas supposé.** WebKit accepte une action `redirect` à la compilation et
+    /// l'ignore à l'exécution : une liste compilée avec elle passe, et le script arrive
+    /// quand même. Le convertisseur d'AdGuard, lui, refuse ces règles en bloc — huit cent
+    /// trente d'entre elles étaient donc perdues, pas seulement privées de leur
+    /// substitut : elles ne bloquaient plus rien du tout.
+    ///
+    /// Enlever l'option laisse une règle de blocage ordinaire, que WebKit exécute. On ne
+    /// touche qu'aux cibles inertes, et jamais à `$redirect-rule`, qui ne s'applique que
+    /// si autre chose a déjà bloqué — la transformer en blocage inventerait un refus que
+    /// la liste n'a pas demandé.
+    nonisolated static func withoutInertRedirect(_ line: String) -> String {
+        guard line.contains("redirect="), !line.contains("redirect-rule=") else { return line }
+        guard let range = line.range(of: "redirect=[^,$]+", options: .regularExpression) else {
+            return line
+        }
+        let target = line[range].dropFirst("redirect=".count)
+        guard inertRedirects.contains(String(target)) else { return line }
+
+        var result = line
+        result.removeSubrange(range)
+        // Les séparateurs restés orphelins, des deux côtés.
+        result = result.replacingOccurrences(of: ",,", with: ",")
+        result = result.replacingOccurrences(of: "$,", with: "$")
+        if result.hasSuffix(",") { result.removeLast() }
+        if result.hasSuffix("$") { result.removeLast() }
+        return result
+    }
+
     nonisolated private static func splice(_ json: String, adding extra: String) -> String? {
         guard json.hasPrefix("["), json.hasSuffix("]") else { return nil }
         let body = extra.dropFirst().dropLast()   // le contenu du second tableau
