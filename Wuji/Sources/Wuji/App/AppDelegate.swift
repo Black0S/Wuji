@@ -94,7 +94,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private var currentSpace: Space { spaces[currentSpaceIndex] }
     /// L'espace courant est-il privé ? Consulté à la création d'un onglet.
     private var isPrivateSpace: Bool { spaces.indices.contains(currentSpaceIndex) && currentSpace.isPrivate }
-    private var currentTab: Tab? { currentSpace.current }
+    /// L'onglet courant, **sans passer par `currentSpace`**.
+    ///
+    /// Ce détour indexait `spaces` sans le borner, et la compilation des règles se termine
+    /// parfois avant que les espaces soient restaurés : le rappel touchait alors un tableau
+    /// vide et l'application mourait au lancement. C'est la deuxième fois que ce chemin
+    /// tue le démarrage — il ne doit plus jamais pouvoir sortir des bornes.
+    private var currentTab: Tab? {
+        spaces.indices.contains(currentSpaceIndex) ? spaces[currentSpaceIndex].current : nil
+    }
 
     // MARK: - Cycle de vie
 
@@ -785,6 +793,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private func syncBlockingButton() {
         guard layout != nil else { return }
         layout.topBar.setBlocking(blockingBadge)
+        layout.topBar.setScripts(installed: !userScripts.scripts.isEmpty,
+                                 activeHere: !userScripts.matching(currentTab?.url).isEmpty)
+    }
+
+    /// Le menu des scripts.
+    ///
+    /// Il dit d'abord ce qui tourne **ici**, puis laisse allumer et éteindre chaque script
+    /// sans passer par une page : c'est le geste qu'on fait quand un script casse le site
+    /// qu'on est en train de lire, et il ne doit pas coûter une navigation.
+    private func scriptsMenu() -> [ActionItem] {
+        var items: [ActionItem] = []
+        let here = Set(userScripts.matching(currentTab?.url).map(\.0.id))
+
+        items.append(ActionItem(title: here.isEmpty
+                                    ? "Aucun script sur cette page"
+                                    : "\(here.count) script\(here.count > 1 ? "s" : "") sur cette page",
+                                symbol: "curlybraces", isEnabled: false))
+        items.append(.separator)
+
+        // Ceux qui s'appliquent ici d'abord : c'est la page ouverte qui motive l'ouverture
+        // du menu, pas l'inventaire.
+        let ordered = userScripts.scripts.sorted { first, second in
+            here.contains(first.id) != here.contains(second.id) ? here.contains(first.id) : false
+        }
+        for script in ordered {
+            // La coche dit l'état, et l'action le renverse. Un rond vide plutôt qu'une
+            // absence de glyphe : sans forme, une ligne éteinte n'est qu'un texte, et on
+            // ne sait plus si la liste est cochable.
+            items.append(ActionItem(title: script.name,
+                                    symbol: script.isEnabled ? "checkmark.circle.fill" : "circle",
+                                    action: { [weak self] in
+                                        guard let self else { return }
+                                        userScripts.setEnabled(!script.isEnabled, id: script.id.uuidString)
+                                        currentTab?.webView.reload()
+                                        refreshScriptsPages()
+                                        syncBlockingButton()
+                                    }))
+        }
+
+        items.append(.separator)
+        items.append(ActionItem(title: "Gérer les scripts…", symbol: "list.bullet",
+                                action: { [weak self] in self?.showScripts(nil) }))
+        return items
     }
 
     private func refreshAdBlockPages() {
@@ -837,8 +888,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         items.append(ActionItem(title: blocker.state.summary, symbol: "info.circle", isEnabled: false))
         items.append(ActionItem(title: "Gérer les listes…", symbol: "list.bullet",
                                 action: { [weak self] in self?.showAdBlock(nil) }))
-        items.append(ActionItem(title: "Scripts…", symbol: "curlybraces",
-                                action: { [weak self] in self?.showScripts(nil) }))
         items.append(ActionItem(title: "Journal de blocage…", symbol: "text.line.first.and.arrowtriangle.forward",
                                 action: { [weak self] in self?.showBlockLog(nil) }))
         return items
@@ -1422,6 +1471,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         case .forward: currentTab?.webView.goForward()
         case .menu:    layout.actionSheet.present(mainMenu(), below: bar.menuButton)
         case .blocking: layout.actionSheet.present(blockingMenu(), below: bar.blockingButton)
+        case .scripts:  layout.actionSheet.present(scriptsMenu(), below: bar.scriptsButton)
         }
     }
 

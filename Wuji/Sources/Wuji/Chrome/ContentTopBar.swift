@@ -13,7 +13,7 @@ protocol ContentTopBarDelegate: AnyObject {
 @MainActor
 final class ContentTopBar: ThemedView {
 
-    enum Action { case back, forward, menu, blocking }
+    enum Action { case back, forward, menu, blocking, scripts }
 
     /// Ce que l'icône de blocage doit dire. Trois états, trois formes — jamais une
     /// couleur seule : « Différencier sans couleur » vaut ici comme ailleurs.
@@ -31,6 +31,7 @@ final class ContentTopBar: ThemedView {
     private let forward = NSButton()
     private let more = NSButton()
     private let shield = NSButton()
+    private let braces = NSButton()
     private var blocking: Blocking = .off
     private let lock = NSImageView()
     private let address = NSTextField(labelWithString: "")
@@ -48,6 +49,12 @@ final class ContentTopBar: ThemedView {
         // n'ont aucune autre porte d'entrée que la barre de menus du système.
         configure(more, symbol: "ellipsis", label: "Menu")
         configure(shield, symbol: "shield", label: "Blocage")
+        // Les scripts ont leur propre bouton, et pas une ligne dans le menu du bloqueur :
+        // ce sont deux pouvoirs différents. Le blocage retire ce qu'un site envoie, un
+        // script ajoute du code qui s'exécute avec les droits de la page. Les ranger
+        // ensemble laissait croire à une option du bloqueur.
+        configure(braces, symbol: "curlybraces", label: "Scripts")
+        braces.isHidden = true
 
         lock.imageScaling = .scaleProportionallyDown
         addSubview(lock)
@@ -77,7 +84,7 @@ final class ContentTopBar: ThemedView {
         // Même fond que la sidebar : les deux forment un seul cadre, pas deux surfaces
         // empilées. C'est la courbe du contenu qui fait la jonction, pas un filet.
         layer?.backgroundColor = Tokens.sidebarBackground.cgColor
-        [back, forward, more, shield].forEach { $0.contentTintColor = Tokens.textPrimary }
+        [back, forward, more, shield, braces].forEach { $0.contentTintColor = Tokens.textPrimary }
 
         let size: CGFloat = 24
         let y = (bounds.height - size) / 2
@@ -85,6 +92,10 @@ final class ContentTopBar: ThemedView {
         forward.frame = NSRect(x: Tokens.Space.l + size + Tokens.Space.xs, y: y, width: size, height: size)
         more.frame = NSRect(x: bounds.width - Tokens.Space.l - size, y: y, width: size, height: size)
         shield.frame = NSRect(x: more.frame.minX - size - Tokens.Space.s, y: y, width: size, height: size)
+        // Le bouton des scripts prend la place du bouclier quand celui-ci s'efface :
+        // laisser un trou là où une icône a disparu ferait chercher un bouton absent.
+        let anchor = shield.isHidden ? more.frame.minX : shield.frame.minX
+        braces.frame = NSRect(x: anchor - size - Tokens.Space.s, y: y, width: size, height: size)
 
         let addressWidth = min(360, bounds.width - 260)
         address.frame = NSRect(x: (bounds.width - addressWidth) / 2, y: (bounds.height - 16) / 2,
@@ -121,9 +132,20 @@ final class ContentTopBar: ThemedView {
         shield.alphaValue = state == .excepted ? 0.5 : 1
     }
 
+    /// Le bouton des scripts n'existe que s'il y a des scripts : sans aucun installé, il
+    /// n'ouvrirait qu'une liste vide.
+    func setScripts(installed: Bool, activeHere: Bool) {
+        braces.isHidden = !installed
+        braces.alphaValue = activeHere ? 1 : 0.5
+        braces.setAccessibilityLabel(activeHere ? "Scripts actifs sur cette page"
+                                                : "Aucun script sur cette page")
+        needsLayout = true
+    }
+
     /// Pour ancrer la feuille d'action sous le bouton.
     var menuButton: NSView { more }
     var blockingButton: NSView { shield }
+    var scriptsButton: NSView { braces }
 
     @objc private func openOmnibox() { delegate?.topBarDidRequestOmnibox(self) }
 
@@ -133,6 +155,7 @@ final class ContentTopBar: ThemedView {
         case forward: delegate?.topBar(self, didTrigger: .forward)
         case more:    delegate?.topBar(self, didTrigger: .menu)
         case shield:  delegate?.topBar(self, didTrigger: .blocking)
+        case braces:  delegate?.topBar(self, didTrigger: .scripts)
         default:      break
         }
     }
