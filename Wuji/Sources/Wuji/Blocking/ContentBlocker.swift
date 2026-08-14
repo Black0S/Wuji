@@ -184,7 +184,7 @@ final class ContentBlocker {
             let sealedAdvanced = advanced.joined(separator: "\n")
             await MainActor.run { [weak self] in
                 perList.forEach { self?.lists.record(lines: $0.1, rules: $0.2, for: $0.0) }
-                self?.advancedRules = sealedAdvanced
+                self?.advanced.load(sealedAdvanced)
                 self?.install(chunks: sealedChunks, counts: counts)
             }
         }
@@ -195,7 +195,7 @@ final class ContentBlocker {
     /// Gardées telles quelles, au format Adblock : c'est ce que la couche JavaScript
     /// consommera. Aujourd'hui elles ne servent à rien d'autre qu'à être comptées, et
     /// c'est déjà mieux que de les jeter comme avant.
-    private(set) var advancedRules = ""
+    let advanced = AdvancedRules()
 
     /// Recolle deux tableaux JSON sans les relire.
     ///

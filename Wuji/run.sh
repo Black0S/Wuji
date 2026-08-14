@@ -21,6 +21,10 @@ cp ".build/$CONFIG/Wuji" "$APP/Contents/MacOS/Wuji"
 # grise en dessous de 128 px. `swift Resources/Icon/make-icon.swift` la régénère.
 [ -f Resources/Icon/AppIcon.icns ] && cp Resources/Icon/AppIcon.icns "$APP/Contents/Resources/"
 
+# Les bibliothèques d'AdGuard : les scriptlets sont développés au moment de la compilation
+# des règles, les sélecteurs étendus s'exécutent dans la page.
+cp Resources/JS/*.js "$APP/Contents/Resources/"
+
 # Signature ad-hoc : suffit pour que macOS accorde les permissions localement.
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 

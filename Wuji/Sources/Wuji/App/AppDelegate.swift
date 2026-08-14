@@ -30,7 +30,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private var findTotal: Int?
     private var omniboxCreatesTab = false
 
-    private lazy var configuration: WKWebViewConfiguration = {
+    /// **Une configuration par onglet.**
+    ///
+    /// Les scriptlets doivent s'exécuter avant les scripts du site, donc être posés avant
+    /// la navigation, donc dépendre du domaine visé. Avec un contrôleur de contenu partagé,
+    /// deux onglets qui chargent en même temps se voleraient leurs scripts. Mesuré avant
+    /// de s'y engager : WebKit ouvre déjà un processus de rendu par vue web, une
+    /// configuration par onglet ne coûte donc rien de plus.
+    private func makeConfiguration() -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
 
@@ -67,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         config.userContentController.addUserScript(PageContextMenu.script)
         blocker.attach(to: config.userContentController)
         return config
-    }()
+    }
 
     private var currentSpace: Space { spaces[currentSpaceIndex] }
     private var currentTab: Tab? { currentSpace.current }
@@ -120,6 +127,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             self?.syncBlockingButton()
             self?.refreshAdBlockPages()
         }
+        // L'index des règles avancées d'abord : il vient du disque, et il doit être prêt
+        // avant que la session restaurée ne charge sa première page.
+        blocker.advanced.restore()
         blocker.start()
 
         history.purge(olderThan: settings.historyRetention)
@@ -338,7 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private func makeTab(configuration override: WKWebViewConfiguration? = nil,
                          pendingURL: URL? = nil, pendingTitle: String? = nil) -> Tab {
-        let tab = Tab(configuration: override ?? configuration,
+        let tab = Tab(configuration: override ?? makeConfiguration(),
                       pendingURL: pendingURL, pendingTitle: pendingTitle)
         tab.webView.navigationDelegate = self
         tab.webView.uiDelegate = self
@@ -375,6 +385,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// justement pour ne pas quitter la page qu'on est en train de lire.
     func webView(_ webView: WKWebView,
                  decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+        // Les règles avancées se posent **avant** que la page parte, sinon le lecteur de
+        // YouTube a déjà lu sa réponse quand notre code arrive.
+        if navigationAction.targetFrame?.isMainFrame ?? false {
+            installAdvancedRules(for: navigationAction.request.url, in: webView)
+        }
+
         guard navigationAction.navigationType == .linkActivated,
               navigationAction.modifierFlags.contains(.command),
               let url = navigationAction.request.url else { return .allow }
@@ -514,6 +530,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     }
 
     // MARK: - Blocage
+
+    /// Pose sur l'onglet les scriptlets et les sélecteurs étendus du domaine visé.
+    ///
+    /// Chaque onglet a son contrôleur de contenu : on peut donc remplacer ses scripts sans
+    /// toucher aux autres. Rien n'est injecté quand le domaine n'a pas de règle — la
+    /// grande majorité des pages ne portent alors aucun poids.
+    private func installAdvancedRules(for url: URL?, in webView: WKWebView) {
+        let controller = webView.configuration.userContentController
+        controller.removeAllUserScripts()
+        controller.addUserScript(PageContextMenu.script)
+
+        guard settings.blockingEnabled, !blocker.isExcepted(url) else { return }
+        let payload = blocker.advanced.payload(for: url)
+        guard !payload.isEmpty else { return }
+
+        // Les scriptlets d'abord, au tout début du document : leur travail est de
+        // remplacer des fonctions du navigateur avant que la page ne s'en serve.
+        if !payload.scriptlets.isEmpty {
+            let source = payload.scriptlets.map { "try{" + $0 + "}catch(e){}" }
+                .joined(separator: "\n")
+            controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart,
+                                                  forMainFrameOnly: false))
+        }
+
+        // Les sélecteurs étendus ensuite, avec leur bibliothèque : ils regardent le DOM,
+        // donc ils attendent qu'il existe.
+        if !payload.extendedSelectors.isEmpty {
+            let rules = payload.extendedSelectors
+                .map { $0 + "{display:none!important;}" }
+                .joined(separator: "\n")
+                .replacingOccurrences(of: "`", with: "\\`")
+            let source = Self.extendedCss + """
+
+            (function(){try{
+              var engine = new ExtendedCss.ExtendedCss({ cssRules: `RULES` });
+              engine.apply();
+            }catch(e){}})();
+            """.replacingOccurrences(of: "RULES", with: rules)
+            controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd,
+                                                  forMainFrameOnly: false))
+        }
+    }
+
+    /// Chargée une fois : 232 ko qu'on ne relit pas du disque à chaque navigation.
+    private static let extendedCss = AdvancedRules.extendedCssLibrary
 
     static let adBlockPage = URL(string: "wuji://ad-block")!
 
