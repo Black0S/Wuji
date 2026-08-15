@@ -198,34 +198,6 @@ final class ActionSheet: ThemedView {
     ///
     /// L'action destructrice est **en premier et nommée par son verbe** — « Supprimer »,
     /// pas « OK ». On lit ce qu'on est en train de faire, pas un acquiescement.
-    /// `isDestructive` distingue « effacer » d'« accepter », et **n'a pas de valeur par
-    /// défaut**. Elle en avait une — détruire — et la corbeille rouge s'est retrouvée sous
-    /// « Installer », « Autoriser » et « Partager » : le bouton disait le contraire de ce
-    /// qu'il faisait. Un défaut qu'on hérite sans y penser est exactement ce qui a produit
-    /// l'erreur ; chaque appel doit donc trancher.
-    func presentConfirmation(title: String, message: String, confirm: String,
-                             isDestructive: Bool,
-                             onCancel: (@MainActor () -> Void)? = nil,
-                             onConfirm: @escaping @MainActor () -> Void) {
-        titleLabel.stringValue = title
-        messageLabel.stringValue = message
-        hasHeader = true
-        hasField = false
-        isCentered = true
-        // Fermer sans choisir doit valoir « non », et pas laisser l'appelant attendre :
-        // une demande d'autorisation qui reste en suspens bloque la page qui l'a faite.
-        cancelAction = onCancel
-        stack = [[
-            ActionItem(title: confirm, symbol: isDestructive ? "trash" : "checkmark",
-                       isDestructive: isDestructive,
-                       action: { [weak self] in self?.cancelAction = nil; onConfirm() }),
-            ActionItem(title: "Annuler", symbol: "xmark")
-        ]]
-        selection = 1
-        isHidden = false
-        rebuild()
-    }
-
     /// Une saisie : la même carte, avec un champ à la place du message.
     ///
     /// Le renommage sur place serait plus direct, mais la sidebar reconstruit ses lignes

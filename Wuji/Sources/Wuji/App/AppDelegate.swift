@@ -674,10 +674,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                   let text = String(data: data, encoding: .utf8) else { return }
             guard let self else { return }
             let preview = UserScript(text: text, source: url)
-            self.layout.actionSheet.presentConfirmation(
+            self.layout.toast.ask(
                 title: "Installer « \(preview.name) » ?",
                 message: "Ce script s'exécutera sur : \(preview.patterns.prefix(3).joined(separator: ", ")). Il aura les mêmes pouvoirs que ces pages.",
-                confirm: "Installer", isDestructive: false) { [weak self] in
+                confirm: "Installer", isDestructive: false, onCancel: {}) { [weak self] in
                     self?.userScripts.add(text: text, source: url)
                     self?.layout.toast.show("Script installé") { self?.showScripts(nil) }
                     self?.refreshScriptsPages()
@@ -964,7 +964,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         }
 
         return await withCheckedContinuation { continuation in
-            layout.actionSheet.presentConfirmation(
+            layout.toast.ask(
                 title: "Autoriser \(kind.label) ?",
                 message: "« \(host) » demande l'accès à \(kind.label). Cette réponse sera retenue pour ce site, et modifiable dans les réglages.",
                 confirm: "Autoriser", isDestructive: false,
@@ -1016,7 +1016,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             location.authorize(decide)
             return
         }
-        layout.actionSheet.presentConfirmation(
+        layout.toast.ask(
             title: "Partager votre position ?",
             message: "« \(host) » demande votre position. Cette réponse sera retenue pour ce site, et modifiable dans les réglages.",
             confirm: "Partager", isDestructive: false,
@@ -1882,12 +1882,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // Supprimer un espace ferme ses onglets, et rien ne les rouvrira tant qu'il n'y a
         // pas d'historique : c'est une perte, donc on demande.
         guard !doomed.isEmpty else { return removeSpace(at: index) }
-        layout.actionSheet.presentConfirmation(
+        layout.toast.ask(
             title: "Supprimer « \(doomed.name) » ?",
             message: doomed.tabCount == 1
                 ? "Son onglet sera fermé, et rien ne le rouvrira."
                 : "Ses \(doomed.tabCount) onglets seront fermés, et rien ne les rouvrira.",
-            confirm: "Supprimer", isDestructive: true,
+            confirm: "Supprimer", isDestructive: true, onCancel: {},
             onConfirm: { [weak self] in self?.removeSpace(at: index) })
     }
 

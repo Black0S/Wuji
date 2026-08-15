@@ -33,6 +33,17 @@ final class InsetTextField: NSTextField {
         field.lineBreakMode = .byTruncatingTail
         return field
     }
+
+    /// Une étiquette qui se replie sur plusieurs lignes. Elle ne se centre pas : un
+    /// paragraphe se lit depuis son coin haut gauche, et le centrage vertical de la
+    /// cellule ferait flotter la première ligne.
+    static func wrapping(_ text: String = "", size: CGFloat = 12) -> InsetTextField {
+        let field = InsetTextField(wrappingLabelWithString: text)
+        field.contentInset = 0
+        field.font = .systemFont(ofSize: size)
+        field.isSelectable = false
+        return field
+    }
 }
 
 private final class InsetTextFieldCell: NSTextFieldCell {
