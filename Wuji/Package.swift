@@ -28,7 +28,12 @@ let package = Package(
             dependencies: [
                 .product(name: "PublicSuffixList", package: "swift-psl")
             ],
-            path: "Sources/Wuji"
+            path: "Sources/Wuji",
+            // Les règles ne sont pas une ressource SwiftPM : elles sont copiées dans le
+            // paquet par `build.sh`, à côté de l'application, pas dans un bundle de
+            // module. Le dire évite l'avertissement — et surtout évite qu'on les embarque
+            // deux fois le jour où quelqu'un « corrige » l'avertissement à l'aveugle.
+            exclude: ["Blocking/Assets"]
         )
     ]
 )
