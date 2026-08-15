@@ -251,8 +251,9 @@
   {"action":{"selector":".ad-banner","type":"css-display-none"},"trigger":{"url-filter":".*"}},
   {"action":{"selector":".sponsored-ad","type":"css-display-none"},"trigger":{"url-filter":".*"}},
 
-// ─── Scripts publicitaires, par leur chemin ───
+// ─── Publicité désignée par son chemin ───
   {"action":{"type":"block"},"trigger":{"url-filter":"/pagead\\.js"}},
   {"action":{"type":"block"},"trigger":{"url-filter":"/widget/ads\\."}},
-  {"action":{"type":"block"},"trigger":{"url-filter":"/ads\\.js"}}
+  {"action":{"type":"block"},"trigger":{"url-filter":"/ads\\.js"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"/AdHandler\\.aspx"}}
 ]
