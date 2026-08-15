@@ -4,9 +4,9 @@ import PackageDescription
 // Exécutable SPM plutôt que projet Xcode : boucle `swift build` en quelques secondes,
 // rien à maintenir, et le bundle .app s'assemble dans run.sh.
 //
-// Les sous-dossiers de Sources/Wuji préfigurent les paquets de la spec §6.1 —
-// DesignSystem, Chrome, WebContent, Settings… Une seule cible pour l'instant : on
-// n'extrait un paquet que le jour où un module doit devenir désactivable.
+// Les sous-dossiers de Sources nomment les domaines du projet — DesignSystem, Chrome,
+// WebContent, Blocking, Settings… Une seule cible pour l'instant : on n'extrait un paquet
+// que le jour où un module doit devenir désactivable.
 let package = Package(
     name: "Wuji",
     platforms: [.macOS(.v26)],
@@ -28,7 +28,11 @@ let package = Package(
             dependencies: [
                 .product(name: "PublicSuffixList", package: "swift-psl")
             ],
-            path: "Sources/Wuji",
+            // `Sources` et non `Sources/Wuji`, comme le voudrait la convention de SwiftPM.
+            // Le dépôt s'appelle déjà Wuji et le paquet aussi : le chemin complet répétait
+            // le nom trois fois pour atteindre un fichier. Une seule cible ici, donc rien
+            // à départager — le jour où il en faudra deux, ce sera à revoir.
+            path: "Sources",
             // Les règles ne sont pas une ressource SwiftPM : elles sont copiées dans le
             // paquet par `build.sh`, à côté de l'application, pas dans un bundle de
             // module. Le dire évite l'avertissement — et surtout évite qu'on les embarque

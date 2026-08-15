@@ -27,7 +27,7 @@ cp ".build/$CONFIG/Wuji" "$APP/Contents/MacOS/Wuji"
 
 # Les règles de Wuji, déjà dans le format de WebKit : rien à convertir, ni ici ni au
 # démarrage.
-cp Sources/Wuji/Blocking/Assets/wuji-rules.json "$APP/Contents/Resources/"
+cp Sources/Blocking/Assets/wuji-rules.json "$APP/Contents/Resources/"
 
 # La liste des suffixes publics, telle que SwiftPM l'empaquette. Elle est cherchée à côté
 # de l'application et **pas** dans ses ressources, et son absence est fatale au lancement :

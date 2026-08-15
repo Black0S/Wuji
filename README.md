@@ -39,7 +39,7 @@ chez soi et évidents chez les autres. `--dry-run` liste sans rien toucher.
 
 ## Le blocage
 
-`Sources/Wuji/Blocking/Assets/wuji-rules.json` — **261 règles écrites directement dans le
+`Sources/Blocking/Assets/wuji-rules.json` — **261 règles écrites directement dans le
 format de `WKContentRuleList`**, celui que WebKit compile. Rien n'est téléchargé, rien
 n'est converti au démarrage : le navigateur lit treize kilo-octets et les donne au moteur.
 
@@ -81,7 +81,7 @@ consentement et les anti-robots. Absents, ils ne retirent pas la publicité — 
 verrouillent la page.
 
 Le format et la marche à suivre pour contribuer sont dans
-[`Blocking/Assets/README.md`](Wuji/Sources/Wuji/Blocking/Assets/README.md).
+[`Blocking/Assets/README.md`](Wuji/Sources/Blocking/Assets/README.md).
 
 ---
 
@@ -110,6 +110,22 @@ Wuji ; accorder la première sans la seconde donnait un refus que la page vous a
 
 **Pages internes** en `wuji://` — favoris, historique, téléchargements, règles, réglages —
 avec le même sommaire à gauche partout.
+
+---
+
+## Raccourcis
+
+| | |
+|---|---|
+| `⌘L` | Palette — adresse, recherche, onglets ouverts |
+| `⌘T` / `⌘W` | Nouvel onglet / fermer · `⇧⌘T` rouvrir le dernier fermé |
+| `⌘]` / `⌘[` | Onglet suivant / précédent |
+| `⇧⌘N` / `⌥⌘N` | Nouvel espace privé / nouveau dossier |
+| `⌘F` | Rechercher dans la page · `⌘G` et `⇧⌘G` pour circuler |
+| `⌘R` | Recharger · `⌘+` et `⌘−` pour le zoom |
+| `⌘D` / `⇧⌘B` | Mettre en favori / ouvrir les favoris |
+| `⌘Y` / `⌘J` | Historique / téléchargements |
+| `⌘,` | Réglages |
 
 ---
 
