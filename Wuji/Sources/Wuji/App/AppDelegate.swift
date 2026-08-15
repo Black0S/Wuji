@@ -1542,7 +1542,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         var items: [ActionItem] = [
             ActionItem(title: "Nouvel onglet", symbol: "plus", shortcut: "⌘T",
                        action: { [weak self] in self?.newTab(nil) }),
-            ActionItem(title: "Nouveau dossier", symbol: "folder.badge.plus", shortcut: "⇧⌘N",
+            // ⇧⌘N appartient à l'espace privé, ici comme dans la barre de menus. La
+            // feuille annonçait encore l'ancien raccourci : un libellé qui ment sur ce
+            // qu'il faut taper est pire que pas de libellé du tout.
+            ActionItem(title: "Nouveau dossier", symbol: "folder.badge.plus", shortcut: "⌥⌘N",
                        action: { [weak self] in self?.newFolder(nil) })
         ]
         // Seulement quand il y a quelque chose à rouvrir : une entrée grisée en
