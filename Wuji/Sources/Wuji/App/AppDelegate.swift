@@ -465,26 +465,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             blockLog.record(.blocked, host: url.host() ?? "", detail: url.absoluteString)
         }
 
-        // **Une fenêtre ouverte par un script, dont la première adresse échoue, se referme.**
+        // **Aucun onglet ne se ferme tout seul. Jamais.**
         //
-        // Quelle que soit la raison de l'échec. C'est le point qu'il a fallu mesurer :
-        // l'adresse d'un traqueur en clair est refusée par la sécurité du transport bien
-        // avant que nos règles la voient, et on n'a alors aucun moyen de savoir laquelle
-        // des deux l'aurait arrêtée. Peu importe : personne n'a demandé cette fenêtre, elle
-        // ne montrera rien, et lui laisser une page d'erreur fait porter à l'utilisateur
-        // la trace de ce qu'on vient d'éviter.
+        // Une fenêtre ouverte par un script et dont l'adresse échouait se refermait
+        // d'elle-même. L'intention était bonne — personne n'avait demandé cette fenêtre —
+        // mais le drapeau qui la désignait restait posé pour toute la vie de l'onglet :
+        // n'importe quel échec ultérieur, un réveil de veille compris, le faisait
+        // disparaître de la colonne. Des onglets s'évanouissaient sans raison visible.
         //
-        // La condition reste étroite : seulement un onglet né d'un script — un lien ouvert
-        // par un clic appartient à celui qui a cliqué, échec compris — et seulement sur sa
-        // toute première adresse. Au-delà, il a une histoire, donc quelqu'un s'en sert.
-        if let tab = spaces.flatMap(\.allTabs).first(where: { $0.webView === webView }),
-           tab.isPopup, !webView.canGoBack {
-            close(tabID: tab.id)
-            layout.toast.show("Fenêtre non sollicitée fermée") { [weak self] in
-                self?.showBlockLog(nil)
-            }
-            return
-        }
+        // La règle est donc absolue, et c'est celle du propriétaire du produit : un onglet
+        // ne part que si on le ferme. Une page qui échoue montre son échec, y compris dans
+        // une fenêtre qu'on n'avait pas demandée — on la ferme d'un ⌘W, ce qui est un
+        // geste, pas une surprise.
         webView.loadSimulatedRequest(URLRequest(url: url),
                                      responseHTML: ErrorPage.html(url: url, error: error))
     }
