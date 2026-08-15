@@ -1,8 +1,21 @@
-.DS_Store
-.claude/settings.local.json
+# Produits de compilation — tout est reconstructible par ./Wuji/build.sh
 .build/
 .swiftpm/
 DerivedData/
+*.app
+*.dmg
+
+# Réglages personnels d'éditeur et d'outillage
+.claude/settings.local.json
 *.xcuserstate
 xcuserdata/
-Wuji.dmg
+
+# Métadonnées que macOS sème
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# `Package.resolved` **est** suivi, et volontairement : il fige les versions des
+# dépendances, donc deux machines compilent le même navigateur. L'ignorer rendrait les
+# différences de comportement inexplicables.
