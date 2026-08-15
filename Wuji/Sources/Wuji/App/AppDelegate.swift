@@ -765,7 +765,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             self.layout.actionSheet.presentConfirmation(
                 title: "Installer « \(preview.name) » ?",
                 message: "Ce script s'exécutera sur : \(preview.patterns.prefix(3).joined(separator: ", ")). Il aura les mêmes pouvoirs que ces pages.",
-                confirm: "Installer") { [weak self] in
+                confirm: "Installer", isDestructive: false) { [weak self] in
                     self?.userScripts.add(text: text, source: url)
                     self?.layout.toast.show("Script installé") { self?.showScripts(nil) }
                     self?.refreshScriptsPages()
@@ -1088,7 +1088,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             layout.actionSheet.presentConfirmation(
                 title: "Autoriser \(kind.label) ?",
                 message: "« \(host) » demande l'accès à \(kind.label). Cette réponse sera retenue pour ce site, et modifiable dans les réglages.",
-                confirm: "Autoriser",
+                confirm: "Autoriser", isDestructive: false,
                 onCancel: { [weak self] in
                     self?.permissions.remember(host: host, kind: kind, isAllowed: false)
                     continuation.resume(returning: .deny)
@@ -2013,7 +2013,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             message: doomed.tabCount == 1
                 ? "Son onglet sera fermé, et rien ne le rouvrira."
                 : "Ses \(doomed.tabCount) onglets seront fermés, et rien ne les rouvrira.",
-            confirm: "Supprimer",
+            confirm: "Supprimer", isDestructive: true,
             onConfirm: { [weak self] in self?.removeSpace(at: index) })
     }
 
