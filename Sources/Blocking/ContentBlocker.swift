@@ -38,6 +38,11 @@ final class ContentBlocker {
     }
 
     private(set) var state: State = .off
+
+    /// Les règles sont-elles réellement posées sur les vues web ? Une page chargée avant
+    /// qu'elles le soient garde l'ancienne liste : WebKit les applique au moment de la
+    /// requête, pas après coup.
+    var isReady: Bool { !compiled.isEmpty }
     var onChange: (() -> Void)?
     /// Appelé quand les règles viennent d'être installées. Une règle ajoutée ne change rien
     /// à la page tant que la compilation n'a pas fini — recharger avant, c'est recharger

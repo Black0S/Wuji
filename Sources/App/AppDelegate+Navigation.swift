@@ -82,6 +82,14 @@ extension AppDelegate {
     /// Une page vue est une page arrivée. Enregistrer au départ de la navigation
     /// compterait les redirections et les erreurs comme des visites.
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // **Une page arrivée avant les règles n'est pas protégée, et rien ne le disait.**
+        //
+        // WebKit applique une liste au moment de la requête : la poser après coup ne
+        // change rien à la page déjà là. Au lancement, la compilation prend un instant, et
+        // la première page part souvent avant. On le note pour le dire — pas pour la
+        // recharger d'office, ce qui ferait clignoter ce qu'on est en train de lire.
+        if !blocker.isReady { loadedBeforeRules = true }
+
         guard let url = webView.url else { return }
         // Rien n'est noté depuis un espace privé — c'est tout ce qu'il promet.
         guard !isPrivateSpace else { return }

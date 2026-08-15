@@ -98,7 +98,18 @@ final class Tab {
         webView.loadHTMLString("", baseURL: nil)
     }
 
-    var url: URL? { webView.url ?? pendingURL }
+    /// L'adresse de l'onglet.
+    ///
+    /// **En veille, c'est l'adresse mise de côté qui fait foi.** Endormir un onglet
+    /// remplace sa page par un document vide, et `webView.url` bascule alors sur
+    /// `about:blank`. La colonne écarte les onglets vierges — le nouvel onglet qui n'a rien
+    /// chargé n'a pas à occuper une ligne — et emportait donc avec eux tous les onglets
+    /// endormis. Ils existaient toujours, mais on ne les voyait plus : la veille passait
+    /// pour une fermeture.
+    var url: URL? {
+        if isSleeping, let pendingURL { return pendingURL }
+        return webView.url ?? pendingURL
+    }
     /// Un titre vide n'est pas `nil` : une page qui commence à charger en renvoie un, et
     /// la ligne se réduirait alors à son marqueur de chargement.
     var title: String {

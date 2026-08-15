@@ -200,9 +200,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // compilation de cent quarante mille règles prend quelques secondes.
         blocker.onApplied = { [weak self] in
             guard let self else { return }
-            guard self.reloadAfterBlocking else { return }
-            self.reloadAfterBlocking = false
-            self.currentTab?.webView.reload()
+            if self.reloadAfterBlocking {
+                self.reloadAfterBlocking = false
+                self.currentTab?.webView.reload()
+                return
+            }
+            // Les règles viennent d'arriver, et une page les a devancées. On propose,
+            // on n'impose pas : recharger d'office ce que quelqu'un est en train de lire
+            // serait exactement l'automatisme dont on ne veut plus.
+            if self.loadedBeforeRules {
+                self.loadedBeforeRules = false
+                self.layout.toast.show("Protection prête — recharger cette page") { [weak self] in
+                    self?.currentTab?.webView.reload()
+                }
+            }
         }
         blocker.onChange = { [weak self] in
             self?.refreshSettingsPages()
@@ -272,6 +283,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     /// Une page à recharger dès que la liste compilée sera en place.
     var reloadAfterBlocking = false
+    /// Une page est arrivée avant que les règles soient posées.
+    var loadedBeforeRules = false
     var lastProgressPush = Date.distantPast
     /// Ce qu'il faut faire si la feuille d'autorisation se ferme sans reponse.
     var pendingPermission: (() -> Void)?

@@ -65,7 +65,7 @@ chez soi et évidents chez les autres. `--dry-run` liste sans rien toucher.
 
 [`Sources/Blocking/Assets/wuji-rules.json`](Sources/Blocking/Assets/wuji-rules.json) —
 **261 règles écrites directement dans le format de `WKContentRuleList`**, celui que WebKit
-compile : 241 blocages et 20 masquages, 28 ko. Rien n'est téléchargé, rien n'est converti
+compile : 241 blocages et 20 masquages. Rien n'est téléchargé, rien n'est converti
 au démarrage — le navigateur lit le fichier et le donne au moteur.
 
 Un convertisseur, si rapide soit-il, refait à chaque lancement un travail dont le résultat
