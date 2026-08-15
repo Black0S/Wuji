@@ -76,10 +76,14 @@ enum AdBlockPage {
           <button type="submit" class="ghost">Ajouter</button>
         </form>
         <p class="note">
-          Les listes appartiennent à leurs auteurs — uBlock Origin, EasyList, AdGuard,
-          Peter Lowe. Wuji n'en entretient aucune : une liste maison serait périmée le mois
-          suivant et donnerait une fausse impression de protection. Elles ne sont
-          téléchargées que depuis cette page, jamais en arrière-plan.
+          Wuji entretient deux listes, et elles ne visent que des domaines — des régies et
+          des mouchards qui portent le même nom depuis dix ans. Elles vivent en texte dans
+          le dépôt : une correction y est une ligne dans un diff.
+          <br><br>
+          Tout ce qui bouge vite reste chez ceux dont c'est le métier : scriptlets, murs
+          anti-adblock, publicités servies depuis le domaine du site. Ces listes-là
+          appartiennent à leurs auteurs — uBlock Origin, EasyList, AdGuard, Peter Lowe — et
+          ne sont téléchargées que depuis cette page, jamais en arrière-plan.
         </p>
         </main>
         """

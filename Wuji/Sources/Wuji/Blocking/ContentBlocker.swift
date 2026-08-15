@@ -65,7 +65,7 @@ final class ContentBlocker {
     /// Une liste compilée par tranche. C'est **la** façon de dépasser le plafond de
     /// WebKit : la limite est par liste, pas par navigateur, et `WKUserContentController`
     /// en accepte autant qu'on veut.
-    private static func identifier(_ index: Int) -> String { "wuji.filters.\(index)" }
+    nonisolated private static func identifier(_ index: Int) -> String { "wuji.filters.\(index)" }
     private static let signatureKey = "blockingSignature"
     private static let chunkKey = "blockingChunks"
     /// L'empreinte des règles **avant** conversion, et le décompte qui allait avec.
@@ -199,22 +199,51 @@ final class ContentBlocker {
                 return result.compactMap { $0 }
             }
 
-            var chunks: [String] = []
             var advanced: [String] = []
             var accepted = 0, rejected = 0
             var perList: [(UUID, Int, Int)] = []
+
+            // **Les listes converties sont regroupées, pas empilées une par tranche.**
+            //
+            // Une tranche par liste était le réflexe évident et il coûtait cher : le
+            // plafond de WebKit est de 150 000 règles **par liste compilée**, donc huit
+            // petites listes tenaient largement dans une seule — et
+            // `ignore-previous-rules` n'annulant que dans sa propre tranche, les
+            // exceptions de l'utilisateur étaient recopiées huit fois pour rien.
+            //
+            // On remplit donc une tranche jusqu'au budget avant d'en ouvrir une autre. Le
+            // découpage ne sert plus qu'à ce pour quoi il existe : dépasser le plafond
+            // quand il y a vraiment de quoi le dépasser.
+            var groups: [[String]] = []
+            var current: [String] = []
+            var currentCount = 0
 
             for (source, item) in zip(sources, converted) {
                 let result = item.result
                 perList.append((source.0.id, result.sourceRulesCount, result.safariRulesCount))
                 accepted += result.safariRulesCount
                 rejected += result.sourceRulesCount - result.sourceSafariCompatibleRulesCount
-                if let json = Self.splice(result.safariRulesJSON, adding: mine.safariRulesJSON) {
-                    chunks.append(json)
+
+                if currentCount > 0, currentCount + result.safariRulesCount > Self.chunkSize {
+                    groups.append(current)
+                    current = []
+                    currentCount = 0
                 }
+                current.append(result.safariRulesJSON)
+                currentCount += result.safariRulesCount
+
                 if let text = result.advancedRulesText { advanced.append(text) }
             }
+            if !current.isEmpty { groups.append(current) }
             if let text = mine.advancedRulesText { advanced.append(text) }
+
+            // Les règles de l'utilisateur — ses exceptions comprises — vont dans chaque
+            // tranche, et une seule fois par tranche.
+            let chunks = groups.compactMap { group -> String? in
+                group.dropFirst().reduce(group.first) { merged, next in
+                    merged.flatMap { Self.splice($0, adding: next) }
+                }.flatMap { Self.splice($0, adding: mine.safariRulesJSON) }
+            }
 
             let counts = (accepted: accepted + mine.safariRulesCount * chunks.count,
                           rejected: rejected,
@@ -404,6 +433,13 @@ final class ContentBlocker {
                 apply([], state: .failed("aucune tranche n'a compilé"))
                 return
             }
+            // Les tranches d'une compilation plus large n'ont plus de raison d'occuper le
+            // magasin : elles y resteraient indéfiniment, mégaoctets compris.
+            //
+            // On demande au magasin ce qu'il contient plutôt que de le déduire du dernier
+            // décompte : celui-ci a déjà baissé plusieurs fois, et chaque baisse avait
+            // laissé derrière elle des tranches que plus rien ne réclamait.
+            await Self.sweepStore(keeping: chunks.count)
             UserDefaults.standard.set(signature, forKey: Self.signatureKey)
             UserDefaults.standard.set(chunks.count, forKey: Self.chunkKey)
             // L'empreinte de la source n'est écrite que **si toutes** les tranches sont
@@ -415,6 +451,18 @@ final class ContentBlocker {
             }
             apply(built, state: .active(rules: counts.accepted, skipped: counts.rejected,
                                         dropped: lost))
+        }
+    }
+
+    /// Efface du magasin de WebKit les tranches au-delà de celles qu'on vient d'installer.
+    private static func sweepStore(keeping count: Int) async {
+        guard let store = WKContentRuleListStore.default() else { return }
+        let identifiers = await withCheckedContinuation { continuation in
+            store.getAvailableContentRuleListIdentifiers { continuation.resume(returning: $0 ?? []) }
+        }
+        let kept = Set((0..<count).map(identifier))
+        for name in identifiers where name.hasPrefix("wuji.filters.") && !kept.contains(name) {
+            try? await store.removeContentRuleList(forIdentifier: name)
         }
     }
 

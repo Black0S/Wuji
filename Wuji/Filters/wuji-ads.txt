@@ -1,0 +1,98 @@
+! Title: Wuji — Publicités
+! Description: Les régies publicitaires les plus répandues, par domaine.
+! License: CC0 — faites-en ce que vous voulez.
+! Homepage: https://github.com/…/wuji
+!
+! ─────────────────────────────────────────────────────────────────────────────
+! Comment contribuer
+!
+! Une règle par ligne, au format Adblock. `||domaine^` bloque le domaine et ses
+! sous-domaines ; ajoutez `$third-party` quand le domaine sert aussi de site à
+! part entière et ne doit être bloqué qu'appelé depuis ailleurs.
+!
+! Trois règles pour que cette liste reste utile :
+!
+! 1. **Un domaine, pas un chemin.** Les chemins changent tous les mois, les
+!    domaines tiennent dix ans. Cette liste vise ce qui dure ; le reste est le
+!    travail des listes amont, qui ont des mainteneurs à plein temps.
+! 2. **Rien qui casse.** Une règle qui empêche une page de fonctionner coûte
+!    plus cher que la publicité qu'elle retire. Dans le doute, `$third-party`.
+! 3. **Rangée sous sa rubrique**, en ordre alphabétique. Une liste qu'on ne
+!    peut pas relire ne se corrige pas.
+! ─────────────────────────────────────────────────────────────────────────────
+
+! ─── Google ──────────────────────────────────────────────────────────────────
+||doubleclick.net^
+||googleadservices.com^
+||googlesyndication.com^
+||googletagservices.com^
+||adservice.google.com^
+||pagead2.googlesyndication.com^
+||partner.googleadservices.com^
+
+! ─── Places de marché et enchères en temps réel ───────────────────────────────
+||3lift.com^
+||adform.net^
+||adnxs.com^
+||adnxs-simple.com^
+||adsrvr.org^
+||adtelligent.com^
+||amazon-adsystem.com^
+||bidswitch.net^
+||casalemedia.com^
+||contextweb.com^
+||criteo.com^$third-party
+||criteo.net^
+||districtm.io^
+||emxdgt.com^
+||gumgum.com^
+||indexww.com^
+||media.net^$third-party
+||openx.net^
+||pubmatic.com^
+||pubnative.net^
+||rubiconproject.com^
+||sharethrough.com^
+||smartadserver.com^
+||smartyads.com^
+||sonobi.com^
+||sovrn.com^
+||spotxchange.com^
+||teads.tv^
+||tremorhub.com^
+||triplelift.com^
+||yieldmo.com^
+
+! ─── Recommandation de contenu et « articles sponsorisés » ────────────────────
+||adskeeper.com^
+||dianomi.com^
+||mgid.com^
+||outbrain.com^
+||plista.com^
+||revcontent.com^
+||taboola.com^
+||zergnet.com^
+
+! ─── Régies vidéo ─────────────────────────────────────────────────────────────
+||imasdk.googleapis.com^$third-party
+||innovid.com^
+||springserve.com^
+||vidoomy.com^
+
+! ─── Régies généralistes ──────────────────────────────────────────────────────
+||adcolony.com^
+||adroll.com^
+||advertising.com^
+||applovin.com^
+||bidr.io^
+||bluekai.com^
+||chartboost.com^
+||exoclick.com^
+||juicyads.com^
+||mopub.com^
+||popads.net^
+||propellerads.com^
+||servedbyadbutler.com^
+||trafficjunky.com^
+||unityads.unity3d.com^
+||zedo.com^

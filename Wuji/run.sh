@@ -25,6 +25,10 @@ cp ".build/$CONFIG/Wuji" "$APP/Contents/MacOS/Wuji"
 # des règles, les sélecteurs étendus s'exécutent dans la page.
 cp Resources/JS/*.js "$APP/Contents/Resources/"
 
+# Les listes de Wuji. Elles vivent en texte à la racine du dépôt pour qu'une contribution
+# soit une ligne dans un diff, et sont recopiées dans le paquet à chaque assemblage.
+cp Filters/*.txt "$APP/Contents/Resources/"
+
 # La liste des suffixes publics, telle que SwiftPM l'empaquette. Elle est cherchée à côté
 # de l'application et **pas** dans ses ressources, et son absence est fatale au lancement :
 # la bibliothèque appelle `fatalError` plutôt que de se passer de ses données.

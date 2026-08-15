@@ -17,10 +17,34 @@ struct FilterList: Codable, Identifiable {
     /// que WebKit ne sait pas faire, et c'est une information honnête à afficher.
     var lines: Int
     var rules: Int
+    /// Fournie avec Wuji, et maintenue dans son dépôt. Elle ne se télécharge pas : elle
+    /// arrive avec l'application et change quand l'application change.
+    var isBuiltIn: Bool = false
     /// Ce que le serveur a répondu la dernière fois. Renvoyé tel quel à la requête
     /// suivante : s'il n'a rien de neuf, il répond « 304 » et rien ne transite.
     var etag: String?
     var lastModified: String?
+
+    /// **Décodage tolérant, et il l'est pour une raison vécue.** Swift n'applique pas les
+    /// valeurs par défaut dans un décodeur synthétisé : ajouter un seul champ à cette
+    /// structure a suffi à rendre illisible le catalogue déjà enregistré, qui est reparti
+    /// de zéro — soixante-dix listes et leurs téléchargements perdus d'un coup. Un fichier
+    /// écrit par une version précédente doit toujours pouvoir être relu par la suivante.
+    init(from decoder: any Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        id = try box.decode(UUID.self, forKey: .id)
+        title = try box.decode(String.self, forKey: .title)
+        source = try box.decode(URL.self, forKey: .source)
+        isEnabled = try box.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        group = try box.decodeIfPresent(String.self, forKey: .group) ?? "other"
+        parent = try box.decodeIfPresent(String.self, forKey: .parent)
+        isBuiltIn = try box.decodeIfPresent(Bool.self, forKey: .isBuiltIn) ?? false
+        updated = try box.decodeIfPresent(Date.self, forKey: .updated)
+        lines = try box.decodeIfPresent(Int.self, forKey: .lines) ?? 0
+        rules = try box.decodeIfPresent(Int.self, forKey: .rules) ?? 0
+        etag = try box.decodeIfPresent(String.self, forKey: .etag)
+        lastModified = try box.decodeIfPresent(String.self, forKey: .lastModified)
+    }
 
     init(title: String, source: URL, isEnabled: Bool = true, group: String = "other",
          parent: String? = nil) {
@@ -37,10 +61,16 @@ struct FilterList: Codable, Identifiable {
 
 /// Les abonnements et les règles de l'utilisateur.
 ///
-/// **Wuji n'entretient aucune liste.** Maintenir un filtre à jour est un travail à plein
-/// temps que des projets font mieux depuis quinze ans ; une liste maison serait périmée le
-/// mois suivant et donnerait une fausse impression de protection. Les listes viennent donc
-/// d'uBlock Origin, d'EasyList et d'AdGuard, telles qu'elles sont publiées.
+/// **Wuji entretient deux listes, et deux seulement.** Elles ne visent que des domaines —
+/// des régies et des mouchards qui portent le même nom depuis dix ans. C'est la part du
+/// filtrage qui se maintient à la main, à la vitesse d'un dépôt ouvert où une contribution
+/// est une ligne dans un diff.
+///
+/// **Tout ce qui bouge vite reste chez ceux dont c'est le métier.** Les scriptlets, les
+/// murs anti-adblock, les publicités servies depuis le domaine du site lui-même : c'est
+/// une course quotidienne, et prétendre la suivre avec deux fichiers texte donnerait une
+/// fausse impression de protection. Ces listes-là viennent d'uBlock Origin, d'EasyList et
+/// d'AdGuard, telles qu'elles sont publiées.
 ///
 /// **Ce que Wuji tient, c'est ce que l'utilisateur écrit** : ses exceptions et ses règles.
 /// Cette liste-là ne vient de nulle part ailleurs et ne part nulle part.
@@ -75,6 +105,19 @@ final class FilterListStore {
     static let catalogSource =
         URL(string: "https://raw.githubusercontent.com/gorhill/uBlock/master/assets/assets.json")!
 
+    /// Les listes de Wuji, livrées avec l'application.
+    ///
+    /// Elles vivent dans `Filters/` à la racine du dépôt, en texte, commentées : c'est ce
+    /// qui rend une contribution possible sans rien savoir de Swift.
+    nonisolated static let builtIn: [(file: String, title: String)] = [
+        ("wuji-ads", "Wuji — Publicités"),
+        ("wuji-trackers", "Wuji — Traqueurs")
+    ]
+
+    static func builtInSource(_ file: String) -> URL {
+        URL(string: "wuji://filters/\(file).txt")!
+    }
+
     private static let seeds: [FilterList] = [
         FilterList(title: "uBlock filters — Ads",
                    source: URL(string: "https://ublockorigin.github.io/uAssets/filters/filters.txt")!,
@@ -91,7 +134,7 @@ final class FilterListStore {
     ]
 
     /// Les rayons, dans l'ordre où uBlock les présente.
-    static let groupOrder = ["default", "ads", "privacy", "malware", "multipurpose",
+    static let groupOrder = ["wuji", "default", "ads", "privacy", "malware", "multipurpose",
                              "cookies", "social", "annoyances", "regions", "other"]
 
     /// Les régions comptent trente-huit entrées : repliées par défaut, comme chez uBlock.
@@ -99,6 +142,7 @@ final class FilterListStore {
 
     static func groupTitle(_ group: String) -> String {
         switch group {
+        case "wuji":         return "Listes de Wuji"
         case "default":      return "uBlock filters"
         case "ads":          return "Publicités"
         case "privacy":      return "Confidentialité"
@@ -128,6 +172,76 @@ final class FilterListStore {
         } else {
             lists = Self.seeds
         }
+        adoptBuiltIn()
+        applySocleOnce()
+        sweep()
+    }
+
+    /// Efface les fichiers de listes que plus aucune entrée ne réclame.
+    ///
+    /// Un identifiant nomme un fichier ; une liste qui disparaît de l'index laisse donc
+    /// derrière elle des mégaoctets que rien ne relira jamais.
+    private func sweep() {
+        let known = Set(lists.map { file(for: $0).lastPathComponent })
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil) else { return }
+        for candidate in files where candidate.pathExtension == "txt" {
+            guard !known.contains(candidate.lastPathComponent) else { continue }
+            try? FileManager.default.removeItem(at: candidate)
+        }
+    }
+
+    /// Ramène une fois pour toutes le catalogue à son socle.
+    ///
+    /// Vingt-deux listes actives faisaient 303 876 règles, donc vingt-deux tranches
+    /// compilées — et `ignore-previous-rules` n'annulant que dans sa propre tranche, les
+    /// exceptions de l'utilisateur étaient recopiées vingt-deux fois. Le socle tient sous
+    /// les 150 000 règles : **une seule tranche**, et le découpage disparaît avec ses
+    /// contreparties.
+    ///
+    /// Ce qui reste coché : les listes de Wuji, et les cinq d'uBlock Origin — ces
+    /// dernières parce qu'elles portent les scriptlets, la seule couche qui atteigne les
+    /// publicités servies depuis le domaine du site. Tout le reste est décoché, pas
+    /// supprimé : un clic le ramène.
+    private func applySocleOnce() {
+        let key = "socleApplied"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        for index in lists.indices {
+            lists[index].isEnabled = lists[index].isBuiltIn || lists[index].group == "default"
+        }
+        save()
+    }
+
+    /// Installe les listes de Wuji et **recopie leur texte à chaque lancement**.
+    ///
+    /// Le paquet fait foi : une liste corrigée dans le dépôt doit s'appliquer dès la
+    /// version suivante, sans que personne ait à cliquer sur « mettre à jour ». C'est la
+    /// contrepartie de les livrer avec l'application plutôt que de les télécharger.
+    private func adoptBuiltIn() {
+        for entry in Self.builtIn {
+            let source = Self.builtInSource(entry.file)
+            var list = lists.first { $0.source == source }
+                ?? FilterList(title: entry.title, source: source, group: "wuji")
+            list.title = entry.title
+            list.group = "wuji"
+            list.isBuiltIn = true
+
+            guard let bundled = Bundle.main.url(forResource: entry.file, withExtension: "txt"),
+                  let text = try? String(contentsOf: bundled, encoding: .utf8) else { continue }
+            try? text.write(to: file(for: list), atomically: true, encoding: .utf8)
+            list.updated = Date()
+            list.lines = text.reduce(into: 1) { count, character in
+                if character == "\n" { count += 1 }
+            }
+
+            if let index = lists.firstIndex(where: { $0.source == source }) {
+                lists[index] = list
+            } else {
+                lists.insert(list, at: 0)
+            }
+        }
+        save()
     }
 
     private struct Stored: Codable {
@@ -196,7 +310,6 @@ final class FilterListStore {
         guard let (data, _) = try? await URLSession.shared.data(for: request),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
-        let language = Locale.current.language.languageCode?.identifier ?? "en"
         var catalog: [FilterList] = []
 
         for (_, value) in root {
@@ -224,9 +337,17 @@ final class FilterListStore {
             // uBlock active une liste régionale quand elle correspond à la langue du
             // système. On fait pareil : proposer trente-huit régions toutes cochées serait
             // absurde, n'en proposer aucune le serait aussi.
-            let languages = ((entry["lang"] as? String) ?? "").split(separator: " ").map(String.init)
-            let enabled = languages.isEmpty ? (entry["off"] as? Bool) != true
-                                            : languages.contains(language)
+            // **Une liste découverte arrive décochée**, sauf le socle d'uBlock Origin.
+            //
+            // Reprendre les défauts d'uBlock à chaque rafraîchissement ferait rallumer des
+            // listes que l'on vient d'éteindre, sans que personne l'ait demandé, et le
+            // socle ne tiendrait pas une semaine. Le catalogue dit ce qui existe ;
+            // l'utilisateur dit ce qui s'applique.
+            //
+            // L'exception tient à ce que ces cinq listes portent : les scriptlets, seule
+            // couche qui atteigne les publicités servies depuis le domaine du site. Sans
+            // elles, Wuji perdrait YouTube sans que rien ne l'annonce.
+            let enabled = group == "default"
 
             // Deux entrées du catalogue peuvent viser le même fichier — les avis de
             // cookies y sont référencés deux fois, par EasyList et par AdGuard.
@@ -255,7 +376,7 @@ final class FilterListStore {
         }
         for known in lists {
             if merged.contains(where: { $0.source == known.source }) { continue }
-            if known.group == "other" {
+            if known.isBuiltIn || known.group == "other" {
                 merged.append(known)
             } else {
                 // Sortie du catalogue : son fichier n'a plus de raison de rester.
@@ -273,6 +394,8 @@ final class FilterListStore {
 
     @discardableResult
     func update(_ list: FilterList) async -> Bool {
+        // Une liste livrée avec l'application n'a nulle part où aller chercher mieux.
+        guard !list.isBuiltIn else { return true }
         var request = URLRequest(url: list.source)
         request.timeoutInterval = 30
         // **Requête conditionnelle.** Une liste change une fois par jour au mieux ;
