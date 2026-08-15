@@ -21,18 +21,26 @@ dossiers, et une palette au centre de l'écran. Tout le vocabulaire « Zero Inte
 document s'applique donc au chrome (peu d'éléments, aucun doublon, rien de mort), pas à un
 mécanisme d'escamotage.
 
-**2. Le blocage va bien plus loin que ce qui était budgété.** L'hypothèse §16 prévoyait
-« pas de règles procédurales avancées ». Le convertisseur d'AdGuard, ses scriptlets et ses
-sélecteurs étendus sont intégrés : environ 304 000 règles actives, réparties en tranches
-compilées — la limite de 150 000 est par liste, pas par navigateur, et c'est par là qu'on
-passe. Les scriptlets sont développés une fois par JavaScriptCore au moment de la
-compilation, jamais dans la page. Contrepartie assumée : **GPL-3 le jour de la
-distribution**, ce que ce document n'avait pas anticipé.
+**2. Le blocage est plus simple que ce qui était budgété, pas plus riche.** L'hypothèse §16
+prévoyait des listes téléchargées et converties. Wuji est passé par là — convertisseur
+d'AdGuard, scriptlets, 304 000 règles en vingt-deux tranches compilées — puis en est
+revenu : 425 Mo sur le disque et trente secondes de recompilation contredisaient la
+sobriété que le produit promet. Il livre maintenant **127 règles écrites directement dans
+le format de `WKContentRuleList`**, dans son propre paquet. Rien n'est téléchargé, rien
+n'est converti au démarrage, il n'y a plus de catalogue ni d'abonnement, et le découpage en
+tranches a disparu avec eux. La dépendance à AdGuard est partie aussi, **et l'obligation
+GPL-3 avec elle**.
 
-**3. Ce qui reste hors d'atteinte est mesuré, pas supposé.** WebKit accepte une action
-`redirect` à la compilation et l'ignore à l'exécution ; `modify-headers` est refusé d'entrée.
-Donc `$replace`, `$csp` et `$removeparam` ne sont pas faisables — et les `$redirect` vers
-une cible inerte sont ramenées à du blocage ordinaire, ce qui en récupère 717.
+**3. Ce que ce choix coûte est écrit dans le produit.** Les règles ne visent que des
+domaines : les publicités servies depuis le domaine du site lui-même — YouTube au premier
+chef — passent. Seuls les scriptlets les atteignaient, et les suivre demande une course
+quotidienne que deux fichiers maintenus à la main ne tiendront pas. C'est dit sur
+`wuji://settings/features`, pas seulement ici.
+
+**4. Ce qui reste hors d'atteinte est mesuré, pas supposé.** WebKit accepte une action
+`redirect` à la compilation et l'ignore à l'exécution ; `modify-headers` est refusé
+d'entrée. Donc `$replace`, `$csp` et `$removeparam` ne sont pas faisables — quel que soit le
+format d'écriture.
 
 Le reste — espaces privés, journal de blocage, scripts utilisateur, autorisations par site,
 mise en veille des onglets — a été construit hors de ce plan, dans l'ordre où l'usage l'a
