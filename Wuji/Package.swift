@@ -11,13 +11,11 @@ let package = Package(
     name: "Wuji",
     platforms: [.macOS(.v26)],
     dependencies: [
-        // Le convertisseur de règles d'AdGuard, celui qu'utilisent leurs produits Safari
-        // et wBlock. Il traduit vers WebKit **et** met de côté ce que WebKit ne sait pas
-        // faire — scriptlets, sélecteurs étendus — au lieu de le perdre.
-        //
-        // GPL-3.0 : Wuji devient GPL le jour où il est distribué. C'est le prix de ne pas
-        // réécrire dix ans de cas particuliers, et il est assumé.
-        .package(url: "https://github.com/AdguardTeam/SafariConverterLib", from: "4.3.0"),
+        // Le convertisseur d'AdGuard a été retiré, et avec lui l'obligation GPL-3 qu'il
+        // imposait à la distribution. Il servait à traduire des listes téléchargées ; Wuji
+        // livre maintenant ses règles déjà écrites dans le format de WebKit, et n'a donc
+        // plus rien à traduire au démarrage. Il reste dans l'outil du dépôt qui régénère
+        // l'asset, sur la machine du mainteneur — jamais dans le navigateur.
         // La liste des suffixes publics. Elle sert à savoir ce qu'est « ce site » : sans
         // elle, lever la protection sur `foo.github.io` la lèverait sur tout `github.io`,
         // c'est-à-dire sur les pages de tout le monde. Aucune heuristique ne remplace la
@@ -28,7 +26,6 @@ let package = Package(
         .executableTarget(
             name: "Wuji",
             dependencies: [
-                .product(name: "ContentBlockerConverter", package: "SafariConverterLib"),
                 .product(name: "PublicSuffixList", package: "swift-psl")
             ],
             path: "Sources/Wuji"

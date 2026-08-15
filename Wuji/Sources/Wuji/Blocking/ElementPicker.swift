@@ -3,7 +3,7 @@ import WebKit
 /// Le sélecteur d'élément : on désigne ce qui gêne, Wuji en écrit la règle.
 ///
 /// **C'est la seule façon honnête de laisser quelqu'un écrire une règle.** L'alternative
-/// serait un champ de texte au format Adblock : il faut alors ouvrir l'inspecteur, lire un
+/// serait un champ de texte où écrire soi-même une règle : il faut alors ouvrir l'inspecteur, lire un
 /// arbre DOM et deviner un sélecteur stable. Ici on survole, on clique, et la règle qui
 /// part dans « Mes règles » est lisible — on peut la relire et la corriger.
 ///

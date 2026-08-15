@@ -15,11 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private let downloads = DownloadStore()
     private let favorites = FavoritesStore()
     private let settings = Settings()
-    private let filterLists = FilterListStore()
+    private let userScriptRules = UserRules()
     private let userScripts = UserScriptStore()
     private let permissions = Permissions()
     private let location = LocationAccess()
-    private lazy var blocker = ContentBlocker(settings: settings, lists: filterLists)
+    private lazy var blocker = ContentBlocker(settings: settings, userRules: userScriptRules)
     private let blockLog = BlockingLog()
     private lazy var blockLogWindow = BlockLogWindow(log: blockLog)
 
@@ -36,11 +36,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     /// **Une configuration par onglet.**
     ///
-    /// Les scriptlets doivent s'exécuter avant les scripts du site, donc être posés avant
-    /// la navigation, donc dépendre du domaine visé. Avec un contrôleur de contenu partagé,
-    /// deux onglets qui chargent en même temps se voleraient leurs scripts. Mesuré avant
-    /// de s'y engager : WebKit ouvre déjà un processus de rendu par vue web, une
-    /// configuration par onglet ne coûte donc rien de plus.
+    /// Les scripts de l'utilisateur dépendent du domaine visé et se posent avant la
+    /// navigation. Avec un contrôleur de contenu partagé, deux onglets qui chargent en même
+    /// temps se voleraient leurs scripts. Mesuré avant de s'y engager : WebKit ouvre déjà
+    /// un processus de rendu par vue web, une configuration par onglet ne coûte donc rien
+    /// de plus.
     private func makeConfiguration(isPrivate: Bool = false) -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
         // Un magasin non persistant : cookies, cache et stockage local vivent en mémoire et
@@ -65,8 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         pages.adBlock = { [unowned self] path in
             AdBlockPage.html(section: AdBlockPage.Section.from(path: path),
                              state: blocker.state.summary,
-                             lists: filterLists.lists,
-                             userRules: filterLists.userRules,
+                             bundled: blocker.bundledCount,
+                             userRules: blocker.userRules.rules,
                              exceptions: settings.blockingExceptions,
                              isBusy: blocker.state.isBusy)
         }
@@ -145,13 +145,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // compilation de cent quarante mille règles prend quelques secondes.
         blocker.onApplied = { [weak self] in
             guard let self else { return }
-            // Une page chargée avant que l'index des règles avancées existe n'a reçu aucun
-            // scriptlet : on la recharge une fois, maintenant qu'il est là.
-            if self.loadedWithoutAdvancedRules, self.blocker.advanced.ruleCount > 0 {
-                self.loadedWithoutAdvancedRules = false
-                self.catchUpAdvancedRules()
-                return
-            }
             guard self.reloadAfterBlocking else { return }
             self.reloadAfterBlocking = false
             self.currentTab?.webView.reload()
@@ -161,10 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             self?.syncBlockingButton()
             self?.refreshAdBlockPages()
         }
-        // L'index des règles avancées d'abord : il vient du disque, et il doit être prêt
-        // avant que la session restaurée ne charge sa première page.
         blocker.isPrivate = { [weak self] in self?.isPrivateSpace ?? false }
-        blocker.advanced.restore()
         blocker.start()
 
         history.purge(olderThan: settings.historyRetention)
@@ -414,7 +404,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // Les règles avancées se posent **avant** que la page parte, sinon le lecteur de
         // YouTube a déjà lu sa réponse quand notre code arrive.
         if navigationAction.targetFrame?.isMainFrame ?? false {
-            installAdvancedRules(for: navigationAction.request.url, in: webView)
+            installPageScripts(for: navigationAction.request.url, in: webView)
         }
 
         // Une adresse en `.user.js` est une offre d'installation, pas une page à lire.
@@ -571,107 +561,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     // MARK: - Blocage
 
-    /// Pose sur l'onglet les scriptlets et les sélecteurs étendus du domaine visé.
+    /// Pose sur l'onglet ce qui doit s'exécuter dans la page.
     ///
     /// Chaque onglet a son contrôleur de contenu : on peut donc remplacer ses scripts sans
-    /// toucher aux autres. Rien n'est injecté quand le domaine n'a pas de règle — la
-    /// grande majorité des pages ne portent alors aucun poids.
-    private func installAdvancedRules(for url: URL?, in webView: WKWebView) {
+    /// toucher aux autres. Il n'y a plus de scriptlets — les règles livrées ne visent que
+    /// des domaines, et WebKit les applique lui-même — donc rien n'est injecté ici qui ne
+    /// serve à l'application ou à l'utilisateur.
+    private func installPageScripts(for url: URL?, in webView: WKWebView) {
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
         controller.addUserScript(PageContextMenu.script)
         controller.addUserScript(MediaWatcher.script)
-        // Le mouchard n'est posé que si quelqu'un regarde : une fenêtre fermée ne doit
-        // pas coûter un écouteur sur chaque cadre de chaque page.
+        // Le mouchard du journal n'est posé que si quelqu'un regarde.
         if blockLogWindow.isOpen { controller.addUserScript(BlockLogWatcher.script) }
 
-        // Les scripts de l'utilisateur passent avant le blocage : ils sont à lui, et ils
-        // s'appliquent même sur un site où la protection est levée.
+        // Les scripts de l'utilisateur s'appliquent même sur un site où la protection est
+        // levée : ils sont à lui.
         for (script, code) in userScripts.matching(url) {
             let time: WKUserScriptInjectionTime = script.runAt == "document-start" ? .atDocumentStart
                                                                                   : .atDocumentEnd
             controller.addUserScript(WKUserScript(source: "(function(){\n" + code + "\n})();",
                                                   injectionTime: time, forMainFrameOnly: true))
         }
-
-        guard settings.blockingEnabled, !blocker.isExcepted(url) else { return }
-
-        // La page part avant que l'index soit prêt — cas du tout premier lancement, ou
-        // d'un changement de règles. On le note pour recharger dès qu'il arrive : sans ça,
-        // une publicité survit jusqu'à ce que l'utilisateur rafraîchisse lui-même.
-        if blocker.advanced.ruleCount == 0 { loadedWithoutAdvancedRules = true }
-
-        let payload = blocker.advanced.payload(for: url)
-        guard !payload.isEmpty else { return }
-
-        // Les scriptlets d'abord, au tout début du document : leur travail est de
-        // remplacer des fonctions du navigateur avant que la page ne s'en serve.
-        if !payload.scriptlets.isEmpty {
-            if blockLogWindow.isOpen {
-                blockLog.record(.scriptlet, host: url?.host() ?? "",
-                                detail: "\(payload.scriptlets.count) scriptlet"
-                                    + (payload.scriptlets.count > 1 ? "s posés" : " posé"))
-            }
-            let source = payload.scriptlets.map { "try{" + $0 + "}catch(e){}" }
-                .joined(separator: "\n")
-            controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart,
-                                                  forMainFrameOnly: false))
-        }
-
-        // Les sélecteurs étendus ensuite, avec leur bibliothèque : ils regardent le DOM,
-        // donc ils attendent qu'il existe.
-        if !payload.extendedSelectors.isEmpty {
-            controller.addUserScript(
-                WKUserScript(source: extendedCssSource(for: payload.extendedSelectors),
-                             injectionTime: .atDocumentEnd, forMainFrameOnly: false))
-        }
     }
-
-    /// La bibliothèque des sélecteurs étendus et les règles à lui donner.
-    ///
-    /// Une seule fabrique pour les deux usages — posée avant la navigation, ou évaluée sur
-    /// une page déjà ouverte. Deux versions divergeraient au premier correctif.
-    private func extendedCssSource(for selectors: [String]) -> String {
-        let rules = selectors
-            .map { $0 + "{display:none!important;}" }
-            .joined(separator: "\n")
-            .replacingOccurrences(of: "`", with: "\\`")
-        return Self.extendedCss + """
-
-        (function(){try{
-          var engine = new ExtendedCss.ExtendedCss({ cssRules: `RULES` });
-          engine.apply();
-        }catch(e){}})();
-        """.replacingOccurrences(of: "RULES", with: rules)
-        + (blockLogWindow.isOpen ? BlockLogWatcher.report(selectors: selectors) : "")
-    }
-
-    /// Rattrape les pages déjà ouvertes quand l'index des règles avancées arrive après
-    /// elles — au premier lancement, ou après un changement de listes.
-    ///
-    /// **On ne recharge que ce qui l'exige.** Un scriptlet doit remplacer des fonctions du
-    /// navigateur avant que la page s'en serve : arrivé après coup, il ne sert à rien, donc
-    /// il faut repartir du début. Un masquage, lui, s'applique très bien à un DOM déjà là.
-    /// Recharger dans les deux cas faisait clignoter toutes les pages ouvertes à chaque
-    /// changement de règles, pour un résultat identique dans la plupart des cas.
-    private func catchUpAdvancedRules() {
-        guard settings.blockingEnabled else { return }
-        for tab in spaces.flatMap(\.allTabs) where !tab.isSleeping {
-            guard let url = tab.url, !blocker.isExcepted(url) else { continue }
-            let payload = blocker.advanced.payload(for: url)
-            guard !payload.isEmpty else { continue }
-            // Les navigations suivantes de cet onglet, dans tous les cas.
-            installAdvancedRules(for: url, in: tab.webView)
-            if !payload.scriptlets.isEmpty {
-                tab.webView.reload()
-            } else {
-                tab.webView.evaluateJavaScript(extendedCssSource(for: payload.extendedSelectors))
-            }
-        }
-    }
-
-    /// Chargée une fois : 232 ko qu'on ne relit pas du disque à chaque navigation.
-    private static let extendedCss = AdvancedRules.extendedCssLibrary
 
     static let adBlockPage = URL(string: "wuji://ad-block")!
     static let scriptsPage = URL(string: "wuji://scripts")!
@@ -888,24 +800,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
         if let url, let host = url.host() {
             let excepted = blocker.isExcepted(url)
-            let payload = blocker.advanced.payload(for: url)
 
             // L'état du site, en une ligne qu'on lit sans cliquer.
             items.append(ActionItem(title: excepted ? "Protection levée sur \(host)"
                                                     : "Protection active sur \(host)",
                                     symbol: excepted ? "shield.slash" : "shield.lefthalf.filled",
                                     isEnabled: false))
-            // Ce que la page reçoit vraiment, quand il y a quelque chose à dire. Un
-            // compteur de requêtes bloquées serait inventé — WebKit n'en remonte aucune —
-            // mais ceci, on le sait exactement.
-            if !excepted, !payload.isEmpty {
-                let parts = [
-                    payload.scriptlets.isEmpty ? nil : "\(payload.scriptlets.count) scriptlet\(payload.scriptlets.count > 1 ? "s" : "")",
-                    payload.extendedSelectors.isEmpty ? nil : "\(payload.extendedSelectors.count) masquage\(payload.extendedSelectors.count > 1 ? "s" : "")"
-                ].compactMap { $0 }
-                items.append(ActionItem(title: parts.joined(separator: " · ") + " sur cette page",
-                                        symbol: "text.badge.checkmark", isEnabled: false))
-            }
             items.append(.separator)
 
             items.append(ActionItem(title: excepted ? "Réactiver sur ce site" : "Désactiver sur ce site",
@@ -937,7 +837,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// le web. Une règle écrite en un clic doit rester bornée à l'endroit où on l'a écrite.
     private func addPickedRule(_ selector: String) {
         guard let host = currentTab?.url?.host(), !selector.isEmpty else { return }
-        blocker.addUserRule("\(host)##\(selector)")
+        blocker.addUserRule(WebKitRule.hide(selector: selector, on: host))
         // L'élément disparaît tout de suite, sans attendre la compilation : on vient de le
         // désigner, le voir survivre quelques secondes ferait douter du clic. La règle,
         // elle, prendra le relais au prochain chargement.
@@ -950,24 +850,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     private func handleAdBlockAction(_ action: String, payload: [String: Any]) {
         switch action {
-        case "update":
-            blocker.update()
-        case "add":
-            guard let raw = payload["url"] as? String, let url = URL(string: raw),
-                  url.scheme == "https" || url.scheme == "http" else { return }
-            // Le nom vient de l'hôte tant que la liste n'a pas été lue : mieux vaut une
-            // étiquette exacte et pauvre qu'un titre inventé.
-            filterLists.add(title: url.host() ?? raw, source: url)
-            blocker.update()
-        case "enable":
-            guard let id = (payload["id"] as? String).flatMap(UUID.init(uuidString:)),
-                  let value = payload["value"] as? Bool else { return }
-            filterLists.setEnabled(value, for: id)
-            blocker.compile()
-        case "remove":
-            guard let id = (payload["id"] as? String).flatMap(UUID.init(uuidString:)) else { return }
-            filterLists.remove(id: id)
-            blocker.compile()
         case "unexcept":
             guard let host = payload["host"] as? String else { return }
             settings.blockingExceptions.removeAll { $0 == host }
@@ -977,8 +859,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             blocker.addUserRule(rule)
         case "unrule":
             guard let rule = payload["rule"] as? String else { return }
-            filterLists.userRules.removeAll { $0 == rule }
-            blocker.compile()
+            blocker.removeUserRule(rule)
         default:
             break
         }
@@ -1000,8 +881,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     /// Une page à recharger dès que la liste compilée sera en place.
     private var reloadAfterBlocking = false
-    /// Une page partie avant que l'index des règles avancées soit disponible.
-    private var loadedWithoutAdvancedRules = false
 
     // MARK: - Favoris
 
@@ -1773,11 +1652,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                     guard let url = URL(string: raw) else { continue }
                     blockLog.record(.refused, host: host,
                                     detail: (url.host() ?? "") + url.path)
-                }
-                for hit in payload["hidden"] as? [[String: Any]] ?? [] {
-                    let count = hit["count"] as? Int ?? 0
-                    blockLog.record(.hidden, host: host,
-                                    detail: "\(count)× " + (hit["selector"] as? String ?? ""))
                 }
                 return
             }

@@ -1,467 +1,158 @@
-import ContentBlockerConverter
 import CryptoKit
 import WebKit
 
-/// Le bloqueur de contenu.
+/// Le blocage.
 ///
-/// Il compile les listes une fois, et WebKit les applique ensuite **dans le moteur**, avant
-/// qu'une requête parte. Rien ne remonte jusqu'à l'application : c'est ce qui rend le
-/// filtrage gratuit à l'usage, et c'est aussi pourquoi Wuji ne peut pas afficher de compteur
-/// de « publicités bloquées ». On préfère ne rien annoncer que d'annoncer un chiffre inventé.
+/// **Les règles arrivent déjà traduites.** L'asset `wuji-rules.json` est écrit dans le format de
+/// `WKContentRuleList` — celui que WebKit compile directement. Il n'y a plus de
+/// convertisseur au démarrage, plus de listes à télécharger, plus d'index à reconstruire :
+/// le navigateur lit un fichier de treize kilo-octets et le donne au moteur.
 ///
-/// **La compilation est gardée en cache.** Cent mille règles prennent plusieurs secondes à
-/// compiler ; les refaire à chaque lancement pour un contenu identique serait une taxe sur
-/// le démarrage. WebKit garde la liste compilée sous son identifiant, on garde l'empreinte
-/// de ce qui l'a produite, et on ne recompile que si les deux divergent.
+/// C'est ce qui a changé, et le prix est assumé. Wuji ne fait plus tourner de scriptlets,
+/// donc il ne retire plus les publicités servies depuis le domaine du site lui-même —
+/// YouTube au premier chef. Ce filtrage-là demande une course quotidienne que deux fichiers
+/// texte ne peuvent pas suivre, et prétendre le contraire donnerait une fausse impression
+/// de protection.
+///
+/// Ce qui reste est vrai partout ailleurs : les régies et les mouchards s'appellent par
+/// leur domaine, et un domaine se bloque.
 @MainActor
 final class ContentBlocker {
 
     enum State {
         case off
-        case empty
-        case updating(done: Int, total: Int)
         case compiling
-        case active(rules: Int, skipped: Int, dropped: Int)
+        case active(rules: Int)
         case failed(String)
 
         var summary: String {
             switch self {
-            case .off:       return "Désactivé"
-            case .empty:     return "Aucune liste téléchargée"
-            case .updating(let done, let total):
-                return total > 0 ? "Téléchargement… \(done)/\(total)" : "Téléchargement…"
-            case .compiling: return "Compilation…"
-            case .active(let rules, let skipped, let dropped):
-                var text = "\(format(rules)) règles actives"
-                if skipped > 0 { text += " · \(format(skipped)) hors syntaxe Safari" }
-                if dropped > 0 { text += " · \(dropped) liste\(dropped > 1 ? "s" : "") refusée\(dropped > 1 ? "s" : "")" }
-                return text
-            case .failed(let reason): return "Échec · \(reason)"
+            case .off:              return "Blocage désactivé"
+            case .compiling:        return "Préparation…"
+            case .active(let rules): return "\(rules) règles actives"
+            case .failed(let why):  return "Blocage indisponible — \(why)"
             }
         }
 
-        var isBusy: Bool {
-            switch self {
-            case .updating, .compiling: return true
-            default: return false
-            }
-        }
-
-        private func format(_ value: Int) -> String {
-            let formatter = NumberFormatter()
-            formatter.numberStyle = .decimal
-            formatter.groupingSeparator = " "
-            return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
-        }
+        var isBusy: Bool { if case .compiling = self { return true }; return false }
     }
 
     private(set) var state: State = .off
     var onChange: (() -> Void)?
-    /// Appelé quand une nouvelle liste vient d'être installée. Une règle ajoutée ne change
-    /// rien à la page tant que la compilation n'a pas fini — recharger avant, c'est
-    /// recharger pour rien et croire que le réglage n'a pas marché.
+    /// Appelé quand les règles viennent d'être installées. Une règle ajoutée ne change rien
+    /// à la page tant que la compilation n'a pas fini — recharger avant, c'est recharger
+    /// pour rien et croire que le réglage n'a pas marché.
     var onApplied: (() -> Void)?
+    /// L'espace courant est-il privé ? Décide où va une exception posée maintenant.
+    var isPrivate: () -> Bool = { false }
 
-    /// Une liste compilée par tranche. C'est **la** façon de dépasser le plafond de
-    /// WebKit : la limite est par liste, pas par navigateur, et `WKUserContentController`
-    /// en accepte autant qu'on veut.
-    nonisolated private static func identifier(_ index: Int) -> String { "wuji.filters.\(index)" }
+    private static let identifier = "wuji.rules"
     private static let signatureKey = "blockingSignature"
-    private static let chunkKey = "blockingChunks"
-    /// L'empreinte des règles **avant** conversion, et le décompte qui allait avec.
-    private static let sourceKey = "blockingSource"
-    private static let countsKey = "blockingCounts"
-
-    /// Taille d'une tranche. Cent mille règles compilent en quelques secondes et passent
-    /// sans discussion ; au-delà on s'approche de la limite pour rien, puisqu'il suffit
-    /// d'ajouter une tranche.
-    nonisolated static let chunkSize = 100_000
 
     private unowned let settings: Settings
-    let lists: FilterListStore
+    let userRules: UserRules
 
     private var controllers: [WKUserContentController] = []
     private var compiled: [WKContentRuleList] = []
 
-    init(settings: Settings, lists: FilterListStore) {
+    init(settings: Settings, userRules: UserRules) {
         self.settings = settings
-        self.lists = lists
+        self.userRules = userRules
     }
 
-    /// Les vues web partagent une configuration, donc un seul contrôleur — mais on garde
-    /// une liste : une fenêtre privée en aura le sien.
     func attach(to controller: WKUserContentController) {
         guard !controllers.contains(where: { $0 === controller }) else { return }
         controllers.append(controller)
         compiled.forEach { controller.add($0) }
     }
 
-    /// Au démarrage : reprendre la liste déjà compilée si rien n'a changé, télécharger si
-    /// l'on n'a jamais rien reçu.
-    func start() {
-        guard settings.blockingEnabled else { return apply([], state: .off) }
-        guard lists.hasContent else {
-            // Premier lancement : on va chercher les listes une fois, parce qu'un
-            // bloqueur sans liste ne bloque rien et que personne n'a envie de cliquer
-            // pour obtenir ce qu'il vient d'activer.
-            Task { await updateAndCompile() }
-            return
-        }
-        compile()
-    }
+    // MARK: - Compilation
 
-    /// Recompile à partir de ce qu'on a sur le disque.
+    /// Le nombre de règles de l'asset, lu une fois. Sert à l'affichage, et à rien d'autre.
+    private(set) var bundledCount = 0
+
+    func start() { compile() }
+
+    /// Assemble l'asset, les règles de l'utilisateur et ses exceptions, puis compile.
     ///
-    /// **Une tranche compilée par liste**, et plusieurs si une liste est grosse. WebKit
-    /// plafonne une liste compilée, pas le nombre de listes installées : c'est par là qu'on
-    /// passe, et c'est ce qui permet d'en charger trois cent mille au lieu de cent
-    /// cinquante mille.
-    ///
-    /// Le prix à payer est réel et vaut d'être dit : `ignore-previous-rules` n'annule que
-    /// ce qui le précède **dans la même tranche**. Les exceptions d'une liste sont donc
-    /// recopiées dans chacune de ses tranches, et celles de l'utilisateur — sites sans
-    /// protection compris — dans toutes. Quelques milliers de règles dupliquées contre des
-    /// exceptions qui marchent : le calcul est vite fait.
+    /// **Une seule liste compilée.** Elle tient très largement sous le plafond de WebKit, et
+    /// `ignore-previous-rules` n'annulant que dans la liste où il figure, tout doit de toute
+    /// façon vivre au même endroit pour que les exceptions fonctionnent.
     func compile() {
         guard settings.blockingEnabled else { return apply([], state: .off) }
-
-        let sources = lists.enabled.compactMap { list -> (FilterList, String)? in
-            lists.text(for: list).map { (list, $0) }
-        }
-        guard !sources.isEmpty else { return apply([], state: .empty) }
-
-        // Rien n'a bougé depuis le dernier lancement ? Alors il n'y a rien à faire.
-        //
-        // **C'était le vrai coût du démarrage.** L'empreinte était calculée sur le
-        // résultat de la conversion : pour découvrir que rien n'avait changé, Wuji
-        // reconvertissait chaque fois un demi-million de règles — quelques secondes de
-        // calcul et six cents mégaoctets, pour aboutir aux tranches déjà compilées qui
-        // attendaient sagement dans le magasin de WebKit.
-        let source = Self.fingerprint(of: sources, userRules: lists.userRules,
-                                      exceptions: settings.blockingExceptions
-                                          + settings.privateBlockingExceptions)
-        if source == UserDefaults.standard.string(forKey: Self.sourceKey),
-           advanced.ruleCount > 0,
-           let stored = UserDefaults.standard.array(forKey: Self.countsKey) as? [Int],
-           stored.count == 2 {
-            let chunkCount = UserDefaults.standard.integer(forKey: Self.chunkKey)
-            Task { [weak self] in
-                var found: [WKContentRuleList] = []
-                for index in 0..<chunkCount {
-                    guard let list = try? await WKContentRuleListStore.default()?
-                        .contentRuleList(forIdentifier: Self.identifier(index)) else { break }
-                    found.append(list)
-                }
-                guard let self else { return }
-                guard found.count == chunkCount, chunkCount > 0 else {
-                    // Les tranches ont disparu du magasin : on refait le chemin long.
-                    UserDefaults.standard.removeObject(forKey: Self.sourceKey)
-                    self.compile()
-                    return
-                }
-                self.apply(found, state: .active(rules: stored[0], skipped: stored[1], dropped: 0))
-                self.onApplied?()
-            }
-            return
+        guard let asset = Self.asset() else {
+            return apply([], state: .failed("les règles livrées sont introuvables"))
         }
 
-        pendingSource = source
+        // Déjà au format de WebKit, comme tout le reste : rien à traduire.
+        let mine = userRules.rules
+        // Les exceptions viennent en dernier : `ignore-previous-rules` annule ce qui le
+        // précède, et rien d'autre.
+        let exceptions = (settings.blockingExceptions + settings.privateBlockingExceptions)
+            .map(WebKitRule.exception(for:))
+
+        bundledCount = asset.count
+        let json = "[" + (asset + mine + exceptions).joined(separator: ",") + "]"
+        let total = asset.count + mine.count
+
+        // Même contenu qu'au dernier lancement : la liste compilée est encore dans le
+        // magasin de WebKit, on la reprend telle quelle.
+        var hasher = SHA256()
+        hasher.update(data: Data(json.utf8))
+        let signature = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+
         state = .compiling
         onChange?()
 
-        // La conversion tourne hors du fil principal, une liste par tâche : elles ne se
-        // regardent pas. **Une liste convertie donne une tranche compilée** — le
-        // convertisseur d'AdGuard s'arrête de lui-même au plafond de Safari, donc le
-        // découper par liste est aussi ce qui évite qu'il écarte le surplus.
-        let userRules = lists.userRules
-        let hosts = settings.blockingExceptions + settings.privateBlockingExceptions
-        Task.detached(priority: .userInitiated) {
-            // Les règles de l'utilisateur valent partout, donc sont recopiées dans chaque
-            // tranche : `ignore-previous-rules` n'annule que ce qui le précède dans la
-            // même liste compilée.
-            let universal = (hosts.map { "@@||\($0)^$document" } + userRules)
-            let mine = ContentBlockerConverter().convertArray(
-                rules: universal, safariVersion: SafariVersion.autodetect(),
-                advancedBlocking: true, maxJsonSizeBytes: nil, progress: nil)
-
-            let converted = await withTaskGroup(of: (Int, Converted).self) { group in
-                for (position, source) in sources.enumerated() {
-                    group.addTask {
-                        let result = ContentBlockerConverter().convertArray(
-                            rules: source.1.components(separatedBy: "\n").map(Self.withoutInertRedirect),
-                            safariVersion: SafariVersion.autodetect(),
-                            advancedBlocking: true, maxJsonSizeBytes: nil, progress: nil)
-                        return (position, Converted(result: result))
-                    }
-                }
-                var result = [Converted?](repeating: nil, count: sources.count)
-                for await (position, item) in group { result[position] = item }
-                return result.compactMap { $0 }
-            }
-
-            var advanced: [String] = []
-            var accepted = 0, rejected = 0
-            var perList: [(UUID, Int, Int)] = []
-
-            // **Les listes converties sont regroupées, pas empilées une par tranche.**
-            //
-            // Une tranche par liste était le réflexe évident et il coûtait cher : le
-            // plafond de WebKit est de 150 000 règles **par liste compilée**, donc huit
-            // petites listes tenaient largement dans une seule — et
-            // `ignore-previous-rules` n'annulant que dans sa propre tranche, les
-            // exceptions de l'utilisateur étaient recopiées huit fois pour rien.
-            //
-            // On remplit donc une tranche jusqu'au budget avant d'en ouvrir une autre. Le
-            // découpage ne sert plus qu'à ce pour quoi il existe : dépasser le plafond
-            // quand il y a vraiment de quoi le dépasser.
-            var groups: [[String]] = []
-            var current: [String] = []
-            var currentCount = 0
-
-            for (source, item) in zip(sources, converted) {
-                let result = item.result
-                perList.append((source.0.id, result.sourceRulesCount, result.safariRulesCount))
-                accepted += result.safariRulesCount
-                rejected += result.sourceRulesCount - result.sourceSafariCompatibleRulesCount
-
-                if currentCount > 0, currentCount + result.safariRulesCount > Self.chunkSize {
-                    groups.append(current)
-                    current = []
-                    currentCount = 0
-                }
-                current.append(result.safariRulesJSON)
-                currentCount += result.safariRulesCount
-
-                if let text = result.advancedRulesText { advanced.append(text) }
-            }
-            if !current.isEmpty { groups.append(current) }
-            if let text = mine.advancedRulesText { advanced.append(text) }
-
-            // Les règles de l'utilisateur — ses exceptions comprises — vont dans chaque
-            // tranche, et une seule fois par tranche.
-            let chunks = groups.compactMap { group -> String? in
-                group.dropFirst().reduce(group.first) { merged, next in
-                    merged.flatMap { Self.splice($0, adding: next) }
-                }.flatMap { Self.splice($0, adding: mine.safariRulesJSON) }
-            }
-
-            let counts = (accepted: accepted + mine.safariRulesCount * chunks.count,
-                          rejected: rejected,
-                          advanced: advanced.reduce(0) { $0 + $1.split(separator: "\n").count })
-            let sealedChunks = chunks
-            let sealedAdvanced = advanced.joined(separator: "\n")
-            await MainActor.run { [weak self] in
-                perList.forEach { self?.lists.record(lines: $0.1, rules: $0.2, for: $0.0) }
-                self?.advanced.load(sealedAdvanced)
-                self?.install(chunks: sealedChunks, counts: counts)
-            }
-        }
-    }
-
-    /// Les règles que WebKit ne sait pas exécuter — scriptlets, sélecteurs étendus.
-    ///
-    /// Gardées telles quelles, au format Adblock : c'est ce que la couche JavaScript
-    /// consommera. Aujourd'hui elles ne servent à rien d'autre qu'à être comptées, et
-    /// c'est déjà mieux que de les jeter comme avant.
-    let advanced = AdvancedRules()
-
-    /// Recolle deux tableaux JSON sans les relire.
-    ///
-    /// Le convertisseur rend une chaîne, et ces chaînes pèsent des mégaoctets : les
-    /// désérialiser pour ajouter trois exceptions coûterait plus cher que toute la
-    /// conversion. On coupe le crochet fermant et on aboute.
-    /// Les cibles de `$redirect` qui ne sont **rien** : un script vide, un pixel
-    /// transparent, un silence d'une seconde.
-    ///
-    /// La distinction fait tout. Rediriger vers un faux `googletag` évite qu'une page
-    /// s'arrête d'attendre — bloquer à la place casserait la mise en page. Rediriger vers
-    /// un script vide, en revanche, ne diffère du blocage que par l'évènement d'erreur.
-    nonisolated private static let inertRedirects: Set<String> = [
-        "noop.js", "noopjs", "noop.txt", "nooptext", "noop.html", "noopframe",
-        "noop.json", "noopjson", "noop.css", "noopcss", "noop.svg",
-        "noop-1s.mp4", "noopmp4-1s", "noop-0.1s.mp3", "noopmp3-0.1s",
-        "1x1.gif", "1x1-transparent.gif", "2x2.png", "2x2-transparent.png",
-        "3x2.png", "3x2-transparent.png", "32x32.png", "32x32-transparent.png",
-        "noopvast-2.0", "noopvast-3.0", "noopvast-4.0",
-        "noopvmap-1.0", "noop-vmap1.0.xml", "empty"
-    ]
-
-    /// Rend à une règle `$redirect` inerte son pouvoir de bloquer.
-    ///
-    /// **Mesuré, pas supposé.** WebKit accepte une action `redirect` à la compilation et
-    /// l'ignore à l'exécution : une liste compilée avec elle passe, et le script arrive
-    /// quand même. Le convertisseur d'AdGuard, lui, refuse ces règles en bloc — huit cent
-    /// trente d'entre elles étaient donc perdues, pas seulement privées de leur
-    /// substitut : elles ne bloquaient plus rien du tout.
-    ///
-    /// Enlever l'option laisse une règle de blocage ordinaire, que WebKit exécute. On ne
-    /// touche qu'aux cibles inertes, et jamais à `$redirect-rule`, qui ne s'applique que
-    /// si autre chose a déjà bloqué — la transformer en blocage inventerait un refus que
-    /// la liste n'a pas demandé.
-    nonisolated static func withoutInertRedirect(_ line: String) -> String {
-        guard line.contains("redirect="), !line.contains("redirect-rule=") else { return line }
-        guard let range = line.range(of: "redirect=[^,$]+", options: .regularExpression) else {
-            return line
-        }
-        let target = line[range].dropFirst("redirect=".count)
-        guard inertRedirects.contains(String(target)) else { return line }
-
-        var result = line
-        result.removeSubrange(range)
-        // Les séparateurs restés orphelins, des deux côtés.
-        result = result.replacingOccurrences(of: ",,", with: ",")
-        result = result.replacingOccurrences(of: "$,", with: "$")
-        if result.hasSuffix(",") { result.removeLast() }
-        if result.hasSuffix("$") { result.removeLast() }
-        return result
-    }
-
-    nonisolated private static func splice(_ json: String, adding extra: String) -> String? {
-        guard json.hasPrefix("["), json.hasSuffix("]") else { return nil }
-        let body = extra.dropFirst().dropLast()   // le contenu du second tableau
-        guard !body.isEmpty else { return json }
-        guard json.count > 2 else { return "[" + body + "]" }
-        return String(json.dropLast()) + "," + body + "]"
-    }
-
-    /// Le résultat d'une conversion, transporté d'une tâche à l'autre.
-    /// Le résultat d'une conversion, transporté d'une tâche à l'autre.
-    ///
-    /// `ConversionResult` n'est pas déclaré `Sendable` par la bibliothèque. Il est
-    /// construit par une tâche, remis à une autre, et plus personne n'y touche — un
-    /// transfert sûr que le compilateur ne peut pas prouver seul.
-    private struct Converted: @unchecked Sendable {
-        let result: ConversionResult
-    }
-
-    /// Télécharge puis recompile.
-    func update() {
-        Task { await updateAndCompile() }
-    }
-
-    private func updateAndCompile() async {
-        state = .updating(done: 0, total: 0)
-        onChange?()
-        // Le catalogue d'abord : c'est lui qui dit quelles listes existent, et il change
-        // plus souvent qu'on ne croit — les listes se scindent et se renomment.
-        await lists.refreshCatalog()
-        await lists.updateAll { [weak self] done, total in
-            self?.state = .updating(done: done, total: total)
-            self?.onChange?()
-        }
-        compile()
-    }
-
-    // MARK: - Installation
-
-    /// L'empreinte de ce qui entre dans la conversion : les listes telles qu'elles sont
-    /// sur le disque, les règles de l'utilisateur, ses exceptions. Tout ce qui, en
-    /// changeant, doit refaire le travail — et rien d'autre.
-    nonisolated private static func fingerprint(of sources: [(FilterList, String)],
-                                                userRules: [String],
-                                                exceptions: [String]) -> String {
-        var hasher = SHA256()
-        for (list, text) in sources {
-            hasher.update(data: Data(list.id.uuidString.utf8))
-            hasher.update(data: Data(text.utf8))
-        }
-        hasher.update(data: Data(userRules.joined(separator: "\n").utf8))
-        hasher.update(data: Data(exceptions.joined(separator: "\n").utf8))
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
-    }
-
-    /// L'empreinte de la source en cours de conversion, à écrire une fois qu'elle a
-    /// abouti. Écrite avant, elle ferait sauter la conversion suivante alors que rien
-    /// n'aurait été installé.
-    private var pendingSource: String?
-
-    private func install(chunks: [String], counts: (accepted: Int, rejected: Int, advanced: Int)) {
-        guard !chunks.isEmpty else { return apply([], state: .empty) }
-
-        var hasher = SHA256()
-        chunks.forEach { hasher.update(data: Data($0.utf8)) }
-        let signature = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-
-        let done: ([WKContentRuleList]) -> Void = { [weak self] lists in
-            UserDefaults.standard.set(signature, forKey: Self.signatureKey)
-            UserDefaults.standard.set(chunks.count, forKey: Self.chunkKey)
-            UserDefaults.standard.set([counts.accepted, counts.rejected], forKey: Self.countsKey)
-            UserDefaults.standard.set(self?.pendingSource, forKey: Self.sourceKey)
-            self?.apply(lists, state: .active(rules: counts.accepted, skipped: counts.rejected,
-                                              dropped: 0))
-        }
-
-        // Même contenu qu'au dernier lancement : les tranches compilées sont encore là, on
-        // les reprend. C'est la différence entre un démarrage instantané et une demi-minute
-        // de moulinette pour le même résultat.
-        if signature == UserDefaults.standard.string(forKey: Self.signatureKey),
-           UserDefaults.standard.integer(forKey: Self.chunkKey) == chunks.count {
-            Task {
-                var found: [WKContentRuleList] = []
-                for index in chunks.indices {
-                    guard let list = try? await WKContentRuleListStore.default()?
-                        .contentRuleList(forIdentifier: Self.identifier(index)) else { break }
-                    found.append(list)
-                }
-                if found.count == chunks.count { done(found) } else { build(chunks, signature, counts) }
-            }
-            return
-        }
-        build(chunks, signature, counts)
-    }
-
-    private func build(_ chunks: [String], _ signature: String,
-                       _ counts: (accepted: Int, rejected: Int, advanced: Int)) {
-        Task {
-            var built: [WKContentRuleList] = []
-            var lost = 0
-            for (index, json) in chunks.enumerated() {
-                do {
-                    if let list = try await WKContentRuleListStore.default()?
-                        .compileContentRuleList(forIdentifier: Self.identifier(index),
-                                                encodedContentRuleList: json) {
-                        built.append(list)
-                    }
-                } catch {
-                    // Une liste refusée ne coûte plus que la sienne : les autres restent en
-                    // place. Un bloqueur amputé vaut mieux qu'un bloqueur éteint.
-                    lost += 1
-                }
-            }
-            guard !built.isEmpty else {
-                UserDefaults.standard.removeObject(forKey: Self.signatureKey)
-                apply([], state: .failed("aucune tranche n'a compilé"))
+        Task { [weak self] in
+            guard let store = WKContentRuleListStore.default() else { return }
+            if signature == UserDefaults.standard.string(forKey: Self.signatureKey),
+               let known = try? await store.contentRuleList(forIdentifier: Self.identifier) {
+                self?.apply([known], state: .active(rules: total))
+                await Self.sweepStore()
                 return
             }
-            // Les tranches d'une compilation plus large n'ont plus de raison d'occuper le
-            // magasin : elles y resteraient indéfiniment, mégaoctets compris.
-            //
-            // On demande au magasin ce qu'il contient plutôt que de le déduire du dernier
-            // décompte : celui-ci a déjà baissé plusieurs fois, et chaque baisse avait
-            // laissé derrière elle des tranches que plus rien ne réclamait.
-            await Self.sweepStore(keeping: chunks.count)
-            UserDefaults.standard.set(signature, forKey: Self.signatureKey)
-            UserDefaults.standard.set(chunks.count, forKey: Self.chunkKey)
-            // L'empreinte de la source n'est écrite que **si toutes** les tranches sont
-            // passées : une compilation amputée ne doit pas se faire reprendre telle
-            // quelle au lancement suivant, sans qu'on retente jamais ce qui a échoué.
-            if lost == 0 {
-                UserDefaults.standard.set([counts.accepted, counts.rejected], forKey: Self.countsKey)
-                UserDefaults.standard.set(pendingSource, forKey: Self.sourceKey)
+            do {
+                guard let list = try await store.compileContentRuleList(
+                    forIdentifier: Self.identifier, encodedContentRuleList: json) else { return }
+                UserDefaults.standard.set(signature, forKey: Self.signatureKey)
+                self?.apply([list], state: .active(rules: total))
+                await Self.sweepStore()
+            } catch {
+                // Une règle écrite à la main peut être refusée par le moteur. On le dit, et
+                // on garde ce qui marchait : un bloqueur amputé vaut mieux qu'un bloqueur
+                // éteint, et un message vaut mieux qu'un silence.
+                self?.apply(self?.compiled ?? [],
+                            state: .failed("une règle a été refusée par le moteur"))
             }
-            apply(built, state: .active(rules: counts.accepted, skipped: counts.rejected,
-                                        dropped: lost))
         }
     }
 
-    /// Efface du magasin de WebKit les tranches au-delà de celles qu'on vient d'installer.
-    private static func sweepStore(keeping count: Int) async {
+    /// L'asset livré avec l'application : une règle par ligne, telle qu'elle est écrite
+    /// dans le dépôt.
+    ///
+    /// Le fichier porte aussi des repères de lecture — les lignes en `//` qui nomment les
+    /// sections. On ne retient que les lignes qui sont des règles, donc le moteur ne voit
+    /// jamais rien d'autre, et le fichier reste relisible par un humain.
+    nonisolated private static func asset() -> [String]? {
+        guard let url = Bundle.main.url(forResource: "wuji-rules", withExtension: "json"),
+              let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        return text.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: ",")) }
+            .filter { $0.hasPrefix("{") && $0.hasSuffix("}") }
+    }
+
+    /// Efface du magasin de WebKit tout ce qui n'est pas la liste courante.
+    ///
+    /// Le magasin garde ce qu'on y a mis, indéfiniment. Les tranches de l'époque où Wuji
+    /// compilait vingt-deux listes y occupaient encore soixante-dix-huit mégaoctets alors
+    /// que plus rien ne les réclamait.
+    private static func sweepStore() async {
         guard let store = WKContentRuleListStore.default() else { return }
         let identifiers = await withCheckedContinuation { continuation in
             store.getAvailableContentRuleListIdentifiers { continuation.resume(returning: $0 ?? []) }
         }
-        let kept = Set((0..<count).map(identifier))
-        for name in identifiers where name.hasPrefix("wuji.filters.") && !kept.contains(name) {
+        for name in identifiers where name != identifier {
             try? await store.removeContentRuleList(forIdentifier: name)
         }
     }
@@ -479,49 +170,43 @@ final class ContentBlocker {
 
     // MARK: - Exceptions par site
 
-    /// L'espace courant est-il privé ? Fourni par l'application : le bloqueur ne connaît
-    /// pas les espaces, mais il doit savoir dans quel registre écrire.
-    var isPrivate: () -> Bool = { false }
-
+    /// Le bloqueur casse parfois une page. Pouvoir l'éteindre **sur ce site seulement**
+    /// évite d'avoir à choisir entre la page et la protection partout ailleurs.
     func isExcepted(_ url: URL?) -> Bool {
         guard let site = Site.name(of: url) else { return false }
-        // La comparaison passe des deux côtés par le nom du site : les exceptions posées
-        // avant qu'on sache lire la liste des suffixes sont des hôtes entiers, et elles
-        // doivent continuer à valoir.
         return (settings.blockingExceptions + settings.privateBlockingExceptions)
             .contains { Site.name(ofHost: $0) == site }
     }
 
-    /// Le bloqueur casse parfois une page — un lecteur vidéo, une banque, un mur de
-    /// paiement. Pouvoir l'éteindre **sur ce site seulement** évite d'avoir à choisir
-    /// entre la page et la protection partout ailleurs.
     func toggleException(for url: URL?) {
-        guard let host = Site.name(of: url) else { return }
-        // En privé, l'exception va dans le registre éphémère : elle vaut pour la session
-        // et ne suit pas l'utilisateur dans ses espaces normaux.
-        // Retirer se fait sur le nom du site, donc emporte aussi les vieilles entrées
-        // écrites en hôte complet : sans ça, « réactiver » laisserait derrière lui une
-        // exception invisible qui continuerait de s'appliquer.
-        let matches = { (entry: String) in Site.name(ofHost: entry) == host }
+        guard let site = Site.name(of: url) else { return }
+        let matches = { (entry: String) in Site.name(ofHost: entry) == site }
+        // En privé, l'exception va dans le registre éphémère : elle vaut pour la session et
+        // ne suit pas l'utilisateur dans ses espaces normaux.
         if isPrivate() {
             if settings.privateBlockingExceptions.contains(where: matches) {
                 settings.privateBlockingExceptions.removeAll(where: matches)
             } else {
-                settings.privateBlockingExceptions.append(host)
+                settings.privateBlockingExceptions.append(site)
             }
         } else if settings.blockingExceptions.contains(where: matches) {
             settings.blockingExceptions.removeAll(where: matches)
         } else {
-            settings.blockingExceptions.append(host)
+            settings.blockingExceptions.append(site)
         }
         compile()
     }
 
-    /// Une règle écrite par l'utilisateur — le sélecteur d'élément passe par là.
+    // MARK: - Règles de l'utilisateur
+
     func addUserRule(_ rule: String) {
-        let rule = rule.trimmingCharacters(in: .whitespaces)
-        guard !rule.isEmpty, !lists.userRules.contains(rule) else { return }
-        lists.userRules.append(rule)
+        userRules.add(rule)
+        compile()
+    }
+
+    func removeUserRule(_ rule: String) {
+        userRules.remove(rule)
         compile()
     }
 }
+

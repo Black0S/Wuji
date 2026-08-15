@@ -3,14 +3,13 @@ import Foundation
 /// Les pages `wuji://ad-block`.
 ///
 /// Trois sujets, trois adresses, une colonne pour passer de l'un à l'autre — la même
-/// grammaire que la fenêtre de réglages, en HTML. Les empiler sur une seule page marchait
-/// tant qu'il y avait six listes ; à vingt-trois, les règles de l'utilisateur se retrouvent
-/// sous deux écrans de défilement.
+/// grammaire que la fenêtre de réglages, en HTML.
 ///
-/// Elles montrent ce qui protège réellement : les listes, leur date, ce que chacune a donné
-/// après traduction. Un bloqueur qui affiche « Protection active » et rien d'autre demande
-/// qu'on lui fasse confiance ; celui-ci montre ses chiffres, y compris ceux qui l'arrangent
-/// mal — les règles sans équivalent WebKit.
+/// **Il n'y a plus de catalogue à gérer, donc plus rien à cocher.** Les règles arrivent avec
+/// l'application, déjà écrites dans le format de WebKit. La page ne demande donc plus de
+/// choisir : elle dit ce qui protège, ce qui est exclu, et ce que l'utilisateur a ajouté.
+/// Un bloqueur qui affiche « Protection active » et rien d'autre demande qu'on lui fasse
+/// confiance ; celui-ci montre ses chiffres, et dit aussi ce qu'il ne fait pas.
 @MainActor
 enum AdBlockPage {
 
@@ -42,11 +41,11 @@ enum AdBlockPage {
         }
     }
 
-    static func html(section: Section, state: String, lists: [FilterList],
+    static func html(section: Section, state: String, bundled: Int,
                      userRules: [String], exceptions: [String], isBusy: Bool) -> String {
         let body: String
         switch section {
-        case .rules:    body = listsSection(lists, isBusy: isBusy)
+        case .rules:    body = listsSection(bundled, state: state, isBusy: isBusy)
         case .unactive: body = exceptionsSection(exceptions)
         case .myRules:  body = rulesSection(userRules)
         }
@@ -59,70 +58,46 @@ enum AdBlockPage {
 
     // MARK: - Sections
 
-    private static func listsSection(_ lists: [FilterList], isBusy: Bool) -> String {
-        let active = lists.filter(\.isEnabled).count
-        return """
+    private static func listsSection(_ bundled: Int, state: String, isBusy: Bool) -> String {
+        """
         <header>
           <div class="titles">
             <h1>Ad-Block Règles</h1>
-            <p>\(active) liste\(active > 1 ? "s" : "") active\(active > 1 ? "s" : "") sur \(lists.count)</p>
+            <p>\(isBusy ? "Préparation…" : escape(state))</p>
           </div>
-          <button id="update" class="ghost"\(isBusy ? " disabled" : "")>\(isBusy ? "En cours…" : "Mettre à jour")</button>
         </header>
         <main>
-        \(groups(lists))
-        <form id="add">
-          <input id="url" type="url" placeholder="https://…/liste.txt" spellcheck="false">
-          <button type="submit" class="ghost">Ajouter</button>
-        </form>
+        <section>
+          <h3>Livrées avec Wuji<span>\(bundled)</span></h3>
+          <ul>
+            <li><div class="body">
+              <span class="name">Publicités</span>
+              <span class="detail">Les régies les plus répandues, par domaine.</span>
+              <span class="detail source">Blocking/Assets/wuji-ads.txt</span>
+            </div></li>
+            <li><div class="body">
+              <span class="name">Traqueurs</span>
+              <span class="detail">Mesure d'audience, profilage, rejeu de session, empreinte.</span>
+              <span class="detail source">Blocking/Assets/wuji-trackers.txt</span>
+            </div></li>
+          </ul>
+        </section>
         <p class="note">
-          Wuji entretient deux listes, et elles ne visent que des domaines — des régies et
-          des mouchards qui portent le même nom depuis dix ans. Elles vivent en texte dans
-          le dépôt : une correction y est une ligne dans un diff.
+          Ces règles arrivent avec l'application, déjà écrites dans le format que WebKit
+          compile. Rien n'est téléchargé, rien n'est converti au démarrage, et il n'y a pas
+          d'autre liste à ajouter : c'est ce qui rend le blocage instantané et vérifiable.
           <br><br>
-          Tout ce qui bouge vite reste chez ceux dont c'est le métier : scriptlets, murs
-          anti-adblock, publicités servies depuis le domaine du site. Ces listes-là
-          appartiennent à leurs auteurs — uBlock Origin, EasyList, AdGuard, Peter Lowe — et
-          ne sont téléchargées que depuis cette page, jamais en arrière-plan.
+          Elles ne visent que des domaines — des régies et des mouchards qui portent le même
+          nom depuis dix ans. <strong>Wuji ne retire donc pas les publicités servies depuis
+          le domaine du site lui-même</strong>, YouTube au premier chef : ce filtrage-là
+          demande une course quotidienne, et prétendre la suivre donnerait une fausse
+          impression de protection.
+          <br><br>
+          Les listes vivent en texte dans le dépôt, sous <code>Blocking/Assets</code>. Une
+          correction y est une ligne dans un diff.
         </p>
         </main>
         """
-    }
-
-    /// Rangées par rayon puis par paquet, comme dans uBlock : soixante-dix listes à la
-    /// file ne se lisent pas, et cinq morceaux d'« EasyList – Annoyances » se comprennent
-    /// mieux sous leur titre commun qu'éparpillés dans l'ordre alphabétique.
-    private static func groups(_ lists: [FilterList]) -> String {
-        FilterListStore.groupOrder.compactMap { group -> String? in
-            let entries = lists.filter { $0.group == group }
-            guard !entries.isEmpty else { return nil }
-            let active = entries.filter(\.isEnabled).count
-
-            let loose = entries.filter { $0.parent == nil }
-            var seen: Set<String> = []
-            let bundles = entries.compactMap(\.parent).filter { seen.insert($0).inserted }
-
-            let body = loose.map(row).joined() + bundles.map { name -> String in
-                let children = entries.filter { $0.parent == name }
-                let on = children.filter(\.isEnabled).count
-                return """
-                <li class="bundle"><span class="name">\(escape(name))</span>
-                  <span class="detail">\(on)/\(children.count)</span></li>
-                <ul class="children">\(children.map(row).joined())</ul>
-                """
-            }.joined()
-
-            // Les régions sont repliées : trente-huit lignes dont on n'en veut qu'une.
-            let collapsed = FilterListStore.collapsedGroups.contains(group)
-            let heading = """
-            <h3>\(escape(FilterListStore.groupTitle(group)))<span>\(active)/\(entries.count)</span></h3>
-            """
-            return collapsed
-                ? """
-                  <section><details><summary>\(heading)</summary><ul>\(body)</ul></details></section>
-                  """
-                : "<section>\(heading)<ul>\(body)</ul></section>"
-        }.joined()
     }
 
     private static func exceptionsSection(_ hosts: [String]) -> String {
@@ -156,48 +131,24 @@ enum AdBlockPage {
         </header>
         <main>
         \(rules.isEmpty
-          ? #"<p class="empty">Aucune règle.<br>« Bloquer un élément » dans le menu du bouclier en écrit une.</p>"#
+          ? #"<p class="empty">Aucune règle.<br>« Bloquer un élément » dans le menu du bouclier en écrit une, au bon format.</p>"#
           : "<ul>\(rules.map(userRule).joined())</ul>")
         <form id="addRule">
-          <input id="rule" type="text" placeholder="site.com##.selecteur" spellcheck="false">
+          <input id="rule" type="text" placeholder='{"action":{"type":"block"},"trigger":{"url-filter":"…"}}' spellcheck="false">
           <button type="submit" class="ghost">Ajouter</button>
         </form>
         <p class="note">
           Ce sont les seules règles que Wuji garde en propre. Elles s'appliquent en plus des
-          listes et sont recopiées dans chaque tranche compilée, donc vos exceptions valent
-          partout. Format Adblock&nbsp;: <code>site.com##.selecteur</code> pour masquer,
-          <code>@@||site.com^</code> pour laisser passer.
+          règles livrées, et dans le même format qu'elles — celui de WebKit, écrit une fois
+          et jamais traduit. « Bloquer un élément » dans le menu du bouclier en rédige une
+          pour vous ; la syntaxe est décrite dans
+          <code>Blocking/Assets/README.md</code>.
         </p>
         </main>
         """
     }
 
     // MARK: - Lignes
-
-    private static func row(_ list: FilterList) -> String {
-        let detail: String
-        if let updated = list.updated {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "fr_FR")
-            formatter.dateFormat = "d MMMM 'à' HH:mm"
-            let converted = list.rules > 0 ? " · \(list.rules) règles sur \(list.lines) lignes" : ""
-            detail = "Mise à jour le \(formatter.string(from: updated))\(converted)"
-        } else {
-            detail = "Jamais téléchargée"
-        }
-
-        return """
-        <li data-id="\(list.id.uuidString)">
-          <input type="checkbox" class="toggle"\(list.isEnabled ? " checked" : "")>
-          <div class="body">
-            <span class="name">\(escape(list.title))</span>
-            <span class="detail">\(escape(detail))</span>
-            <span class="detail source">\(escape(list.source.absoluteString))</span>
-          </div>
-          <button data-action="remove" title="Retirer" aria-label="Retirer">\(cross)</button>
-        </li>
-        """
-    }
 
     private static func exception(_ host: String) -> String {
         """
@@ -208,10 +159,15 @@ enum AdBlockPage {
         """
     }
 
+    /// La phrase d'abord, le texte exact ensuite. Une règle reste lisible dans son
+    /// fichier ; une liste de règles ne se lit pas en JSON.
     private static func userRule(_ rule: String) -> String {
         """
         <li data-rule="\(escape(rule))">
-          <span class="mono">\(escape(rule))</span>
+          <div class="body">
+            <span class="name">\(escape(WebKitRule.describe(rule)))</span>
+            <span class="detail mono">\(escape(rule))</span>
+          </div>
           <button data-action="unrule" title="Supprimer">\(cross)</button>
         </li>
         """

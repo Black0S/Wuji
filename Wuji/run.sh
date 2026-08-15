@@ -21,13 +21,9 @@ cp ".build/$CONFIG/Wuji" "$APP/Contents/MacOS/Wuji"
 # grise en dessous de 128 px. `swift Resources/Icon/make-icon.swift` la régénère.
 [ -f Resources/Icon/AppIcon.icns ] && cp Resources/Icon/AppIcon.icns "$APP/Contents/Resources/"
 
-# Les bibliothèques d'AdGuard : les scriptlets sont développés au moment de la compilation
-# des règles, les sélecteurs étendus s'exécutent dans la page.
-cp Resources/JS/*.js "$APP/Contents/Resources/"
-
-# Les listes de Wuji. Elles vivent en texte à la racine du dépôt pour qu'une contribution
-# soit une ligne dans un diff, et sont recopiées dans le paquet à chaque assemblage.
-cp Filters/*.txt "$APP/Contents/Resources/"
+# Les règles de Wuji, déjà dans le format de WebKit : rien à convertir, ni ici ni au
+# démarrage.
+cp Sources/Wuji/Blocking/Assets/wuji-rules.json "$APP/Contents/Resources/"
 
 # La liste des suffixes publics, telle que SwiftPM l'empaquette. Elle est cherchée à côté
 # de l'application et **pas** dans ses ressources, et son absence est fatale au lancement :

@@ -8,23 +8,19 @@ import Foundation
 /// note ce que Wuji a **vraiment** observé, et rien d'autre :
 ///
 /// - une adresse principale refusée, parce que l'échec nous revient ;
-/// - une ressource qui n'est jamais arrivée, parce que la page nous le signale ;
-/// - un élément masqué par nos sélecteurs étendus, parce que c'est notre code qui l'a fait ;
-/// - un scriptlet posé sur une page, pour la même raison.
+/// - une ressource qui n'est jamais arrivée, parce que la page nous le signale.
 ///
 /// Un journal partiel et honnête vaut mieux qu'un total inventé : on sait ce qu'on lit.
 @MainActor
 final class BlockingLog {
 
     enum Kind: String, Codable {
-        case blocked, refused, hidden, scriptlet
+        case blocked, refused
 
         var label: String {
             switch self {
-            case .blocked:   return "page bloquée"
-            case .refused:   return "non chargé"
-            case .hidden:    return "masqué"
-            case .scriptlet: return "scriptlet"
+            case .blocked: return "page bloquée"
+            case .refused: return "non chargé"
             }
         }
     }

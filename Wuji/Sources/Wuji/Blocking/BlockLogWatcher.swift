@@ -48,28 +48,4 @@ enum BlockLogWatcher {
       }, true);
     })();
     """, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-
-    /// Le compte des éléments qu'un sélecteur étendu a effectivement fait disparaître.
-    ///
-    /// Posé après coup, une seule fois : ces sélecteurs coûtent cher à évaluer, et les
-    /// réévaluer en boucle pour tenir un chiffre à jour reviendrait à payer le blocage deux
-    /// fois. Une photographie à un instant vaut mieux qu'un compteur qui rame.
-    static func report(selectors: [String]) -> String {
-        let list = selectors.prefix(40)
-            .map { "`" + $0.replacingOccurrences(of: "`", with: "\\`") + "`" }
-            .joined(separator: ",")
-        return """
-
-        setTimeout(() => { try {
-          const hits = [];
-          for (const selector of [\(list)]) {
-            try {
-              const count = ExtendedCss.query(selector).length;
-              if (count) hits.push({ selector, count });
-            } catch (e) {}
-          }
-          if (hits.length) window.webkit.messageHandlers.wujiBlockLog.postMessage({ hidden: hits });
-        } catch (e) {} }, 1500);
-        """
-    }
 }

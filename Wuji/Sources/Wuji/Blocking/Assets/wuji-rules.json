@@ -1,0 +1,164 @@
+// Les règles de Wuji.
+//
+// Format `WKContentRuleList` : WebKit les compile telles quelles, rien n'est traduit.
+// Les lignes commençant par « // » sont des repères de lecture ; le chargeur ne retient
+// que les lignes qui sont des règles, et c'est tout ce que le moteur reçoit.
+//
+// Pour ajouter un domaine : une ligne, dans sa section, en ordre alphabétique. Voir
+// README.md à côté de ce fichier.
+
+[
+
+// ─── Google ───
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?adservice\\.google\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?doubleclick\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?googleadservices\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?googlesyndication\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?googletagservices\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?pagead2\\.googlesyndication\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?partner\\.googleadservices\\.com[/:]"}},
+
+// ─── Places de marché et enchères en temps réel ───
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?3lift\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?adform\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?adnxs-simple\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?adnxs\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?adsrvr\\.org[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?adtelligent\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?amazon-adsystem\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?bidswitch\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?casalemedia\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?contextweb\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"load-type":["third-party"],"url-filter":"^[^:]+://+([^:/]+\\.)?criteo\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?criteo\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?districtm\\.io[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?emxdgt\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?gumgum\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?indexww\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"load-type":["third-party"],"url-filter":"^[^:]+://+([^:/]+\\.)?media\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?openx\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?pubmatic\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?pubnative\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?rubiconproject\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?sharethrough\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?smartadserver\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?smartyads\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?sonobi\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?sovrn\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?spotxchange\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?teads\\.tv[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?tremorhub\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?triplelift\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?yieldmo\\.com[/:]"}},
+
+// ─── Recommandation de contenu et articles sponsorisés ───
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?adskeeper\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?dianomi\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?mgid\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?outbrain\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?plista\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?revcontent\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?taboola\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?zergnet\\.com[/:]"}},
+
+// ─── Régies vidéo ───
+  {"action":{"type":"block"},"trigger":{"load-type":["third-party"],"url-filter":"^[^:]+://+([^:/]+\\.)?imasdk\\.googleapis\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?innovid\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?springserve\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?vidoomy\\.com[/:]"}},
+
+// ─── Régies généralistes ───
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?adcolony\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?adroll\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?advertising\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?applovin\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?bidr\\.io[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?bluekai\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?chartboost\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?exoclick\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?juicyads\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?mopub\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?popads\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?propellerads\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?servedbyadbutler\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?trafficjunky\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?unityads\\.unity3d\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?zedo\\.com[/:]"}},
+
+// ─── Mesure d'audience ───
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?analytics\\.google\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?chartbeat\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?chartbeat\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?google-analytics\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?googletagmanager\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?histats\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"load-type":["third-party"],"url-filter":"^[^:]+://+([^:/]+\\.)?matomo\\.cloud[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?parsely\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?quantcount\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?quantserve\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?scorecardresearch\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?statcounter\\.com[/:]"}},
+
+// ─── Produit et comportement ───
+  {"action":{"type":"block"},"trigger":{"load-type":["third-party"],"url-filter":"^[^:]+://+([^:/]+\\.)?amplitude\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?heap\\.io[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?heapanalytics\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?kissmetrics\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"load-type":["third-party"],"url-filter":"^[^:]+://+([^:/]+\\.)?mixpanel\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?pendo\\.io[/:]"}},
+  {"action":{"type":"block"},"trigger":{"load-type":["third-party"],"url-filter":"^[^:]+://+([^:/]+\\.)?segment\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?segment\\.io[/:]"}},
+
+// ─── Rejeu de session — l'enregistrement de ce que vous faites à l'écran ───
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?clarity\\.ms[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?contentsquare\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?fullstory\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?hotjar\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?inspectlet\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?logrocket\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?luckyorange\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?mouseflow\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?quantummetric\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?smartlook\\.com[/:]"}},
+
+// ─── Empreinte de navigateur ───
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?fingerprintjs\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?fpapi\\.io[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?fpjs\\.io[/:]"}},
+
+// ─── Réseaux sociaux, quand ils suivent ailleurs que chez eux ───
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?ads-twitter\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?analytics\\.tiktok\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"load-type":["third-party"],"url-filter":"^[^:]+://+([^:/]+\\.)?connect\\.facebook\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?pixel\\.reddit\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?px\\.ads\\.linkedin\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?snap\\.licdn\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?static\\.ads-twitter\\.com[/:]"}},
+
+// ─── Attribution publicitaire et suivi d'installation ───
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?adjust\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?appsflyer\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?branch\\.io[/:]"}},
+  {"action":{"type":"block"},"trigger":{"load-type":["third-party"],"url-filter":"^[^:]+://+([^:/]+\\.)?bugsnag-cdn\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?kochava\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?singular\\.net[/:]"}},
+
+// ─── Régies de données et courtiers d'identité ───
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?agkn\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?crwdcntrl\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?demdex\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?everesttech\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?exelator\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?id5-sync\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?liadm\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?rlcdn\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?tapad\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?thebrighttag\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"load-type":["third-party"],"url-filter":"^[^:]+://+([^:/]+\\.)?tiqcdn\\.com[/:]"}},
+
+// ─── Notifications poussées et rappels ───
+  {"action":{"type":"block"},"trigger":{"load-type":["third-party"],"url-filter":"^[^:]+://+([^:/]+\\.)?onesignal\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?pushcrew\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?pushengage\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?wonderpush\\.com[/:]"}}
+]

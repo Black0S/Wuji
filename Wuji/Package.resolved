@@ -1,5 +1,5 @@
 {
-  "originHash" : "0191de6307c5215609a24d1c418e0dd9345dc512c2d2df02fd136830619925a8",
+  "originHash" : "f4d3fcf964660e297d85a1e7adf2648fff36429e218b2b76549293a66024bb30",
   "pins" : [
     {
       "identity" : "punycodeswift",
@@ -8,24 +8,6 @@
       "state" : {
         "revision" : "30a462bdb4398ea835a3585472229e0d74b36ba5",
         "version" : "3.0.0"
-      }
-    },
-    {
-      "identity" : "safariconverterlib",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/AdguardTeam/SafariConverterLib",
-      "state" : {
-        "revision" : "7a2e93f0afa70479cc59985f332025236c3f0c39",
-        "version" : "4.3.0"
-      }
-    },
-    {
-      "identity" : "swift-argument-parser",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-argument-parser",
-      "state" : {
-        "revision" : "41982a3656a71c768319979febd796c6fd111d5c",
-        "version" : "1.5.0"
       }
     },
     {

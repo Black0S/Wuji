@@ -118,9 +118,9 @@ final class BlockLogWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, N
         // page qu'on n'ouvre jamais : une ressource peut manquer parce qu'on l'a refusée,
         // ou parce que le site l'a perdue. Wuji ne sait pas trancher, alors il ne tranche pas.
         let note = label("""
-            Wuji note ce qu'il observe : une page refusée par une règle, un élément masqué, \
-            un scriptlet posé, une ressource qui n'est jamais venue. WebKit ne dit pas ce \
-            qu'il bloque — une ressource absente peut aussi être une panne du site.
+            Wuji note ce qu'il observe : une page refusée par une règle, une ressource qui \
+            n'est jamais venue. WebKit ne dit pas ce qu'il bloque — une ressource absente \
+            peut aussi être une panne du site.
             """, size: 11, weight: .regular, color: Tokens.textSecondary)
         note.lineBreakMode = .byWordWrapping
         note.maximumNumberOfLines = 4
