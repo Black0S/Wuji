@@ -26,6 +26,23 @@
 	<false/>
 	<!-- Sans ces descriptions, une page qui demande la caméra ou le micro échoue en
 	     silence. C'est aussi ce que le liseré « permission active » doit signaler. -->
+	<!-- Sans cette déclaration, macOS ne propose même pas Wuji dans la liste des
+	     navigateurs : on ne peut pas devenir le navigateur par défaut si l'on n'a jamais
+	     dit qu'on savait ouvrir une adresse. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Adresse web</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>http</string>
+				<string>https</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Un site web demande l'accès à la caméra.</string>
 	<key>NSMicrophoneUsageDescription</key>

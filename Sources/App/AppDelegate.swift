@@ -114,6 +114,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     // MARK: - Cycle de vie
 
+    /// Les adresses qu'un autre programme nous confie — un lien cliqué dans un courriel,
+    /// un fichier HTML ouvert depuis le Finder, tout ce qui arrive quand Wuji est le
+    /// navigateur par défaut.
+    ///
+    /// **Chacune ouvre son onglet, et la fenêtre passe devant.** Remplacer la page en
+    /// cours ferait perdre ce qu'on lisait pour un lien qu'on vient à peine de cliquer
+    /// ailleurs.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme == "http" || url.scheme == "https" {
+            openInNewTab(url, activate: true)
+        }
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate()
+    }
+
+    /// Wuji est-il le navigateur par défaut ? On le demande au système plutôt que de le
+    /// retenir : c'est un réglage de macOS, et il peut changer sans passer par nous.
+    var isDefaultBrowser: Bool {
+        guard let https = URL(string: "https://example.com"),
+              let handler = NSWorkspace.shared.urlForApplication(toOpen: https) else { return false }
+        return handler.standardizedFileURL == Bundle.main.bundleURL.standardizedFileURL
+    }
+
+    /// Demande à macOS de faire de Wuji le navigateur par défaut.
+    ///
+    /// C'est le système qui tranche, et il demande confirmation : on ne peut pas se
+    /// déclarer navigateur par défaut dans le dos de quelqu'un, et c'est très bien ainsi.
+    private func askToBecomeDefault() {
+        let bundle = Bundle.main.bundleURL
+        Task { @MainActor in
+            for scheme in ["http", "https"] {
+                try? await NSWorkspace.shared.setDefaultApplication(at: bundle,
+                                                                    toOpenURLsWithScheme: scheme)
+            }
+            refreshSettingsPages()
+            layout.toast.show(isDefaultBrowser
+                              ? "Wuji est le navigateur par défaut"
+                              : "macOS n'a pas retenu le changement")
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         installTerminationHandler()
         buildMenu()
@@ -635,6 +676,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                            retention: settings.historyRetention,
                            historyCount: history.count,
                            blockingEnabled: settings.blockingEnabled,
+                           isDefaultBrowser: isDefaultBrowser,
                            userScripts: settings.userScriptsEnabled,
                            agent: settings.agent.rawValue,
                            blockingSummary: blocker.state.summary,
@@ -675,6 +717,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                 }
             default: break
             }
+        case "make-default":
+            askToBecomeDefault()
         case "clear-history":
             history.clear()
             refreshSettingsPages()

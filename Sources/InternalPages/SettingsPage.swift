@@ -58,6 +58,7 @@ enum SettingsPage {
         var retention: Int
         var historyCount: Int
         var blockingEnabled: Bool
+        var isDefaultBrowser: Bool
         var userScripts: Bool
         var agent: String
         var blockingSummary: String
@@ -97,7 +98,16 @@ enum SettingsPage {
     /// **Une fonction éteinte disparaît de l'interface.** Sans ça, on garderait un bouton
     /// qui ne pilote plus rien — exactement le contrôle mort que le projet s'interdit.
     private static func features(_ state: State) -> String {
-        row(title: "Bloquer publicités et traqueurs",
+        // Quand c'est déjà le cas, la ligne le dit au lieu d'offrir un bouton qui ne
+        // ferait rien : un contrôle mort est pire qu'un contrôle absent.
+        row(title: "Navigateur par défaut",
+            subtitle: state.isDefaultBrowser
+                ? "Les liens ouverts ailleurs sur ce Mac arrivent dans Wuji."
+                : "macOS demandera confirmation — c'est lui qui tranche, pas nous.",
+            control: state.isDefaultBrowser
+                ? #"<span class="readout">C'est le cas</span>"#
+                : #"<button class="button" data-action="make-default">Définir</button>"#)
+        + row(title: "Bloquer publicités et traqueurs",
             subtitle: escape(state.blockingSummary)
                 + ". Elles ne visent que des domaines : les publicités servies depuis le "
                 + "domaine du site lui-même, YouTube au premier chef, lui échappent.",
