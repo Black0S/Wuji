@@ -38,6 +38,8 @@ enum SidebarDrop {
 final class Sidebar: ThemedView {
 
     var onSelectTab: ((UUID) -> Void)?
+    /// Le survol d'un onglet, pour le réveiller avant qu'on clique.
+    var onHoverTab: ((UUID) -> Void)?
     var onCloseTab: ((UUID) -> Void)?
     var onToggleFolder: ((UUID) -> Void)?
     var onTabMenu: ((UUID, NSEvent) -> Void)?
@@ -139,6 +141,7 @@ final class Sidebar: ThemedView {
                 }
                 row.onClose = { [weak self] in self?.onCloseTab?(id) }
                 row.onContextMenu = { [weak self] event in self?.onTabMenu?(id, event) }
+                row.onHover = { [weak self] in self?.onHoverTab?(id) }
                 list.addSubview(row)
                 return row
 
@@ -639,6 +642,7 @@ private final class FolderRow: ThemedView {
 
     var onMouseDown: ((NSEvent) -> Void)?
     var onContextMenu: ((NSEvent) -> Void)?
+    var onHover: (() -> Void)?
 
     var hoverEnabled = true { didSet { if !hoverEnabled { isHovered = false; needsLayout = true } } }
 
@@ -719,12 +723,15 @@ private final class TabRow: ThemedView {
     var onMouseDown: ((NSEvent) -> Void)?
     var onClose: (() -> Void)?
     var onContextMenu: ((NSEvent) -> Void)?
+    var onHover: (() -> Void)?
 
     var hoverEnabled = true { didSet { if !hoverEnabled { isHovered = false; needsLayout = true } } }
 
     private let icon = NSImageView()
     private let label = InsetTextField.label()
     private let close = NSButton()
+    private let speaker = NSImageView()
+    private let isPlaying: Bool
     private let isSelected: Bool
     private let depth: Int
     private var trackingArea: NSTrackingArea?
@@ -733,6 +740,7 @@ private final class TabRow: ThemedView {
     init(title: String, host: String, isLoading: Bool, isPlaying: Bool = false,
          isSleeping: Bool = false, favicon: NSImage?,
          depth: Int, isSelected: Bool) {
+        self.isPlaying = isPlaying
         self.isSelected = isSelected
         self.depth = depth
         super.init(frame: .zero)
@@ -749,11 +757,14 @@ private final class TabRow: ThemedView {
         icon.imageScaling = .scaleProportionallyDown
         addSubview(icon)
 
-        // Un préfixe plutôt qu'une icône de plus : la ligne est déjà chargée d'un glyphe,
-        // d'un titre et d'une croix. Le haut-parleur dit « ça joue », le point dit « ça
-        // charge », et rien ne dit « en veille » — un onglet endormi doit se comporter
-        // comme les autres, il se réveille au clic.
-        label.stringValue = isPlaying ? "♪ \(title)" : (isLoading ? "· \(title)" : title)
+        // Le haut-parleur est à droite, là où l'œil descend pour chercher lequel des
+        // onglets chante — pas collé au titre, où il déplacerait le texte d'une ligne à
+        // l'autre et casserait la colonne. Le point de chargement, lui, reste un préfixe :
+        // il est passager, et il n'y a rien à viser.
+        //
+        // Rien ne dit « en veille » : un onglet endormi doit se comporter comme les
+        // autres, il se réveille au clic.
+        label.stringValue = isLoading ? "· \(title)" : title
         label.alphaValue = isSleeping ? 0.55 : 1
         label.font = .systemFont(ofSize: 13, weight: .regular)
         label.lineBreakMode = .byTruncatingTail
@@ -766,6 +777,12 @@ private final class TabRow: ThemedView {
         close.action = #selector(closeTab)
         close.isHidden = true
         addSubview(close)
+
+        speaker.image = NSImage(systemSymbolName: "speaker.wave.2",
+                                accessibilityDescription: "Lecture en cours")
+        speaker.imageScaling = .scaleProportionallyDown
+        speaker.isHidden = !isPlaying
+        addSubview(speaker)
     }
 
     @available(*, unavailable)
@@ -784,6 +801,7 @@ private final class TabRow: ThemedView {
         guard hoverEnabled else { return }
         isHovered = true
         needsLayout = true
+        onHover?()
     }
     override func mouseExited(with event: NSEvent) { isHovered = false; needsLayout = true }
 
@@ -799,6 +817,11 @@ private final class TabRow: ThemedView {
         // La croix n'apparaît qu'au survol : cinq croix alignées en permanence, c'est
         // cinq éléments de plus à l'écran pour une action rare (principe 5).
         close.isHidden = !isHovered
+        // Le haut-parleur cède la place à la croix au survol : ils visent le même point, et
+        // deux glyphes empilés ne se lisent ni l'un ni l'autre. Ce qui joue reste audible,
+        // et la souris est déjà sur la ligne — on sait de laquelle il s'agit.
+        speaker.isHidden = !isPlaying || isHovered
+        speaker.contentTintColor = Tokens.textSecondary
 
         let indent = CGFloat(depth) * Tokens.Row.indent
         let iconSize: CGFloat = 16
@@ -807,6 +830,7 @@ private final class TabRow: ThemedView {
         let left = Tokens.Space.s + indent + iconSize + Tokens.Space.m
         label.frame = NSRect(x: left, y: 0, width: max(0, bounds.width - left - 26), height: bounds.height)
         close.frame = NSRect(x: bounds.width - 22, y: (bounds.height - 18) / 2, width: 18, height: 18)
+        speaker.frame = NSRect(x: bounds.width - 23, y: (bounds.height - 13) / 2, width: 14, height: 13)
     }
 
 

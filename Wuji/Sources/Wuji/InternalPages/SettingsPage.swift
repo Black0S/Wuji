@@ -14,32 +14,38 @@ import Foundation
 enum SettingsPage {
 
     enum Section {
-        case appearance, privacy, search, websites
+        case features, appearance, privacy, search, websites, development
 
         static func from(path: String) -> Section {
             switch path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) {
-            case "privacy":  return .privacy
-            case "search":   return .search
-            case "websites": return .websites
-            default:         return .appearance
+            case "features":    return .features
+            case "privacy":     return .privacy
+            case "search":      return .search
+            case "websites":    return .websites
+            case "development": return .development
+            default:            return .appearance
             }
         }
 
         var title: String {
             switch self {
-            case .appearance: return "Apparence"
-            case .privacy:    return "Confidentialité"
-            case .search:     return "Recherche"
-            case .websites:   return "Sites web"
+            case .features:    return "Fonctions"
+            case .appearance:  return "Apparence"
+            case .privacy:     return "Confidentialité"
+            case .search:      return "Recherche"
+            case .websites:    return "Sites web"
+            case .development: return "Développement"
             }
         }
 
         var address: String {
             switch self {
-            case .appearance: return "wuji://settings"
-            case .privacy:    return "wuji://settings/privacy"
-            case .search:     return "wuji://settings/search"
-            case .websites:   return "wuji://settings/websites"
+            case .features:    return "wuji://settings/features"
+            case .appearance:  return "wuji://settings"
+            case .privacy:     return "wuji://settings/privacy"
+            case .search:      return "wuji://settings/search"
+            case .websites:    return "wuji://settings/websites"
+            case .development: return "wuji://settings/development"
             }
         }
     }
@@ -52,6 +58,7 @@ enum SettingsPage {
         var retention: Int
         var historyCount: Int
         var blockingEnabled: Bool
+        var userScripts: Bool
         var agent: String
         var blockingSummary: String
         /// Les autorisations accordées ou refusées, par site.
@@ -61,10 +68,12 @@ enum SettingsPage {
     static func html(section: Section, state: State) -> String {
         let body: String
         switch section {
-        case .appearance: body = appearance(state)
-        case .privacy:    body = privacy(state)
-        case .search:     body = search(state)
-        case .websites:   body = websites(state)
+        case .features:    body = features(state)
+        case .appearance:  body = appearance(state)
+        case .privacy:     body = privacy(state)
+        case .search:      body = search(state)
+        case .websites:    body = websites(state)
+        case .development: body = development(state)
         }
 
         return InternalShell.page(
@@ -83,6 +92,30 @@ enum SettingsPage {
 
     // MARK: - Sections
 
+    /// Ce qu'on allume et ce qu'on éteint.
+    ///
+    /// **Une fonction éteinte disparaît de l'interface.** Sans ça, on garderait un bouton
+    /// qui ne pilote plus rien — exactement le contrôle mort que le projet s'interdit.
+    private static func features(_ state: State) -> String {
+        row(title: "Bloquer publicités et traqueurs",
+            subtitle: escape(state.blockingSummary)
+                + ". Elles ne visent que des domaines : les publicités servies depuis le "
+                + "domaine du site lui-même, YouTube au premier chef, lui échappent.",
+            control: toggle(name: "blocking", isOn: state.blockingEnabled))
+        + row(title: "Scripts utilisateur",
+              subtitle: "Du code à vous, exécuté sur les sites que vous désignez. Éteint, "
+                  + "l'icône quitte la barre et plus aucun script ne s'exécute.",
+              control: toggle(name: "userscripts", isOn: state.userScripts))
+    }
+
+    private static func development(_ state: State) -> String {
+        row(title: "Autoriser l'inspection Safari",
+            subtitle: "Rend les pages de Wuji inspectables depuis Safari : menu "
+                + "Développement, puis cette machine. L'inspecteur ne s'ouvre pas dans "
+                + "Wuji — WebKit ne le propose qu'à Safari.",
+            control: toggle(name: "inspection", isOn: state.inspection))
+    }
+
     private static func appearance(_ state: State) -> String {
         row(title: "Thème",
             subtitle: "« Auto » suit le réglage du système.",
@@ -92,13 +125,7 @@ enum SettingsPage {
     }
 
     private static func privacy(_ state: State) -> String {
-        row(title: "Bloquer publicités et traceurs",
-            subtitle: escape(state.blockingSummary) + ". Les listes viennent d'uBlock Origin et d'AdGuard.",
-            control: toggle(name: "blocking", isOn: state.blockingEnabled))
-        + row(title: "Listes de filtres",
-              subtitle: "Abonnements, sites sans protection et règles à vous.",
-              control: #"<a class="button" href="wuji://ad-block">Ouvrir</a>"#)
-        + row(title: "Conserver l'historique",
+        row(title: "Conserver l'historique",
               subtitle: "Au-delà, les pages sont effacées au lancement suivant.",
               control: """
               <input type="range" name="retention" min="7" max="365" value="\(state.retention)">
@@ -107,9 +134,6 @@ enum SettingsPage {
         + row(title: "Effacer l'historique",
               subtitle: "\(state.historyCount) page\(state.historyCount > 1 ? "s" : "") enregistrée\(state.historyCount > 1 ? "s" : ""). L'effacement est immédiat et définitif.",
               control: #"<button class="button danger" data-action="clear-history">Effacer</button>"#)
-        + row(title: "Autoriser l'inspection Safari",
-              subtitle: "Ouvre l'inspecteur web d'Apple sur les pages de Wuji.",
-              control: toggle(name: "inspection", isOn: state.inspection))
     }
 
     private static func search(_ state: State) -> String {

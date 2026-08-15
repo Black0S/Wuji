@@ -125,6 +125,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         layout.sidebar.onTabMenu = { [weak self] id, event in self?.showTabMenu(id, event) }
         layout.sidebar.onFolderMenu = { [weak self] id, event in self?.showFolderMenu(id, event) }
         layout.sidebar.onDropTab = { [weak self] id, drop in self?.drop(tabID: id, on: drop) }
+        // **Le survol réveille.** Un onglet endormi doit recharger sa page ; fait au clic,
+        // on regarde une page blanche le temps du réseau. Fait au survol, le trajet de la
+        // souris jusqu'à la ligne suffit le plus souvent à couvrir le chargement.
+        //
+        // Un délai court avant d'agir : traverser la liste pour atteindre le bas ne doit
+        // pas réveiller tout ce qu'on frôle au passage.
+        layout.sidebar.onHoverTab = { [weak self] id in self?.prewake(id) }
         layout.sidebar.onNew = { [weak self] in self?.newTab(nil) }
         layout.sidebar.onDownloads = { [weak self] in self?.showDownloads(nil) }
         layout.sidebar.onSpaceClick = { [weak self] anchor in self?.showSpacesPanel(from: anchor) }
@@ -577,6 +584,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
         // Les scripts de l'utilisateur s'appliquent même sur un site où la protection est
         // levée : ils sont à lui.
+        guard settings.userScriptsEnabled else { return }
         for (script, code) in userScripts.matching(url) {
             let time: WKUserScriptInjectionTime = script.runAt == "document-start" ? .atDocumentStart
                                                                                   : .atDocumentEnd
@@ -585,7 +593,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         }
     }
 
-    static let adBlockPage = URL(string: "wuji://ad-block")!
+    static let adBlockPage = URL(string: "wuji://ad-block/my-rules")!
     static let scriptsPage = URL(string: "wuji://scripts")!
 
     /// Ce que la page des reglages doit afficher.
@@ -597,6 +605,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                            retention: settings.historyRetention,
                            historyCount: history.count,
                            blockingEnabled: settings.blockingEnabled,
+                           userScripts: settings.userScriptsEnabled,
                            agent: settings.agent.rawValue,
                            blockingSummary: blocker.state.summary,
                            permissions: permissions.decisions.map {
@@ -625,6 +634,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             case "blocking":
                 settings.blockingEnabled = (value == "true")
                 blocker.start()
+            case "userscripts":
+                settings.userScriptsEnabled = (value == "true")
+                syncBlockingButton()
+                // Les onglets ouverts portent encore les scripts posés à leur navigation :
+                // éteindre la fonction sans les retirer laisserait croire qu'elle ment.
+                spaces.flatMap(\.allTabs).filter { !$0.isSleeping }.forEach {
+                    installPageScripts(for: $0.url, in: $0.webView)
+                    $0.webView.reload()
+                }
             default: break
             }
         case "clear-history":
@@ -648,14 +666,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         openInternal(Self.scriptsPage)
     }
 
-    /// Ouvre le journal, et **relance les pages ouvertes** : les mesures ne sont posées
-    /// qu'à la navigation, donc sans ce rechargement la fenêtre resterait vide devant une
-    /// page pleine de publicités arrêtées.
+    /// Ouvre le journal. **Il part de maintenant, et ne recharge rien.**
+    ///
+    /// Il rechargeait toutes les pages ouvertes pour y poser son mouchard, et remplissait
+    /// donc sa première fenêtre en cassant ce que l'on regardait — une vidéo relancée, un
+    /// formulaire vidé. Un journal est un témoin : il note ce qui se passe pendant qu'il
+    /// est ouvert, pas ce qu'il aurait fallu provoquer pour avoir quelque chose à montrer.
     @objc func showBlockLog(_ sender: Any?) {
-        let wasOpen = blockLogWindow.isOpen
         blockLogWindow.show()
-        guard !wasOpen else { return }
-        spaces.flatMap(\.allTabs).filter { !$0.isSleeping }.forEach { $0.webView.reload() }
+        // Les pages déjà ouvertes recevront le mouchard à leur prochaine navigation ; les
+        // nouvelles l'ont tout de suite.
     }
 
     private func refreshScriptsPages() {
@@ -738,8 +758,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     private func syncBlockingButton() {
         guard layout != nil else { return }
         layout.topBar.setBlocking(blockingBadge)
-        layout.topBar.setScripts(installed: !userScripts.scripts.isEmpty,
-                                 activeHere: !userScripts.matching(currentTab?.url).isEmpty)
+        layout.topBar.setScripts(
+            installed: settings.userScriptsEnabled && !userScripts.scripts.isEmpty,
+            activeHere: settings.userScriptsEnabled && !userScripts.matching(currentTab?.url).isEmpty)
     }
 
     /// Le menu des scripts.
@@ -819,7 +840,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         }
 
         items.append(ActionItem(title: blocker.state.summary, symbol: "info.circle", isEnabled: false))
-        items.append(ActionItem(title: "Gérer les listes…", symbol: "list.bullet",
+        items.append(ActionItem(title: "Mes règles…", symbol: "pencil",
                                 action: { [weak self] in self?.showAdBlock(nil) }))
         items.append(ActionItem(title: "Journal de blocage…", symbol: "text.line.first.and.arrowtriangle.forward",
                                 action: { [weak self] in self?.showBlockLog(nil) }))
@@ -1187,7 +1208,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// de vider la page en conservant de quoi la reconstruire. Dix minutes, parce que
     /// revenir sur un onglet après dix minutes coûte un rechargement qu'on accepte, alors
     /// qu'après trente secondes il surprendrait.
-    private static let sleepDelay: TimeInterval = 600
+    /// Au bout de combien de temps un onglet qu'on ne regarde plus rend sa mémoire.
+    ///
+    /// **Cinq minutes.** Deux, c'était trop court à l'usage : on revenait sur un onglet
+    /// quitté le temps d'une recherche et il fallait le recharger. Le survol le réveille
+    /// avant le clic, mais ça ne rachète pas un délai qui se déclenche pendant qu'on
+    /// travaille.
+    ///
+    /// Le processeur, lui, n'attend pas ce délai : une page qui n'est pas à l'écran est
+    /// déjà bridée par WebKit, ses minuteries comprises.
+    private static let sleepDelay: TimeInterval = 300
 
     private func scheduleSleep() {
         sleepTimer?.invalidate()
@@ -1197,16 +1227,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     }
 
     private var sleepTimer: Timer?
+    private var prewakeItem: DispatchWorkItem?
+
+    /// Réveille un onglet survolé, s'il l'est encore dans un cinquième de seconde.
+    private func prewake(_ id: UUID) {
+        prewakeItem?.cancel()
+        guard let tab = spaces.flatMap(\.allTabs).first(where: { $0.id == id }), tab.isSleeping
+        else { return }
+        let item = DispatchWorkItem { [weak self, weak tab] in
+            MainActor.assumeIsolated {
+                guard let tab, tab.isSleeping else { return }
+                tab.wake()
+                self?.syncSidebar()
+            }
+        }
+        prewakeItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: item)
+    }
 
     private func sleepIdleTabs() {
         let now = Date()
         for space in spaces {
             for tab in space.allTabs where tab !== space.current {
-                guard now.timeIntervalSince(tab.lastSeen) > Self.sleepDelay else { continue }
-                tab.sleep()
+                guard now.timeIntervalSince(tab.lastSeen) > Self.sleepDelay, !tab.isSleeping,
+                      tab.webView.url != nil else { continue }
+                // **On demande au moteur, pas à la page.** Le drapeau posé par la page vient
+                // d'un évènement `play` ou `pause` ; il suffit qu'un lecteur change de piste,
+                // ou que WebKit bride l'onglet en arrière-plan, pour qu'un `pause` passe et
+                // qu'on croie la musique finie. On endormait alors un onglet qui jouait, et
+                // le son s'arrêtait — exactement ce que la mise en veille promettait
+                // d'éviter.
+                tab.webView.requestMediaPlaybackState { [weak self, weak tab] state in
+                    MainActor.assumeIsolated {
+                        guard let tab, state != .playing, !tab.isPlayingMedia else { return }
+                        tab.sleep()
+                        self?.syncSidebar()
+                    }
+                }
             }
         }
-        syncSidebar()
     }
 
     private func syncChrome() {

@@ -114,6 +114,15 @@ final class Settings {
 
     var agent: Agent { didSet { store.set(agent.rawValue, forKey: Key.agent); changed() } }
 
+    /// Les scripts de l'utilisateur, en bloc.
+    ///
+    /// Éteint, **l'icône quitte la barre** : une fonction qu'on n'utilise pas ne doit pas
+    /// occuper de place. C'est la même règle que le bouclier, qui disparaît quand le
+    /// blocage est éteint partout.
+    var userScriptsEnabled: Bool {
+        didSet { store.set(userScriptsEnabled, forKey: Key.userScripts); changed() }
+    }
+
     // MARK: - Protection
 
     var blockingEnabled: Bool {
@@ -148,6 +157,7 @@ final class Settings {
         static let blocking = "blockingEnabled"
         static let blockingExceptions = "blockingExceptions"
         static let agent = "agent"
+        static let userScripts = "userScriptsEnabled"
     }
 
     init() {
@@ -161,6 +171,7 @@ final class Settings {
         blockingEnabled = store.object(forKey: Key.blocking) as? Bool ?? true
         blockingExceptions = store.stringArray(forKey: Key.blockingExceptions) ?? []
         agent = Agent(rawValue: store.string(forKey: Key.agent) ?? "") ?? .safari
+        userScriptsEnabled = store.object(forKey: Key.userScripts) as? Bool ?? true
     }
 
     private func changed() { onChange?() }

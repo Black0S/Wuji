@@ -59,6 +59,10 @@ enum WebKitRule {
         return "Règle"
     }
 
+    /// Le site auquel une règle appartient, quand elle en vise un. C'est la clé sous
+    /// laquelle « Mes règles » les range.
+    static func site(of rule: String) -> String? { domain(in: rule) }
+
     private static func value(of key: String, in rule: String) -> String? {
         guard let start = rule.range(of: "\"\(key)\":\"") else { return nil }
         let rest = rule[start.upperBound...]

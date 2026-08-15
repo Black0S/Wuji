@@ -14,19 +14,15 @@ import Foundation
 enum AdBlockPage {
 
     enum Section: String {
-        case rules, unactive, myRules
+        case unactive, myRules
 
         static func from(path: String) -> Section {
-            switch path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) {
-            case "unactive": return .unactive
-            case "my-rules": return .myRules
-            default:         return .rules
-            }
+            path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) == "unactive"
+                ? .unactive : .myRules
         }
 
         var title: String {
             switch self {
-            case .rules:    return "Ad-Block Règles"
             case .unactive: return "Sans Protection"
             case .myRules:  return "Mes Règles"
             }
@@ -34,7 +30,6 @@ enum AdBlockPage {
 
         var address: String {
             switch self {
-            case .rules:    return "wuji://ad-block"
             case .unactive: return "wuji://ad-block/unactive"
             case .myRules:  return "wuji://ad-block/my-rules"
             }
@@ -45,7 +40,6 @@ enum AdBlockPage {
                      userRules: [String], exceptions: [String], isBusy: Bool) -> String {
         let body: String
         switch section {
-        case .rules:    body = listsSection(bundled, state: state, isBusy: isBusy)
         case .unactive: body = exceptionsSection(exceptions)
         case .myRules:  body = rulesSection(userRules)
         }
@@ -57,48 +51,6 @@ enum AdBlockPage {
     }
 
     // MARK: - Sections
-
-    private static func listsSection(_ bundled: Int, state: String, isBusy: Bool) -> String {
-        """
-        <header>
-          <div class="titles">
-            <h1>Ad-Block Règles</h1>
-            <p>\(isBusy ? "Préparation…" : escape(state))</p>
-          </div>
-        </header>
-        <main>
-        <section>
-          <h3>Livrées avec Wuji<span>\(bundled)</span></h3>
-          <ul>
-            <li><div class="body">
-              <span class="name">Publicités</span>
-              <span class="detail">Les régies les plus répandues, par domaine.</span>
-              <span class="detail source">Blocking/Assets/wuji-ads.txt</span>
-            </div></li>
-            <li><div class="body">
-              <span class="name">Traqueurs</span>
-              <span class="detail">Mesure d'audience, profilage, rejeu de session, empreinte.</span>
-              <span class="detail source">Blocking/Assets/wuji-trackers.txt</span>
-            </div></li>
-          </ul>
-        </section>
-        <p class="note">
-          Ces règles arrivent avec l'application, déjà écrites dans le format que WebKit
-          compile. Rien n'est téléchargé, rien n'est converti au démarrage, et il n'y a pas
-          d'autre liste à ajouter : c'est ce qui rend le blocage instantané et vérifiable.
-          <br><br>
-          Elles ne visent que des domaines — des régies et des mouchards qui portent le même
-          nom depuis dix ans. <strong>Wuji ne retire donc pas les publicités servies depuis
-          le domaine du site lui-même</strong>, YouTube au premier chef : ce filtrage-là
-          demande une course quotidienne, et prétendre la suivre donnerait une fausse
-          impression de protection.
-          <br><br>
-          Les listes vivent en texte dans le dépôt, sous <code>Blocking/Assets</code>. Une
-          correction y est une ligne dans un diff.
-        </p>
-        </main>
-        """
-    }
 
     private static func exceptionsSection(_ hosts: [String]) -> String {
         """
@@ -121,18 +73,50 @@ enum AdBlockPage {
         """
     }
 
+    /// Les règles, **rangées par site**.
+    ///
+    /// Une liste à plat marche tant qu'il y en a trois. Au trentième, on cherche « qu'est-ce
+    /// que j'ai fait sur ce site » et on relit tout. Le site est la seule clé qui réponde à
+    /// cette question, et c'est aussi celle sous laquelle on écrit une règle — le sélecteur
+    /// d'élément ne produit jamais rien d'autre.
     private static func rulesSection(_ rules: [String]) -> String {
+        var bySite: [String: [String]] = [:]
+        var loose: [String] = []
+        for rule in rules {
+            if let site = WebKitRule.site(of: rule) { bySite[site, default: []].append(rule) }
+            else { loose.append(rule) }
+        }
+
+        let sites = bySite.keys.sorted().map { site -> String in
+            let entries = bySite[site] ?? []
+            return """
+            <section>
+              <h3>\(escape(site))<span>\(entries.count)</span></h3>
+              <ul>\(entries.map(userRule).joined())</ul>
+            </section>
+            """
+        }.joined()
+
+        // Une règle qui ne vise aucun site en particulier — un domaine bloqué partout —
+        // n'a pas de dossier où aller, et la ranger sous un site inventé serait mentir.
+        let everywhere = loose.isEmpty ? "" : """
+        <section>
+          <h3>Partout<span>\(loose.count)</span></h3>
+          <ul>\(loose.map(userRule).joined())</ul>
+        </section>
         """
+
+        return """
         <header>
           <div class="titles">
             <h1>Mes Règles</h1>
-            <p>\(rules.count) règle\(rules.count > 1 ? "s" : "")</p>
+            <p>\(rules.count) règle\(rules.count > 1 ? "s" : "") sur \(bySite.count + (loose.isEmpty ? 0 : 1)) site\(bySite.count > 1 ? "s" : "")</p>
           </div>
         </header>
         <main>
         \(rules.isEmpty
           ? #"<p class="empty">Aucune règle.<br>« Bloquer un élément » dans le menu du bouclier en écrit une, au bon format.</p>"#
-          : "<ul>\(rules.map(userRule).joined())</ul>")
+          : sites + everywhere)
         <form id="addRule">
           <input id="rule" type="text" placeholder='{"action":{"type":"block"},"trigger":{"url-filter":"…"}}' spellcheck="false">
           <button type="submit" class="ghost">Ajouter</button>
@@ -147,8 +131,6 @@ enum AdBlockPage {
         </main>
         """
     }
-
-    // MARK: - Lignes
 
     private static func exception(_ host: String) -> String {
         """

@@ -29,16 +29,17 @@ enum InternalShell {
             Item(title: "Téléchargements", address: "wuji://downloads", symbol: "arrow.down")
         ]),
         ("Blocage", [
-            Item(title: "Règles", address: "wuji://ad-block", symbol: "shield"),
             Item(title: "Sans protection", address: "wuji://ad-block/unactive", symbol: "shield.slash"),
             Item(title: "Mes règles", address: "wuji://ad-block/my-rules", symbol: "pencil"),
             Item(title: "Scripts", address: "wuji://scripts", symbol: "curlybraces")
         ]),
         ("Réglages", [
+            Item(title: "Fonctions", address: "wuji://settings/features", symbol: "switch.2"),
             Item(title: "Apparence", address: "wuji://settings", symbol: "circle.lefthalf"),
             Item(title: "Confidentialité", address: "wuji://settings/privacy", symbol: "hand.raised"),
             Item(title: "Recherche", address: "wuji://settings/search", symbol: "magnifyingglass"),
-            Item(title: "Sites web", address: "wuji://settings/websites", symbol: "globe")
+            Item(title: "Sites web", address: "wuji://settings/websites", symbol: "globe"),
+            Item(title: "Développement", address: "wuji://settings/development", symbol: "hammer")
         ])
     ]
 

@@ -30,8 +30,9 @@ cp Sources/Wuji/Blocking/Assets/wuji-rules.json "$APP/Contents/Resources/"
 # la bibliothèque appelle `fatalError` plutôt que de se passer de ses données.
 cp -R ".build/arm64-apple-macosx/$CONFIG/swift-psl_PublicSuffixList.bundle" "$APP/"
 
-# Signature ad-hoc : suffit pour que macOS accorde les permissions localement.
-codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+# Signature ad-hoc, avec l'autorisation de débogage : suffit pour que macOS accorde les
+# permissions localement, et c'est ce qui rend l'inspecteur web accessible.
+codesign --force --sign - --entitlements Resources/Wuji.entitlements "$APP" >/dev/null 2>&1 || true
 
 echo "→ $APP"
 open "$APP"
