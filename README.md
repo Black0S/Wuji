@@ -23,6 +23,7 @@ Sources/
 ├── Scripts/ Settings/ Store/ Tabs/
 └── DesignSystem/      les tokens : couleurs, espacements, métriques
 Resources/             Info.plist, entitlements, icône
+Tests/                 ce qui se vérifie sans fenêtre
 build.sh run.sh dmg.sh uninstall.sh
 ```
 
@@ -47,6 +48,7 @@ aura chez quelqu'un, et macOS ne lui accorde pas les autorisations au même nom.
 | `./run.sh` | installe dans `/Applications` et lance (`debug` en argument pour l'autre configuration) |
 | `./dmg.sh` | produit `Wuji.dmg` à côté |
 | `./uninstall.sh` | efface l'application **et tout ce qu'elle a laissé** |
+| `swift test` | la logique pure : fabrication des règles, nom d'un site, validité de l'asset |
 
 La signature est ad-hoc. Sur une autre machine, le premier lancement demandera un clic
 droit → Ouvrir : il faudrait une identité Developer ID et la notarisation pour s'en passer.

@@ -24,9 +24,21 @@ enum Site {
     static func name(ofHost host: String) -> String {
         let host = host.lowercased()
         if let cached = known[host] { return cached }
-        let name = PublicSuffixList.effectiveTLDPlusOne(host) ?? host
+        let name = isAddress(host) ? host : (PublicSuffixList.effectiveTLDPlusOne(host) ?? host)
         known[host] = name
         return name
+    }
+
+    /// Une adresse numérique n'a pas de suffixe public, et la liste ne le sait pas.
+    ///
+    /// Elle rendait `1.10` pour `192.168.1.10` — en traitant `10` comme une extension et
+    /// `1` comme le nom. Deux machines du réseau local finissant par les mêmes chiffres
+    /// devenaient alors « le même site » : lever la protection sur l'une la levait sur
+    /// l'autre. C'est précisément le débordement que cette liste est censée empêcher.
+    private static func isAddress(_ host: String) -> Bool {
+        if host.contains(":") { return true }          // IPv6
+        let parts = host.split(separator: ".")
+        return parts.count == 4 && parts.allSatisfy { UInt8($0) != nil }
     }
 
     static func name(of url: URL?) -> String? {

@@ -38,6 +38,14 @@ let package = Package(
             // module. Le dire évite l'avertissement — et surtout évite qu'on les embarque
             // deux fois le jour où quelqu'un « corrige » l'avertissement à l'aveugle.
             exclude: ["Blocking/Assets"]
+        ),
+        // Les tests visent la logique pure : fabriquer une règle, nommer un site, relire
+        // l'asset. Rien qui demande une fenêtre — ce qui se vérifie à l'œil se vérifie à
+        // l'œil, et le reste doit se vérifier tout seul.
+        .testTarget(
+            name: "WujiTests",
+            dependencies: ["Wuji"],
+            path: "Tests/WujiTests"
         )
     ]
 )
