@@ -183,7 +183,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// vingtaine d'onglets pendant les essais. Changer d'application est le moment le plus
     /// fréquent où l'on peut écrire sans que personne attende.
     func applicationDidResignActive(_ notification: Notification) {
-        guard !spaces.isEmpty else { return }
+        // **Un état vide n'écrase pas une session pleine.**
+        //
+        // La garde ne regardait que les espaces, or il y en a toujours au moins un : il
+        // suffisait donc d'un instant sans onglets — pendant une restauration, une
+        // fermeture en série — pour qu'un simple passage en arrière-plan écrive le vide
+        // par-dessus quinze onglets, définitivement.
+        //
+        // Perdre une session est irréversible ; garder une session périmée une minute de
+        // plus ne coûte rien. Le déséquilibre commande la règle. Une fermeture explicite,
+        // elle, passe par `applicationWillTerminate` et dit ce qu'elle veut dire.
+        guard spaces.contains(where: { !$0.isEmpty }) else { return }
         session.save(snapshot())
     }
 
