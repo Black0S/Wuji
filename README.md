@@ -9,6 +9,28 @@ bouton qui ne fait rien.
 
 ---
 
+## Le dépôt
+
+```
+Package.swift          une seule cible, le chemin des sources dit pourquoi
+Sources/
+├── App/               point d'entrée, assemblage, menus, délégués WebKit
+├── Window/            la fenêtre, la géométrie, le journal de blocage
+├── Chrome/            barre du haut, colonne d'onglets, palette, feuilles, bulles
+├── WebContent/        hôte du WKWebView, liseré de sécurité, favicons, menu de page
+├── Blocking/          les règles, leur asset, le sélecteur d'élément, le journal
+├── InternalPages/     tout ce qui s'ouvre en wuji://
+├── Scripts/ Settings/ Store/ Tabs/
+└── DesignSystem/      les tokens : couleurs, espacements, métriques
+Resources/             Info.plist, entitlements, icône
+build.sh run.sh dmg.sh uninstall.sh
+```
+
+Les scripts restent à la racine : ce sont les points d'entrée, et `./run.sh` se tape sans
+réfléchir.
+
+---
+
 ## Le construire et le lancer
 
 ```bash
@@ -39,9 +61,10 @@ chez soi et évidents chez les autres. `--dry-run` liste sans rien toucher.
 
 ## Le blocage
 
-`Sources/Blocking/Assets/wuji-rules.json` — **261 règles écrites directement dans le
-format de `WKContentRuleList`**, celui que WebKit compile. Rien n'est téléchargé, rien
-n'est converti au démarrage : le navigateur lit treize kilo-octets et les donne au moteur.
+[`Sources/Blocking/Assets/wuji-rules.json`](Sources/Blocking/Assets/wuji-rules.json) —
+**261 règles écrites directement dans le format de `WKContentRuleList`**, celui que WebKit
+compile : 241 blocages et 20 masquages, 28 ko. Rien n'est téléchargé, rien n'est converti
+au démarrage — le navigateur lit le fichier et le donne au moteur.
 
 Un convertisseur, si rapide soit-il, refait à chaque lancement un travail dont le résultat
 ne change pas. Autant écrire le résultat.

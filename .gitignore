@@ -6,6 +6,11 @@ DerivedData/
 *.dmg
 
 # Réglages personnels d'éditeur et d'outillage
+#
+# `.vscode/launch.json` est régénéré par l'extension Swift et se réécrit tout seul au
+# moindre déplacement de fichier. Le suivre ne partageait rien d'utile — il gardait des
+# configurations mortes vers des cibles supprimées — et salissait chaque diff.
+.vscode/
 .claude/settings.local.json
 *.xcuserstate
 xcuserdata/
