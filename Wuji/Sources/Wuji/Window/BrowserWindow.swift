@@ -24,6 +24,11 @@ final class BrowserWindow: NSWindow {
         // au vide immersif, et blanc pur sur noir pur fait baver le texte (spec §5).
         backgroundColor = Tokens.chromeBackground
         minSize = NSSize(width: 640, height: 480)
+        // **Le plein écran ne va pas de soi ici.** macOS ne l'accorde d'office qu'aux
+        // fenêtres ordinaires ; une fenêtre sans barre de titre visible, en contenu
+        // pleine hauteur, doit le réclamer. Sans cette ligne, le bouton vert ne proposait
+        // que l'agrandissement, et ⌃⌘F ne faisait rien.
+        collectionBehavior.insert(.fullScreenPrimary)
         center()
     }
 

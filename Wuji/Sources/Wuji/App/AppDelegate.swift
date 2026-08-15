@@ -47,6 +47,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // disparaissent avec l'espace. C'est WebKit qui garantit l'effacement, pas nous.
         if isPrivate { config.websiteDataStore = .nonPersistent() }
         config.defaultWebpagePreferences.allowsContentJavaScript = true
+        // **Le plein écran d'un élément, celui du bouton d'un lecteur vidéo.**
+        //
+        // Il est éteint par défaut dans `WKWebView`, et rien ne le dit : YouTube répondait
+        // « votre navigateur n'est pas compatible avec le mode plein écran » et le bouton
+        // ne faisait rien. C'est une propriété distincte du plein écran de la fenêtre —
+        // les deux portent le même nom et n'ont rien à voir.
+        config.preferences.isElementFullscreenEnabled = true
 
         // **Se présenter comme Safari, mot pour mot.**
         //
