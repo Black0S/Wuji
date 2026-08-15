@@ -463,6 +463,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // arrêtée. C'est peu, et c'est vrai.
         if ErrorPage.isBlocked(error) {
             blockLog.record(.blocked, host: url.host() ?? "", detail: url.absoluteString)
+
+            // **Une fenêtre ouverte par un site pour une adresse refusée se referme.**
+            //
+            // Rien ne l'a demandée, elle ne montrera rien, et la laisser afficher une page
+            // d'erreur ferait porter à l'utilisateur la trace d'une publicité qu'on vient
+            // justement d'arrêter. La condition est étroite à dessein : seulement un
+            // onglet né de `window.open`, et seulement sur sa toute première adresse —
+            // au-delà, il a une histoire, donc quelqu'un s'en sert.
+            if let tab = spaces.flatMap(\.allTabs).first(where: { $0.webView === webView }),
+               tab.isPopup, !webView.canGoBack {
+                close(tabID: tab.id)
+                layout.toast.show("Fenêtre publicitaire bloquée") { [weak self] in
+                    self?.showBlockLog(nil)
+                }
+                return
+            }
         }
         webView.loadSimulatedRequest(URLRequest(url: url),
                                      responseHTML: ErrorPage.html(url: url, error: error))
@@ -1074,6 +1090,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
         let tab = makeTab(configuration: configuration)
+        tab.isPopup = true
         currentSpace.append(tab)
         activateCurrentTab()
         return tab.webView

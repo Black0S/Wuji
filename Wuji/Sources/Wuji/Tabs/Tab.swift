@@ -26,6 +26,9 @@ final class Tab {
     /// vidéo. `requestMediaPlaybackState` existe, mais il faut l'interroger — donc scruter
     /// tous les onglets en boucle pour savoir lequel chante.
     var isPlayingMedia = false
+    /// Ouvert par un site, pas par l'utilisateur — `window.open`. Sert à savoir quoi faire
+    /// quand sa toute première adresse est refusée.
+    var isPopup = false
 
     /// Depuis quand cet onglet n'a-t-il pas été regardé.
     var lastSeen = Date()
