@@ -463,22 +463,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // arrêtée. C'est peu, et c'est vrai.
         if ErrorPage.isBlocked(error) {
             blockLog.record(.blocked, host: url.host() ?? "", detail: url.absoluteString)
+        }
 
-            // **Une fenêtre ouverte par un site pour une adresse refusée se referme.**
-            //
-            // Rien ne l'a demandée, elle ne montrera rien, et la laisser afficher une page
-            // d'erreur ferait porter à l'utilisateur la trace d'une publicité qu'on vient
-            // justement d'arrêter. La condition est étroite à dessein : seulement un
-            // onglet né de `window.open`, et seulement sur sa toute première adresse —
-            // au-delà, il a une histoire, donc quelqu'un s'en sert.
-            if let tab = spaces.flatMap(\.allTabs).first(where: { $0.webView === webView }),
-               tab.isPopup, !webView.canGoBack {
-                close(tabID: tab.id)
-                layout.toast.show("Fenêtre publicitaire bloquée") { [weak self] in
-                    self?.showBlockLog(nil)
-                }
-                return
+        // **Une fenêtre ouverte par un script, dont la première adresse échoue, se referme.**
+        //
+        // Quelle que soit la raison de l'échec. C'est le point qu'il a fallu mesurer :
+        // l'adresse d'un traqueur en clair est refusée par la sécurité du transport bien
+        // avant que nos règles la voient, et on n'a alors aucun moyen de savoir laquelle
+        // des deux l'aurait arrêtée. Peu importe : personne n'a demandé cette fenêtre, elle
+        // ne montrera rien, et lui laisser une page d'erreur fait porter à l'utilisateur
+        // la trace de ce qu'on vient d'éviter.
+        //
+        // La condition reste étroite : seulement un onglet né d'un script — un lien ouvert
+        // par un clic appartient à celui qui a cliqué, échec compris — et seulement sur sa
+        // toute première adresse. Au-delà, il a une histoire, donc quelqu'un s'en sert.
+        if let tab = spaces.flatMap(\.allTabs).first(where: { $0.webView === webView }),
+           tab.isPopup, !webView.canGoBack {
+            close(tabID: tab.id)
+            layout.toast.show("Fenêtre non sollicitée fermée") { [weak self] in
+                self?.showBlockLog(nil)
             }
+            return
         }
         webView.loadSimulatedRequest(URLRequest(url: url),
                                      responseHTML: ErrorPage.html(url: url, error: error))
@@ -1090,7 +1095,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
         let tab = makeTab(configuration: configuration)
-        tab.isPopup = true
+        // **Ouverte par un script, pas par un clic.** `createWebViewWith` sert les deux :
+        // `window.open` d'un côté, un lien en `target="_blank"` de l'autre. Le second est
+        // un geste de l'utilisateur, et ce qu'il demande — même un échec — lui appartient.
+        tab.isPopup = navigationAction.navigationType == .other
         currentSpace.append(tab)
         activateCurrentTab()
         return tab.webView
