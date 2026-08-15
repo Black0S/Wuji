@@ -12,7 +12,7 @@ bouton qui ne fait rien.
 ## Le construire et le lancer
 
 ```bash
-./Wuji/run.sh
+./run.sh
 ```
 
 Compile en release, installe dans `/Applications` et lance depuis là. **On teste où
@@ -21,10 +21,10 @@ aura chez quelqu'un, et macOS ne lui accorde pas les autorisations au même nom.
 
 | | |
 |---|---|
-| `./Wuji/build.sh` | assemble le paquet, sans le lancer — le seul script qui sait ce qu'il y a dedans |
-| `./Wuji/run.sh` | installe dans `/Applications` et lance (`debug` en argument pour l'autre configuration) |
-| `./Wuji/dmg.sh` | produit `Wuji.dmg` à la racine |
-| `./Wuji/uninstall.sh` | efface l'application **et tout ce qu'elle a laissé** |
+| `./build.sh` | assemble le paquet, sans le lancer — le seul script qui sait ce qu'il y a dedans |
+| `./run.sh` | installe dans `/Applications` et lance (`debug` en argument pour l'autre configuration) |
+| `./dmg.sh` | produit `Wuji.dmg` à côté |
+| `./uninstall.sh` | efface l'application **et tout ce qu'elle a laissé** |
 
 La signature est ad-hoc. Sur une autre machine, le premier lancement demandera un clic
 droit → Ouvrir : il faudrait une identité Developer ID et la notarisation pour s'en passer.
@@ -81,7 +81,7 @@ consentement et les anti-robots. Absents, ils ne retirent pas la publicité — 
 verrouillent la page.
 
 Le format et la marche à suivre pour contribuer sont dans
-[`Blocking/Assets/README.md`](Wuji/Sources/Blocking/Assets/README.md).
+[`Blocking/Assets/README.md`](Sources/Blocking/Assets/README.md).
 
 ---
 

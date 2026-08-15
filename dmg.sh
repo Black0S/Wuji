@@ -13,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 ./build.sh release
 
-DMG="../Wuji.dmg"
+DMG="Wuji.dmg"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 

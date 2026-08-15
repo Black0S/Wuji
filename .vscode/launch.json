@@ -59,6 +59,26 @@
             "target": "cmp",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release cmp (Wuji)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Wuji}",
+            "name": "Debug Wuji",
+            "target": "Wuji",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Wuji"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Wuji}",
+            "name": "Release Wuji",
+            "target": "Wuji",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Wuji"
         }
     ]
 }
