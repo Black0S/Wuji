@@ -14,10 +14,8 @@ final class UserScriptStore {
     private let directory: URL
     private let index: URL
 
-    init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory,
-                                               in: .userDomainMask)[0]
-        directory = support.appendingPathComponent("Wuji/userscripts", isDirectory: true)
+    init(root: URL = Storage.directory) {
+        directory = root.appendingPathComponent("userscripts", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         index = directory.appendingPathComponent("scripts.json")
 

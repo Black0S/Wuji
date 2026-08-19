@@ -31,11 +31,7 @@ final class FavoritesStore {
 
     var onChange: (() -> Void)?
 
-    init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory,
-                                               in: .userDomainMask)[0]
-        let directory = support.appendingPathComponent("Wuji", isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    init(directory: URL = Storage.directory) {
         url = directory.appendingPathComponent("favorites.json")
 
         let decoder = JSONDecoder()

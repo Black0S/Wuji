@@ -17,11 +17,7 @@ final class UserRules {
 
     private let file: URL
 
-    init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory,
-                                               in: .userDomainMask)[0]
-        let directory = support.appendingPathComponent("Wuji")
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    init(directory: URL = Storage.directory) {
         file = directory.appendingPathComponent("rules.json")
 
         if let data = try? Data(contentsOf: file),

@@ -42,11 +42,7 @@ final class SessionStore {
     private let url: URL
     private var pendingSave: DispatchWorkItem?
 
-    init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory,
-                                               in: .userDomainMask)[0]
-        let directory = support.appendingPathComponent("Wuji", isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    init(directory: URL = Storage.directory) {
         url = directory.appendingPathComponent("session.json")
     }
 
