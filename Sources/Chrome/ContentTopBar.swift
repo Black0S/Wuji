@@ -13,7 +13,7 @@ protocol ContentTopBarDelegate: AnyObject {
 @MainActor
 final class ContentTopBar: ThemedView {
 
-    enum Action { case back, forward, menu, blocking, scripts }
+    enum Action { case back, forward, menu, blocking, scripts, security }
 
     /// Ce que l'icône de blocage doit dire. Trois états, trois formes — jamais une
     /// couleur seule : « Différencier sans couleur » vaut ici comme ailleurs.
@@ -57,6 +57,11 @@ final class ContentTopBar: ThemedView {
         braces.isHidden = true
 
         lock.imageScaling = .scaleProportionallyDown
+        // **Le cadenas est cliquable.** Il affirmait « chiffré » sans jamais dire par qui,
+        // et c'est précisément la question qu'on se pose au moment où l'on regarde ce
+        // symbole. Un indicateur qui ne mène à rien demande qu'on lui fasse confiance.
+        lock.addGestureRecognizer(NSClickGestureRecognizer(target: self,
+                                                           action: #selector(openSecurity)))
         addSubview(lock)
 
         address.font = .systemFont(ofSize: 13, weight: .medium)
@@ -148,6 +153,11 @@ final class ContentTopBar: ThemedView {
     var scriptsButton: NSView { braces }
 
     @objc private func openOmnibox() { delegate?.topBarDidRequestOmnibox(self) }
+
+    @objc private func openSecurity() { delegate?.topBar(self, didTrigger: .security) }
+
+    /// Pour ancrer la feuille sous le cadenas.
+    var securityButton: NSView { lock }
 
     @objc private func buttonAction(_ sender: NSButton) {
         switch sender {

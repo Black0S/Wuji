@@ -349,15 +349,58 @@ extension AppDelegate {
                                            self.syncSidebar()
                                        }))
 
-        let items: [ActionItem] = [
+        // **Envoyer, et non glisser.** Traîner un onglet jusqu'à un espace qu'on ne voit
+        // pas — il faudrait d'abord ouvrir le sélecteur — demande de viser une cible qui
+        // n'est pas à l'écran. Nommer la destination est plus sûr et plus rapide.
+        let elsewhere = spaces.filter { $0 !== space }.map { target in
+            ActionItem(title: target.name, symbol: target.symbol,
+                       action: { [weak self] in self?.send(tabID: id, to: target) })
+        }
+
+        var items: [ActionItem] = [
             ActionItem(title: "Déplacer vers", symbol: "arrow.right.doc.on.clipboard",
-                       children: destinations),
+                       children: destinations)
+        ]
+        // Rien à proposer s'il n'y a qu'un espace : une entrée qui ouvrirait une liste vide
+        // est un contrôle mort.
+        if !elsewhere.isEmpty {
+            items.append(ActionItem(title: "Envoyer vers l'espace", symbol: "arrow.turn.up.right",
+                                    children: elsewhere))
+        }
+        items += [
             .separator,
             ActionItem(title: "Fermer l'onglet", symbol: "xmark", shortcut: "⌘W",
                        isDestructive: true,
                        action: { [weak self] in self?.close(tabID: id) })
         ]
         presentSheet(items, at: event)
+    }
+
+    /// Déplace un onglet vers un autre espace.
+    ///
+    /// **L'onglet part avec sa page vivante.** On ne recharge pas : la vue web est la même,
+    /// elle change seulement d'appartenance. Recharger ferait perdre le défilement, un
+    /// formulaire à moitié rempli, une vidéo en cours — pour un déplacement de rangement.
+    ///
+    /// Le cas qui compte est celui d'un espace privé. Y envoyer un onglet ordinaire ne le
+    /// rend pas privé pour autant : sa vue garde le magasin de données avec lequel elle est
+    /// née, et le contraire serait un mensonge tranquille. On le dit plutôt que de laisser
+    /// croire.
+    func send(tabID: UUID, to target: Space) {
+        guard let tab = currentSpace.tab(with: tabID) else { return }
+        let wasCurrent = currentSpace.current === tab
+        currentSpace.remove(tab)
+        target.append(tab)
+
+        if wasCurrent { activateCurrentTab() }
+        syncSidebar()
+
+        let warning = target.isPrivate && !currentSpace.isPrivate
+            ? " — sa page reste hors du privé" : ""
+        layout.toast.show("Envoyé vers \(target.name)\(warning)") { [weak self] in
+            guard let self, let index = self.spaces.firstIndex(where: { $0 === target }) else { return }
+            self.spacesPanel(self.layout.spacesPanel, didSelect: index)
+        }
     }
 
     func showFolderMenu(_ id: UUID, _ event: NSEvent) {

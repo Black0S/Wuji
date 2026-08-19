@@ -22,7 +22,36 @@ extension AppDelegate {
         case .menu:    layout.actionSheet.present(mainMenu(), below: bar.menuButton)
         case .blocking: layout.actionSheet.present(blockingMenu(), below: bar.blockingButton)
         case .scripts:  layout.actionSheet.present(scriptsMenu(), below: bar.scriptsButton)
+        case .security: layout.actionSheet.present(securityMenu(), below: bar.securityButton)
         }
+    }
+
+    /// Ce que le cadenas promet, en clair.
+    ///
+    /// **Il affirmait « chiffré » sans jamais dire par qui.** Or c'est exactement la
+    /// question qu'on se pose au moment où l'on regarde ce symbole — surtout sur un site
+    /// où l'on va taper quelque chose. Un indicateur de sécurité qui ne mène à rien demande
+    /// qu'on lui fasse confiance, ce qui est le contraire de son rôle.
+    ///
+    /// Rien n'est inventé : ce qui n'est pas lisible dans le certificat n'est pas affiché.
+    func securityMenu() -> [ActionItem] {
+        guard let tab = currentTab, let url = tab.url, let host = url.host() else { return [] }
+        var items: [ActionItem] = []
+
+        switch tab.security {
+        case .insecure:
+            items.append(ActionItem(title: "Connexion non chiffrée",
+                                    symbol: "exclamationmark.triangle", isEnabled: false))
+            items.append(ActionItem(title: "Ce que vous tapez ici circule en clair",
+                                    symbol: "eye", isEnabled: false))
+        default:
+            items.append(ActionItem(title: "Connexion chiffrée avec \(host)",
+                                    symbol: "lock", isEnabled: false))
+            for line in Certificate.describe(tab.webView.serverTrust) {
+                items.append(ActionItem(title: line, symbol: "checkmark.seal", isEnabled: false))
+            }
+        }
+        return items
     }
 
     /// Le menu principal ne contient que ce qui existe. La maquette en montrait onze
