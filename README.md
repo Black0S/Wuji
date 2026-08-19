@@ -116,10 +116,14 @@ Le format et la marche à suivre pour contribuer sont dans
 espace peut être privé : magasin de données éphémère, rien sur le disque, un symbole qui ne
 se change pas — `⇧⌘N`.
 
-**Un onglet ne se ferme jamais tout seul.** Au bout de cinq minutes sans être regardé il
-rend sa mémoire, mais sa ligne reste dans la colonne, et le survol le réveille avant même
-le clic. Un onglet qui joue du son ne s'endort pas, et il porte un haut-parleur à droite de
-son titre.
+**Un onglet ne se ferme jamais tout seul.** Passé un délai réglable — jamais, une minute,
+jusqu'à une heure — il rend sa mémoire sans quitter la colonne, et le survol le réveille
+avant même le clic. Aucune durée ne convient à toutes les machines, d'où le choix. Un
+onglet qui joue du son ne s'endort pas, et il porte un haut-parleur à droite de son titre.
+
+**Zoom par site.** `⌘+` et `⌘−` règlent le site qu'on regarde, et il s'en souvient : un
+site qui se lit mal n'impose pas sa correction à tout le web. `⌘0` lui rend le zoom par
+défaut. Seuls les écarts sont conservés, et Réglages › Sites web les liste.
 
 **Journal de blocage** — une fenêtre qui montre ce qui est arrêté, ligne par ligne. Pas de
 compteur : un chiffre qui monte ne se vérifie pas, et il pousse à gonfler ce qu'on mesure.

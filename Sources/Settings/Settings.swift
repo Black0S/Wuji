@@ -75,6 +75,25 @@ final class Settings {
         didSet { store.set(searchEngine.rawValue, forKey: Key.searchEngine); changed() }
     }
     var pageZoom: CGFloat { didSet { store.set(Double(pageZoom), forKey: Key.pageZoom); changed() } }
+
+    /// Le zoom retenu pour un site, quand il diffère du réglage général.
+    ///
+    /// **Un site qui se lit mal ne doit pas imposer sa correction à tous les autres.** Le
+    /// réglage général reste la valeur par défaut ; ceci ne garde que les écarts, ce qui
+    /// évite d'enregistrer une ligne pour chaque site visité.
+    var siteZoom: [String: Double] {
+        didSet { store.set(siteZoom, forKey: Key.siteZoom); changed() }
+    }
+    /// Au bout de combien de temps un onglet qu'on ne regarde plus rend sa mémoire.
+    ///
+    /// **Réglable, parce qu'aucune valeur ne convient à tout le monde.** Sur une machine
+    /// à seize gigaoctets avec quarante onglets, cinq minutes sont généreuses ; sur une
+    /// machine large avec cinq onglets, elles sont une gêne pure. Zéro veut dire jamais —
+    /// et jamais veut vraiment dire jamais, le minuteur ne tourne même pas.
+    var sleepDelay: Int {
+        didSet { store.set(sleepDelay, forKey: Key.sleepDelay); changed() }
+    }
+
     var safariInspection: Bool {
         didSet { store.set(safariInspection, forKey: Key.inspection); changed() }
     }
@@ -152,6 +171,8 @@ final class Settings {
         static let theme = "theme"
         static let searchEngine = "searchEngine"
         static let pageZoom = "pageZoom"
+        static let sleepDelay = "sleepDelay"
+        static let siteZoom = "siteZoom"
         static let inspection = "safariInspection"
         static let retention = "historyRetention"
         static let blocking = "blockingEnabled"
@@ -166,6 +187,8 @@ final class Settings {
         theme = Theme(rawValue: store.string(forKey: Key.theme) ?? "") ?? .auto
         searchEngine = SearchEngine(rawValue: store.string(forKey: Key.searchEngine) ?? "") ?? .duckduckgo
         pageZoom = store.object(forKey: Key.pageZoom).map { CGFloat($0 as? Double ?? 1) } ?? 1
+        sleepDelay = store.object(forKey: Key.sleepDelay) as? Int ?? 300
+        siteZoom = store.dictionary(forKey: Key.siteZoom) as? [String: Double] ?? [:]
         safariInspection = store.bool(forKey: Key.inspection)
         historyRetention = store.object(forKey: Key.retention) as? Int ?? 90
         blockingEnabled = store.object(forKey: Key.blocking) as? Bool ?? true

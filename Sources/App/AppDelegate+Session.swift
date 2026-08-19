@@ -74,13 +74,24 @@ extension AppDelegate {
     /// Un seul endroit où les réglages descendent dans l'application. Sans ça, chaque
     /// réglage finirait branché depuis sa propre rangée d'interface, et on ne saurait
     /// plus qui pilote quoi.
+    /// Le zoom qui s'applique à une adresse : celui retenu pour son site, le réglage
+    /// général sinon.
+    func zoom(for url: URL?) -> CGFloat {
+        guard let site = Site.name(of: url), let value = settings.siteZoom[site] else {
+            return settings.pageZoom
+        }
+        return CGFloat(value)
+    }
+
     func applySettings() {
         let themeChanged = appliedTheme != settings.theme
         appliedTheme = settings.theme
         NSApp.appearance = settings.theme.appearance
 
         for tab in spaces.flatMap(\.allTabs) {
-            tab.webView.pageZoom = settings.pageZoom
+            // Chaque onglet prend le zoom de **son** site, pas celui de l'onglet courant :
+            // c'est une propriété de la page qu'on regarde, pas de la fenêtre.
+            tab.webView.pageZoom = zoom(for: tab.url)
             tab.webView.customUserAgent = settings.agent == .safari ? nil
                 : "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
                   + "(KHTML, like Gecko) " + settings.agent.applicationName

@@ -59,6 +59,8 @@ enum SettingsPage {
         var historyCount: Int
         var blockingEnabled: Bool
         var isDefaultBrowser: Bool
+        var sleepDelay: Int
+        var siteZoom: [(site: String, zoom: Int)]
         var userScripts: Bool
         var agent: String
         var blockingSummary: String
@@ -112,6 +114,15 @@ enum SettingsPage {
                 + ". Elles ne visent que des domaines : les publicités servies depuis le "
                 + "domaine du site lui-même, YouTube au premier chef, lui échappent.",
             control: toggle(name: "blocking", isOn: state.blockingEnabled))
+        + row(title: "Décharger les onglets inactifs",
+              subtitle: "Un onglet qu'on ne regarde plus rend sa mémoire, sans quitter la "
+                  + "colonne — le survol le réveille avant même le clic. Aucune valeur ne "
+                  + "convient à toutes les machines, d'où le choix.",
+              control: select(name: "sleep",
+                              options: [("0", "Jamais"), ("60", "1 minute"),
+                                        ("300", "5 minutes"), ("900", "15 minutes"),
+                                        ("1800", "30 minutes"), ("3600", "1 heure")],
+                              selected: String(state.sleepDelay)))
         + row(title: "Scripts utilisateur",
               subtitle: "Du code à vous, exécuté sur les sites que vous désignez. Éteint, "
                   + "l'icône quitte la barre et plus aucun script ne s'exécute.",
@@ -165,6 +176,18 @@ enum SettingsPage {
 
         // Les autorisations : une par site, révocable. Sans cette liste, une réponse donnée
         // une fois deviendrait irrévocable — ce qui la rendrait dangereuse à donner.
+        let zooms = state.siteZoom.isEmpty
+            ? #"<p class="none">Aucun site n'a de zoom qui lui soit propre.</p>"#
+            : state.siteZoom.map { entry in
+                """
+                <div class="permission" data-site="\(escape(entry.site))">
+                  <span class="mono">\(escape(entry.site))</span>
+                  <span class="verdict yes">\(entry.zoom) %</span>
+                  <button class="button" data-action="forget-zoom">Oublier</button>
+                </div>
+                """
+            }.joined()
+
         let permissions = state.permissions.isEmpty
             ? #"<p class="none">Aucun site n'a demandé la caméra ou le micro.</p>"#
             : state.permissions.map { entry in
@@ -187,6 +210,14 @@ enum SettingsPage {
                                         selected: state.agent))
 
         return zoom + agent + """
+        <div class="row block">
+          <div class="labels">
+            <span class="title">Zoom par site</span>
+            <span class="subtitle">⌘+ et ⌘− règlent le site qu'on regarde, et il s'en souvient. ⌘0 lui rend le zoom par défaut.</span>
+          </div>
+        </div>
+        <div class="permissions">\(zooms)</div>
+        """ + """
         <div class="row block">
           <div class="labels">
             <span class="title">Autorisations des sites</span>
@@ -328,6 +359,7 @@ enum SettingsPage {
       if (!button) return;
       const row = button.closest('.permission');
       send({ action: button.dataset.action,
+             site: row ? row.dataset.site : null,
              host: row ? row.dataset.host : null,
              kind: row ? row.dataset.kind : null });
       if (row) row.remove();

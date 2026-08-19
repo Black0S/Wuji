@@ -44,7 +44,7 @@ extension AppDelegate {
                       pendingURL: pendingURL, pendingTitle: pendingTitle)
         tab.webView.navigationDelegate = self
         tab.webView.uiDelegate = self
-        tab.webView.pageZoom = settings.pageZoom
+        tab.webView.pageZoom = zoom(for: pendingURL)
         tab.webView.isInspectable = settings.safariInspection
         // Un onglet vierge ne montre plus le blanc par défaut de WebKit : il prend le fond
         // du thème. Sans ça, ouvrir un onglet en thème sombre projette une page blanche
@@ -162,7 +162,10 @@ extension AppDelegate {
     ///
     /// Le processeur, lui, n'attend pas ce délai : une page qui n'est pas à l'écran est
     /// déjà bridée par WebKit, ses minuteries comprises.
-    static let sleepDelay: TimeInterval = 300
+    ///
+    /// La valeur d'usine seulement : le délai réel vient des réglages, parce qu'aucune
+    /// durée ne convient à toutes les machines ni à tous les usages.
+    static let defaultSleepDelay = 300
 
     func scheduleSleep() {
         sleepTimer?.invalidate()
@@ -188,10 +191,13 @@ extension AppDelegate {
     }
 
     func sleepIdleTabs() {
+        // Zéro veut dire jamais, et jamais se vérifie ici : aucun onglet n'est examiné.
+        let delay = settings.sleepDelay
+        guard delay > 0 else { return }
         let now = Date()
         for space in spaces {
             for tab in space.allTabs where tab !== space.current {
-                guard now.timeIntervalSince(tab.lastSeen) > Self.sleepDelay, !tab.isSleeping,
+                guard now.timeIntervalSince(tab.lastSeen) > TimeInterval(delay), !tab.isSleeping,
                       tab.webView.url != nil else { continue }
                 // **On demande au moteur, pas à la page.** Le drapeau posé par la page vient
                 // d'un évènement `play` ou `pause` ; il suffit qu'un lecteur change de piste,

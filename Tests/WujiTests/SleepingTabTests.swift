@@ -33,3 +33,27 @@ struct SleepingTabTests {
         #expect(Tab.resolvedURL(live: nil, pending: nil, isSleeping: false) == nil)
     }
 }
+
+/// Le zoom par site.
+///
+/// Il touche à deux réglages qui se ressemblent — la valeur générale et l'écart retenu
+/// pour un site — et les confondre donnerait soit un zoom qui ne suit pas, soit un
+/// enregistrement pour chaque site visité.
+@MainActor
+struct SiteZoomTests {
+
+    @Test func unSiteSansÉcartPrendLeRéglageGénéral() {
+        let settings: [String: Double] = ["exemple.com": 1.3]
+        #expect(settings["autre.com"] == nil)
+    }
+
+    @Test func leZoomEstRangéSousLeSiteEtPasSousLHôte() {
+        // C'est ce qui fait qu'un réglage posé sur `www.lemonde.fr` vaut aussi sur
+        // `m.lemonde.fr` : on range sous le nom du site, pas sous celui de la machine.
+        #expect(Site.name(ofHost: "www.lemonde.fr") == Site.name(ofHost: "m.lemonde.fr"))
+    }
+
+    @Test func deuxSitesVoisinsRestentDistincts() {
+        #expect(Site.name(ofHost: "foo.github.io") != Site.name(ofHost: "bar.github.io"))
+    }
+}

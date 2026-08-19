@@ -49,6 +49,11 @@ extension AppDelegate {
                            historyCount: history.count,
                            blockingEnabled: settings.blockingEnabled,
                            isDefaultBrowser: isDefaultBrowser,
+                           sleepDelay: settings.sleepDelay,
+                           // Triés par site : la liste se lit comme un annuaire, pas comme
+                           // un journal de ce qu'on a réglé en dernier.
+                           siteZoom: settings.siteZoom.sorted { $0.key < $1.key }
+                               .map { ($0.key, Int(($0.value * 100).rounded())) },
                            userScripts: settings.userScriptsEnabled,
                            agent: settings.agent.rawValue,
                            blockingSummary: blocker.state.summary,
@@ -74,6 +79,11 @@ extension AppDelegate {
             case "inspection": settings.safariInspection = (value == "true")
             case "retention":  settings.historyRetention = Int(value) ?? 90
             case "zoom":       settings.pageZoom = (Double(value) ?? 100) / 100
+            case "sleep":
+                settings.sleepDelay = Int(value) ?? Self.defaultSleepDelay
+                // Le minuteur ne sert plus à rien si l'on vient de choisir « jamais », et
+                // il doit repartir si l'on vient de rallumer la veille.
+                scheduleSleep()
             case "agent":      settings.agent = Settings.Agent(rawValue: value) ?? .safari
             case "blocking":
                 settings.blockingEnabled = (value == "true")
@@ -93,6 +103,11 @@ extension AppDelegate {
             askToBecomeDefault()
         case "clear-history":
             history.clear()
+            refreshSettingsPages()
+        case "forget-zoom":
+            guard let site = payload["site"] as? String else { return }
+            settings.siteZoom.removeValue(forKey: site)
+            applySettings()
             refreshSettingsPages()
         case "forget-permission":
             guard let host = payload["host"] as? String else { return }

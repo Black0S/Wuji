@@ -90,6 +90,10 @@ extension AppDelegate {
         // recharger d'office, ce qui ferait clignoter ce qu'on est en train de lire.
         if !blocker.isReady { loadedBeforeRules = true }
 
+        // Le zoom suit le site, donc il se réévalue à l'arrivée : d'un onglet qui va de
+        // `a.com` à `b.com`, on attend la taille de `b.com`.
+        webView.pageZoom = zoom(for: webView.url)
+
         guard let url = webView.url else { return }
         // Rien n'est noté depuis un espace privé — c'est tout ce qu'il promet.
         guard !isPrivateSpace else { return }
@@ -125,20 +129,51 @@ extension AppDelegate {
 
     @objc func focusOmnibox(_ sender: Any?) { openOmnibox() }
     @objc func reload(_ sender: Any?) { currentTab?.webView.reload() }
-    /// Le zoom est un réglage de l'application, pas de l'onglet.
+    /// Le zoom s'applique **au site qu'on regarde**, et se retient pour lui.
     ///
-    /// Régler la taille du texte page par page obligerait à le refaire partout ; c'est une
-    /// question de vue, pas de site. Le raccourci modifie donc le même réglage que la page
-    /// « Sites web », et toutes les pages suivent.
-    @objc func zoomIn(_ sender: Any?)  { setZoom(settings.pageZoom + 0.1) }
-    @objc func zoomOut(_ sender: Any?) { setZoom(settings.pageZoom - 0.1) }
-    @objc func zoomReset(_ sender: Any?) { setZoom(1) }
+    /// Un site dont le texte est trop petit ne doit pas obliger à grossir tout le web, ni
+    /// à refaire le réglage à chaque visite. Le réglage général reste la valeur de départ ;
+    /// seuls les écarts sont conservés, ce qui évite d'enregistrer une ligne pour chaque
+    /// site visité.
+    ///
+    /// `⌘0` efface l'écart plutôt que de poser 100 % : revenir au défaut et *imposer* cent
+    /// pour cent sont deux gestes différents, et c'est le premier qu'on attend d'une remise
+    /// à zéro.
+    @objc func zoomIn(_ sender: Any?)  { setZoom(zoomForCurrentSite + 0.1) }
+    @objc func zoomOut(_ sender: Any?) { setZoom(zoomForCurrentSite - 0.1) }
+
+    @objc func zoomReset(_ sender: Any?) {
+        guard let site = Site.name(of: currentTab?.url) else { return }
+        settings.siteZoom.removeValue(forKey: site)
+        applySettings()
+        layout.toast.show("Zoom par défaut sur \(site)")
+    }
+
+    /// Le zoom en vigueur ici : celui du site s'il en a un, le réglage général sinon.
+    var zoomForCurrentSite: CGFloat {
+        guard let site = Site.name(of: currentTab?.url),
+              let zoom = settings.siteZoom[site] else { return settings.pageZoom }
+        return CGFloat(zoom)
+    }
 
     func setZoom(_ value: CGFloat) {
         let clamped = min(max(0.5, (value * 10).rounded() / 10), 2)
-        guard clamped != settings.pageZoom else { return }
-        settings.pageZoom = clamped
-        layout.toast.show("Zoom \(Int(clamped * 100)) %")
+        guard let site = Site.name(of: currentTab?.url) else {
+            // Sur une page interne il n'y a pas de site à retenir : le geste vaut alors
+            // pour le réglage général, comme avant.
+            guard clamped != settings.pageZoom else { return }
+            settings.pageZoom = clamped
+            layout.toast.show("Zoom \(Int(clamped * 100)) %")
+            return
+        }
+        guard clamped != zoomForCurrentSite else { return }
+        if clamped == settings.pageZoom {
+            settings.siteZoom.removeValue(forKey: site)
+        } else {
+            settings.siteZoom[site] = Double(clamped)
+        }
+        applySettings()
+        layout.toast.show("Zoom \(Int(clamped * 100)) % sur \(site)")
     }
 
     @objc func goBack(_ sender: Any?) { currentTab?.webView.goBack() }
