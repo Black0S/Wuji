@@ -102,15 +102,28 @@ final class ContentTopBar: ThemedView {
         let anchor = shield.isHidden ? more.frame.minX : shield.frame.minX
         braces.frame = NSRect(x: anchor - size - Tokens.Space.s, y: y, width: size, height: size)
 
-        let addressWidth = min(360, bounds.width - 260)
+        // **L'adresse occupe la place, au lieu de la laisser vide.**
+        //
+        // Elle était plafonnée à 360 points : sur une fenêtre large, sept cents pixels de
+        // rien séparaient les flèches du texte, et l'adresse était tronquée alors que la
+        // barre était aux trois quarts vide. Elle grandit maintenant avec la fenêtre, sans
+        // jamais empiéter sur les boutons — c'est ce vide qui déséquilibrait la barre, pas
+        // la position des icônes.
+        let disponible = bounds.width - 2 * (Tokens.Space.l + 4 * size)
+        let addressWidth = max(320, min(disponible, bounds.width * 0.52))
         address.frame = NSRect(x: (bounds.width - addressWidth) / 2, y: (bounds.height - 16) / 2,
                                width: addressWidth, height: 16)
-        lock.frame = NSRect(x: address.frame.minX - 20, y: (bounds.height - 12) / 2, width: 12, height: 12)
+
+        // Le cadenas se pose contre le texte, pas contre le cadre du champ. Le texte est
+        // centré : ancré au cadre, le cadenas s'en éloignait à mesure que le champ
+        // grandissait, et qualifiait une adresse dont il était séparé par un vide.
+        let texte = min(address.attributedStringValue.size().width, addressWidth)
+        let début = address.frame.midX - texte / 2
+        lock.frame = NSRect(x: début - 20, y: (bounds.height - 14) / 2, width: 14, height: 14)
     }
 
     func show(url: URL?, security: SecurityBorderView.State, canGoBack: Bool, canGoForward: Bool) {
-        address.stringValue = url?.absoluteString ?? "wuji://"
-        address.textColor = url == nil ? Tokens.textSecondary : Tokens.textPrimary
+        address.attributedStringValue = Self.render(url, insecure: security == .insecure)
 
         let insecure = security == .insecure
         lock.image = NSImage(systemSymbolName: insecure ? "exclamationmark.triangle" : "lock",
@@ -123,6 +136,60 @@ final class ContentTopBar: ThemedView {
         // « Différencier sans couleur » : l'état désactivé passe par l'opacité.
         back.alphaValue = canGoBack ? 1 : 0.35
         forward.alphaValue = canGoForward ? 1 : 0.35
+    }
+
+    /// L'adresse, écrite pour répondre à une seule question : **sur quel site suis-je ?**
+    ///
+    /// C'est une question de sécurité avant d'être une question de confort, et elle se
+    /// perdait dans le bruit — tout s'affichait du même poids, le site au milieu d'un
+    /// protocole et d'un identifiant de vidéo. Le nom du site est donc seul en pleine
+    /// valeur ; le sous-domaine et le chemin s'estompent.
+    ///
+    /// **`https://` disparaît, `http://` reste.** Le premier ne dit rien que le cadenas ne
+    /// dise mieux. Le second est une information — et il s'écrit dans la couleur du danger,
+    /// parce qu'un site en clair doit se voir sans qu'on aille chercher le petit symbole.
+    static func render(_ url: URL?, insecure: Bool) -> NSAttributedString {
+        let normal = NSFont.systemFont(ofSize: 13, weight: .medium)
+        let result = NSMutableAttributedString()
+
+        func append(_ text: String, _ colour: NSColor, weight: NSFont.Weight = .regular) {
+            guard !text.isEmpty else { return }
+            result.append(NSAttributedString(string: text, attributes: [
+                .font: weight == .regular ? normal : NSFont.systemFont(ofSize: 13, weight: weight),
+                .foregroundColor: colour
+            ]))
+        }
+
+        guard let url, let host = url.host() else {
+            append("wuji://", Tokens.textSecondary)
+            return result
+        }
+
+        // Une page interne garde son schéma : c'est lui qui dit qu'on est chez Wuji et non
+        // sur un site qui s'appellerait « réglages ». Le retirer l'aurait affichée comme
+        // un simple mot, sans rien pour la distinguer d'une page du web.
+        if url.scheme == InternalPageHandler.scheme {
+            append(InternalPageHandler.scheme + "://", Tokens.textSecondary)
+            append(host, Tokens.textPrimary, weight: .semibold)
+            let chemin = url.path
+            append(chemin == "/" ? "" : chemin, Tokens.textSecondary)
+            return result
+        }
+
+        if insecure { append("http://", Tokens.Security.insecure) }
+
+        // Le site au sens de la liste des suffixes publics : le même découpage que celui
+        // qui décide où s'applique une exception de blocage. Deux notions de « site » dans
+        // la même application finiraient par se contredire.
+        let site = Site.name(ofHost: host)
+        if host != site, host.hasSuffix(site) {
+            append(String(host.dropLast(site.count)), Tokens.textSecondary)
+        }
+        append(site, Tokens.textPrimary, weight: .semibold)
+
+        let rest = url.path + (url.query.map { "?" + $0 } ?? "")
+        append(rest == "/" ? "" : rest, Tokens.textSecondary)
+        return result
     }
 
     /// L'état du blocage, tel que la barre doit le montrer.
