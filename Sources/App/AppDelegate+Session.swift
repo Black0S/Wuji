@@ -45,7 +45,7 @@ extension AppDelegate {
     }
 
     func restore(_ stored: StoredTab) -> Tab {
-        makeTab(pendingURL: stored.url.flatMap(URL.init(string:)), pendingTitle: stored.title)
+        makeTab(url: stored.url.flatMap(URL.init(string:)), title: stored.title)
     }
 
     func snapshot() -> StoredSession {

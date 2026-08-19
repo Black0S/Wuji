@@ -45,12 +45,12 @@ extension AppDelegate {
     }
 
     func makeTab(configuration override: WKWebViewConfiguration? = nil,
-                         pendingURL: URL? = nil, pendingTitle: String? = nil) -> Tab {
+                         url: URL? = nil, title: String? = nil) -> Tab {
         let tab = Tab(configuration: override ?? makeConfiguration(isPrivate: isPrivateSpace),
-                      pendingURL: pendingURL, pendingTitle: pendingTitle)
+                      url: url, title: title)
         tab.webView.navigationDelegate = self
         tab.webView.uiDelegate = self
-        tab.webView.pageZoom = zoom(for: pendingURL)
+        tab.webView.pageZoom = zoom(for: url)
         tab.webView.isInspectable = settings.safariInspection
         // Un onglet vierge ne montre plus le blanc par défaut de WebKit : il prend le fond
         // du thème. Sans ça, ouvrir un onglet en thème sombre projette une page blanche
@@ -120,7 +120,7 @@ extension AppDelegate {
             currentSpaceIndex = index
         }
         let space = currentSpace
-        let tab = makeTab(pendingURL: closed.url, pendingTitle: closed.title)
+        let tab = makeTab(url: closed.url, title: closed.title)
         space.restore(tab, folder: closed.folder, index: closed.index)
         space.current = tab
         activateCurrentTab()

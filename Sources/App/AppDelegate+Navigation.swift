@@ -90,6 +90,13 @@ extension AppDelegate {
         // recharger d'office, ce qui ferait clignoter ce qu'on est en train de lire.
         if !blocker.isReady { loadedBeforeRules = true }
 
+        // L'onglet retient où il en est. Sans ce rappel, sa mémoire resterait celle de la
+        // session restaurée et vieillirait à chaque navigation.
+        if let tab = spaces.flatMap(\.allTabs).first(where: { $0.webView === webView }),
+           let arrivée = webView.url {
+            tab.remember(url: arrivée)
+        }
+
         // Le zoom suit le site, donc il se réévalue à l'arrivée : d'un onglet qui va de
         // `a.com` à `b.com`, on attend la taille de `b.com`.
         webView.pageZoom = zoom(for: webView.url)

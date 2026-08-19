@@ -11,14 +11,19 @@ final class Tab {
     let id = UUID()
     let webView: WKWebView
 
-    /// Ce qu'on sait d'un onglet restauré tant qu'il n'a pas été ouvert.
+    /// La dernière adresse dont on soit sûr, et le titre qui allait avec.
     ///
-    /// **Chargement différé** : à la réouverture, seul l'onglet actif va chercher sa page.
-    /// Les autres ne sont qu'un titre et une adresse jusqu'au clic. Sans ça, rouvrir
-    /// trente onglets lancerait trente requêtes réseau et trente moteurs de rendu d'un
-    /// coup — c'est ce qui rend le démarrage des autres navigateurs si lourd.
-    var pendingURL: URL?
-    private var pendingTitle: String?
+    /// **C'est l'identité de l'onglet, et elle ne s'efface jamais de son vivant.** La vue
+    /// web, elle, passe par des états où elle ne sait rien dire : vidée pendant la veille,
+    /// entre deux navigations, restaurée mais pas encore chargée. Chaque fois qu'on a fait
+    /// dépendre l'identité de l'onglet de ce que la vue racontait sur l'instant, un onglet
+    /// a disparu de la colonne — trois fois, par trois chemins différents.
+    ///
+    /// Elle sert aussi au **chargement différé** : à la réouverture, seul l'onglet actif va
+    /// chercher sa page. Les autres ne sont qu'un titre et une adresse jusqu'au clic —
+    /// sinon rouvrir trente onglets lancerait trente requêtes et trente moteurs de rendu.
+    var lastKnownURL: URL?
+    var lastKnownTitle: String?
 
     /// Un média joue-t-il dans cette page ?
     ///
@@ -69,8 +74,7 @@ final class Tab {
         // vierge et le retirait, et `wake()` refusait de le rouvrir faute d'état. Un
         // onglet perdu, sans rien pour le dire.
         guard !isSleeping, !isPlayingMedia, let live = webView.url else { return }
-        pendingURL = live
-        pendingTitle = title
+        remember(url: live)
 
         // Le marqueur est posé quoi qu'il arrive : sans état d'interaction on rechargera
         // l'adresse, ce qui coûte le défilement mais rend l'onglet. Perdre sa position est
@@ -82,20 +86,33 @@ final class Tab {
     }
 
     /// Réveille l'onglet à l'endroit exact où on l'avait laissé.
+    ///
+    /// **L'adresse de repli n'est pas effacée ici.** Elle l'était, et c'était le défaut :
+    /// entre l'instant où l'on efface et celui où la page s'engage, la vue annonce encore
+    /// un document vide. L'onglet n'avait alors plus aucune adresse à donner, la colonne le
+    /// prenait pour vierge, et il disparaissait sous le curseur de qui venait le survoler
+    /// pour le réveiller. Le repli reste ; il s'efface tout seul dès que la vue a mieux à
+    /// dire.
     func wake() {
         guard let state = sleepingState else { return }
-        let address = pendingURL
         sleepingState = nil
-        pendingURL = nil
-        pendingTitle = nil
 
         // Un état vide veut dire « endormi sans savoir où l'on en était » : on repart de
         // l'adresse. C'est le repli, pas le cas courant.
         if state.isEmpty {
-            if let address { webView.load(URLRequest(url: address)) }
+            if let address = lastKnownURL { webView.load(URLRequest(url: address)) }
             return
         }
         webView.interactionState = state
+    }
+
+    /// Note où en est l'onglet. Appelé quand une page s'engage pour de bon, et avant de
+    /// l'endormir.
+    func remember(url: URL) {
+        guard url.absoluteString != "about:blank" else { return }
+        lastKnownURL = url
+        let live = webView.title
+        if let live, !live.isEmpty { lastKnownTitle = live }
     }
 
     /// Coupe tout ce qui vit dans cet onglet.
@@ -118,46 +135,52 @@ final class Tab {
     }
 
     /// L'adresse de l'onglet.
-    var url: URL? { Self.resolvedURL(live: webView.url, pending: pendingURL, isSleeping: isSleeping) }
+    var url: URL? { Self.resolvedURL(live: webView.url, lastKnown: lastKnownURL) }
 
-    /// Quelle adresse fait foi, de celle de la vue web ou de celle mise de côté.
+    /// Quelle adresse fait foi : celle de la vue quand elle en a une vraie, la dernière
+    /// connue sinon.
     ///
-    /// **En veille, c'est celle mise de côté.** Endormir un onglet remplace sa page par un
-    /// document vide, et l'adresse de la vue bascule alors sur `about:blank`. La colonne
-    /// écarte les onglets vierges — un nouvel onglet qui n'a rien chargé n'a pas à occuper
-    /// une ligne — et emportait donc avec eux tous les onglets endormis. Ils existaient
-    /// toujours, mais on ne les voyait plus : la veille passait pour une fermeture.
+    /// **Une seule règle, sans état intermédiaire à connaître.** Les versions précédentes
+    /// demandaient « l'onglet dort-il ? » pour choisir, et chaque nouvel état de transition
+    /// — en veille, en réveil, restauré, entre deux navigations — ouvrait un trou par
+    /// lequel un onglet disparaissait. Ici la question ne se pose plus : `about:blank` et
+    /// l'absence d'adresse veulent dire la même chose, « la vue n'a rien à dire », et c'est
+    /// la mémoire de l'onglet qui répond.
     ///
     /// Fonction séparée et sans dépendance à WebKit, pour que la règle soit vérifiable.
-    static func resolvedURL(live: URL?, pending: URL?, isSleeping: Bool) -> URL? {
-        if isSleeping, let pending { return pending }
-        // Filet de sécurité : une vue vidée annonce `about:blank`, qui n'est pas une page
-        // mais l'absence d'une page. Tant qu'on sait où l'onglet allait, c'est cette
-        // adresse-là qui le nomme — quel que soit le chemin par lequel il s'est vidé.
-        if live?.absoluteString == "about:blank", let pending { return pending }
-        return live ?? pending
+    static func resolvedURL(live: URL?, lastKnown: URL?) -> URL? {
+        if let live, live.absoluteString != "about:blank" { return live }
+        return lastKnown ?? live
     }
 
     /// Un titre vide n'est pas `nil` : une page qui commence à charger en renvoie un, et
     /// la ligne se réduirait alors à son marqueur de chargement.
     var title: String {
         if let title = webView.title, !title.isEmpty { return title }
-        if let pendingTitle, !pendingTitle.isEmpty { return pendingTitle }
+        if let lastKnownTitle, !lastKnownTitle.isEmpty { return lastKnownTitle }
         return url?.host() ?? "Nouvel onglet"
     }
 
-    convenience init(configuration: WKWebViewConfiguration, pendingURL: URL?, pendingTitle: String?) {
+    /// Un onglet qu'on connaît déjà : restauré d'une session, ou repris après fermeture.
+    convenience init(configuration: WKWebViewConfiguration, url: URL?, title: String?) {
         self.init(configuration: configuration)
-        self.pendingURL = pendingURL
-        self.pendingTitle = pendingTitle
+        lastKnownURL = url
+        lastKnownTitle = title
     }
 
-    /// Charge la page si elle ne l'a jamais été. Rendu au premier affichage de l'onglet.
+    /// Charge la page d'un onglet restauré, au premier affichage.
+    ///
+    /// **Rien n'est effacé ici non plus.** C'était le troisième endroit à vider l'identité
+    /// de l'onglet avant que la page existe — même motif, même conséquence : une ligne qui
+    /// s'évanouit le temps du chargement. La mémoire de l'onglet reste, la vue la
+    /// remplacera d'elle-même quand elle aura mieux à dire.
+    ///
+    /// La condition porte sur la vue, pas sur la mémoire : une vue qui n'a **rien** n'a
+    /// jamais chargé. Une vue vidée par la veille annonce `about:blank`, et c'est `wake()`
+    /// qui s'en occupe, pas cette fonction.
     func loadIfPending() {
-        guard let pendingURL else { return }
-        self.pendingURL = nil
-        pendingTitle = nil
-        webView.load(URLRequest(url: pendingURL))
+        guard webView.url == nil, let address = lastKnownURL else { return }
+        webView.load(URLRequest(url: address))
     }
 
     /// L'état de sécurité déduit de l'URL. Le vrai signal (certificat invalide,

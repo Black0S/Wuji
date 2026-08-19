@@ -13,36 +13,49 @@ import Foundation
 struct SleepingTabTests {
 
     private let page = URL(string: "https://exemple.com/article")!
-    private let blank = URL(string: "about:blank")!
+    private let autre = URL(string: "https://exemple.com/suite")!
+    private let vide = URL(string: "about:blank")!
 
-    @Test func enVeilleLAdresseMiseDeCôtéFaitFoi() {
-        #expect(Tab.resolvedURL(live: blank, pending: page, isSleeping: true) == page)
+    // Chaque cas ci-dessous correspond à un moment vécu par un onglet. Trois d'entre eux
+    // ont déjà fait disparaître une ligne de la colonne, par trois chemins différents.
+
+    @Test func pageAffichée() {
+        #expect(Tab.resolvedURL(live: page, lastKnown: page) == page)
     }
 
-    @Test func éveilléCEstLaVueQuiFaitFoi() {
-        #expect(Tab.resolvedURL(live: page, pending: nil, isSleeping: false) == page)
+    @Test func enVeille() {
+        // La vue est vidée : c'est la mémoire qui nomme l'onglet.
+        #expect(Tab.resolvedURL(live: vide, lastKnown: page) == page)
     }
 
-    @Test func unOngletRestauréAnnonceSonAdresseAvantDAvoirChargé() {
-        // À la reprise d'une session, la vue n'a encore rien : sans ce repli, la ligne
-        // serait vide au démarrage.
-        #expect(Tab.resolvedURL(live: nil, pending: page, isSleeping: false) == page)
+    @Test func pendantLeRéveil() {
+        // Le défaut signalé : on survole pour réveiller, la vue n'a pas encore repris, et
+        // l'onglet disparaissait sous le curseur.
+        #expect(Tab.resolvedURL(live: vide, lastKnown: page) == page)
     }
 
-    @Test func unOngletVraimentViergeNAPasDAdresse() {
-        #expect(Tab.resolvedURL(live: nil, pending: nil, isSleeping: false) == nil)
+    @Test func restauréMaisPasEncoreChargé() {
+        #expect(Tab.resolvedURL(live: nil, lastKnown: page) == page)
     }
 
-    @Test func uneVueVidéeNeFaitPasPasserLOngletPourVierge() {
-        // Le filet de sécurité : quel que soit le chemin par lequel la vue s'est vidée,
-        // tant qu'on sait où l'onglet allait, c'est cette adresse qui le nomme. Sans lui,
-        // un onglet vidé sans être marqué endormi disparaissait de la colonne — et ne
-        // pouvait plus revenir.
-        #expect(Tab.resolvedURL(live: blank, pending: page, isSleeping: false) == page)
+    @Test func entreDeuxNavigations() {
+        // La vue a lâché l'ancienne page sans avoir engagé la nouvelle.
+        #expect(Tab.resolvedURL(live: nil, lastKnown: autre) == autre)
     }
 
-    @Test func sansAdresseDeRepliOnNInventeRien() {
-        #expect(Tab.resolvedURL(live: blank, pending: nil, isSleeping: false) == blank)
+    @Test func laVueVivanteLEmporteSurLaMémoire() {
+        // Une fois la nouvelle page engagée, c'est elle qui fait foi : la mémoire ne doit
+        // pas figer l'onglet sur son adresse précédente.
+        #expect(Tab.resolvedURL(live: autre, lastKnown: page) == autre)
+    }
+
+    @Test func ongletVraimentVierge() {
+        #expect(Tab.resolvedURL(live: nil, lastKnown: nil) == nil)
+    }
+
+    @Test func vueVidéeSansMémoire() {
+        // Rien à inventer : on rend ce que la vue dit, et la colonne décidera.
+        #expect(Tab.resolvedURL(live: vide, lastKnown: nil) == vide)
     }
 }
 
