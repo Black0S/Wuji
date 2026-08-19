@@ -117,7 +117,14 @@ final class ContentTopBar: ThemedView {
         // Le cadenas se pose contre le texte, pas contre le cadre du champ. Le texte est
         // centré : ancré au cadre, le cadenas s'en éloignait à mesure que le champ
         // grandissait, et qualifiait une adresse dont il était séparé par un vide.
-        let texte = min(address.attributedStringValue.size().width, addressWidth)
+        //
+        // La largeur se mesure par la cellule et non par `NSAttributedString.size()`, qui
+        // rendait zéro ici — le cadenas se retrouvait alors au milieu du champ, c'est-à-dire
+        // **dessiné par-dessus l'adresse**. Une mesure fausse est pire qu'une position
+        // approximative : elle donne un résultat qui a l'air délibéré.
+        let mesure = address.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: addressWidth,
+                                                              height: 16)).width ?? 0
+        let texte = min(max(mesure, 0), addressWidth)
         let début = address.frame.midX - texte / 2
         lock.frame = NSRect(x: début - 20, y: (bounds.height - 14) / 2, width: 14, height: 14)
     }
