@@ -163,6 +163,10 @@ avec le même sommaire à gauche partout.
 - **Aucun contrôle mort.** Un réglage qui ne pilote rien est pire qu'un réglage absent : il
   donne l'illusion d'un produit plus avancé qu'il ne l'est.
 - **Aucune télémétrie.** Rien ne part de cette machine que vous n'ayez demandé.
+- **Aucune suggestion du moteur de recherche.** Elles supposent d'envoyer *chaque frappe* à
+  un tiers — « c », « ch », « cha » — y compris pour les recherches qu'on efface avant de
+  les valider. C'est une fuite continue, pas ponctuelle. La palette cherche donc chez vous
+  seulement : onglets ouverts, historique, favoris. Décidé, pas en attente.
 - **Les favicons viennent du site**, jamais d'un service tiers qui apprendrait au passage
   ce que vous visitez.
 - **Aucune règle écrite pour faire passer un test.** Les pages de conformité proposent
