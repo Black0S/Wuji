@@ -99,17 +99,22 @@ final class Tab {
     }
 
     /// L'adresse de l'onglet.
+    var url: URL? { Self.resolvedURL(live: webView.url, pending: pendingURL, isSleeping: isSleeping) }
+
+    /// Quelle adresse fait foi, de celle de la vue web ou de celle mise de côté.
     ///
-    /// **En veille, c'est l'adresse mise de côté qui fait foi.** Endormir un onglet
-    /// remplace sa page par un document vide, et `webView.url` bascule alors sur
-    /// `about:blank`. La colonne écarte les onglets vierges — le nouvel onglet qui n'a rien
-    /// chargé n'a pas à occuper une ligne — et emportait donc avec eux tous les onglets
-    /// endormis. Ils existaient toujours, mais on ne les voyait plus : la veille passait
-    /// pour une fermeture.
-    var url: URL? {
-        if isSleeping, let pendingURL { return pendingURL }
-        return webView.url ?? pendingURL
+    /// **En veille, c'est celle mise de côté.** Endormir un onglet remplace sa page par un
+    /// document vide, et l'adresse de la vue bascule alors sur `about:blank`. La colonne
+    /// écarte les onglets vierges — un nouvel onglet qui n'a rien chargé n'a pas à occuper
+    /// une ligne — et emportait donc avec eux tous les onglets endormis. Ils existaient
+    /// toujours, mais on ne les voyait plus : la veille passait pour une fermeture.
+    ///
+    /// Fonction séparée et sans dépendance à WebKit, pour que la règle soit vérifiable.
+    static func resolvedURL(live: URL?, pending: URL?, isSleeping: Bool) -> URL? {
+        if isSleeping, let pending { return pending }
+        return live ?? pending
     }
+
     /// Un titre vide n'est pas `nil` : une page qui commence à charger en renvoie un, et
     /// la ligne se réduirait alors à son marqueur de chargement.
     var title: String {
