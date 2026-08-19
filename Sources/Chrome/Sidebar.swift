@@ -817,10 +817,11 @@ private final class TabRow: ThemedView {
         // La croix n'apparaît qu'au survol : cinq croix alignées en permanence, c'est
         // cinq éléments de plus à l'écran pour une action rare (principe 5).
         close.isHidden = !isHovered
-        // Le haut-parleur cède la place à la croix au survol : ils visent le même point, et
-        // deux glyphes empilés ne se lisent ni l'un ni l'autre. Ce qui joue reste audible,
-        // et la souris est déjà sur la ligne — on sait de laquelle il s'agit.
-        speaker.isHidden = !isPlaying || isHovered
+        // Le haut-parleur ne cède plus la place à la croix : il se décale à sa gauche.
+        // Le faire disparaître au survol était une erreur — on survole justement la
+        // colonne pour trouver l'onglet qui chante, et le repère s'effaçait au moment où
+        // l'on en avait besoin.
+        speaker.isHidden = !isPlaying
         speaker.contentTintColor = Tokens.textSecondary
 
         let indent = CGFloat(depth) * Tokens.Row.indent
@@ -828,9 +829,12 @@ private final class TabRow: ThemedView {
         icon.frame = NSRect(x: Tokens.Space.s + indent, y: (bounds.height - iconSize) / 2,
                             width: iconSize, height: iconSize)
         let left = Tokens.Space.s + indent + iconSize + Tokens.Space.m
-        label.frame = NSRect(x: left, y: 0, width: max(0, bounds.width - left - 26), height: bounds.height)
+        let reserved: CGFloat = (isPlaying && isHovered) ? 48 : 26
+        label.frame = NSRect(x: left, y: 0,
+                             width: max(0, bounds.width - left - reserved), height: bounds.height)
         close.frame = NSRect(x: bounds.width - 22, y: (bounds.height - 18) / 2, width: 18, height: 18)
-        speaker.frame = NSRect(x: bounds.width - 23, y: (bounds.height - 13) / 2, width: 14, height: 13)
+        speaker.frame = NSRect(x: bounds.width - (isHovered ? 45 : 23),
+                               y: (bounds.height - 13) / 2, width: 14, height: 13)
     }
 
 
