@@ -154,6 +154,17 @@ final class Omnibox: ThemedView, NSTextFieldDelegate {
         Tokens.applyChromeShadow(to: card)
         addSubview(card)
 
+        // **Une seule ligne, toujours.** `NSTextField` se replie sur plusieurs lignes dès
+        // que le texte dépasse, et une adresse longue faisait grandir le champ par le bas
+        // en recouvrant la première suggestion. Une palette dont la hauteur dépend de ce
+        // qu'on tape ne se vise plus : ce qu'on s'apprêtait à cliquer a bougé.
+        //
+        // Les trois réglages vont ensemble — la cellule doit défiler pour que le curseur
+        // reste visible au-delà du bord, sinon on tape à l'aveugle.
+        field.usesSingleLineMode = true
+        field.lineBreakMode = .byTruncatingTail
+        field.cell?.wraps = false
+        field.cell?.isScrollable = true
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
