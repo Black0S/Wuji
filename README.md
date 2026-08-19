@@ -163,6 +163,14 @@ avec le même sommaire à gauche partout.
 - **Aucun contrôle mort.** Un réglage qui ne pilote rien est pire qu'un réglage absent : il
   donne l'illusion d'un produit plus avancé qu'il ne l'est.
 - **Aucune télémétrie.** Rien ne part de cette machine que vous n'ayez demandé.
+- **Une seule fenêtre, parce qu'il y a les espaces.** Ailleurs, on ouvre une seconde
+  fenêtre parce que les onglets n'ont aucun autre moyen d'être groupés — c'est un
+  contournement. Ici les espaces font le travail, et mieux : ils persistent, se nomment, se
+  reconnaissent d'un symbole et survivent à la fermeture. Reste ce qu'ils ne savent pas
+  faire — être visibles en même temps — mais ce besoin-là est étroit et le coût est le plus
+  élevé de la liste : un contexte par fenêtre, et chaque surface flottante à faire suivre.
+  Le jour où il faudra trancher autrement, la bonne forme sera « ouvrir *cet espace* dans
+  une seconde fenêtre », pas des fenêtres génériques qui concurrenceraient les espaces.
 - **Aucune suggestion du moteur de recherche.** Elles supposent d'envoyer *chaque frappe* à
   un tiers — « c », « ch », « cha » — y compris pour les recherches qu'on efface avant de
   les valider. C'est une fuite continue, pas ponctuelle. La palette cherche donc chez vous
