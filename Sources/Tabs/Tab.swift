@@ -61,10 +61,21 @@ final class Tab {
     /// Rien n'est endormi qui joue du son — couper la musique d'un onglet qu'on a laissé
     /// exprès en fond serait pire que la mémoire économisée.
     func sleep() {
-        guard !isSleeping, !isPlayingMedia, webView.url != nil else { return }
-        sleepingState = webView.interactionState as? Data
-        pendingURL = webView.url
+        // **On note d'abord où revenir, on vide ensuite.**
+        //
+        // L'ordre inverse a coûté cher : `interactionState` peut être nul — une page qui
+        // n'a pas fini de s'engager n'en a pas — et l'onglet était alors vidé sans être
+        // marqué endormi. Il annonçait `about:blank`, la colonne le prenait pour un onglet
+        // vierge et le retirait, et `wake()` refusait de le rouvrir faute d'état. Un
+        // onglet perdu, sans rien pour le dire.
+        guard !isSleeping, !isPlayingMedia, let live = webView.url else { return }
+        pendingURL = live
         pendingTitle = title
+
+        // Le marqueur est posé quoi qu'il arrive : sans état d'interaction on rechargera
+        // l'adresse, ce qui coûte le défilement mais rend l'onglet. Perdre sa position est
+        // ennuyeux ; perdre l'onglet ne l'est pas, c'est inacceptable.
+        sleepingState = (webView.interactionState as? Data) ?? Data()
         webView.stopLoading()
         // La vue reste, mais vide : son processus de rendu est libéré avec son contenu.
         webView.loadHTMLString("", baseURL: nil)
@@ -73,9 +84,17 @@ final class Tab {
     /// Réveille l'onglet à l'endroit exact où on l'avait laissé.
     func wake() {
         guard let state = sleepingState else { return }
+        let address = pendingURL
         sleepingState = nil
         pendingURL = nil
         pendingTitle = nil
+
+        // Un état vide veut dire « endormi sans savoir où l'on en était » : on repart de
+        // l'adresse. C'est le repli, pas le cas courant.
+        if state.isEmpty {
+            if let address { webView.load(URLRequest(url: address)) }
+            return
+        }
         webView.interactionState = state
     }
 
@@ -112,6 +131,10 @@ final class Tab {
     /// Fonction séparée et sans dépendance à WebKit, pour que la règle soit vérifiable.
     static func resolvedURL(live: URL?, pending: URL?, isSleeping: Bool) -> URL? {
         if isSleeping, let pending { return pending }
+        // Filet de sécurité : une vue vidée annonce `about:blank`, qui n'est pas une page
+        // mais l'absence d'une page. Tant qu'on sait où l'onglet allait, c'est cette
+        // adresse-là qui le nomme — quel que soit le chemin par lequel il s'est vidé.
+        if live?.absoluteString == "about:blank", let pending { return pending }
         return live ?? pending
     }
 

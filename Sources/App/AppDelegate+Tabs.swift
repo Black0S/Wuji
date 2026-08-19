@@ -27,6 +27,12 @@ extension AppDelegate {
     /// Un onglet vierge n'est pas encore un onglet : il n'a ni adresse ni titre à montrer.
     /// Il reste donc hors de la liste, hors de la palette et hors de la session — sinon on
     /// listerait une ligne qui ne désigne rien, et on la restaurerait au lancement suivant.
+    ///
+    /// **L'invariant que ce filtre exige.** Il ne juge que sur l'adresse, donc tout onglet
+    /// qui a montré quelque chose doit continuer d'en annoncer une, y compris pendant qu'il
+    /// dort et sa vue vidée. C'est `Tab.resolvedURL` qui le garantit, et c'est là qu'il
+    /// faut regarder si une ligne disparaît sans qu'on l'ait fermée — le filtre, lui, fait
+    /// exactement ce qu'on lui demande.
     func isBlank(_ tab: Tab) -> Bool {
         tab.url == nil || tab.url == Self.blankPage
     }

@@ -29,8 +29,20 @@ struct SleepingTabTests {
         #expect(Tab.resolvedURL(live: nil, pending: page, isSleeping: false) == page)
     }
 
-    @Test func unOngletVraimentVierseNAPasDAdresse() {
+    @Test func unOngletVraimentViergeNAPasDAdresse() {
         #expect(Tab.resolvedURL(live: nil, pending: nil, isSleeping: false) == nil)
+    }
+
+    @Test func uneVueVidéeNeFaitPasPasserLOngletPourVierge() {
+        // Le filet de sécurité : quel que soit le chemin par lequel la vue s'est vidée,
+        // tant qu'on sait où l'onglet allait, c'est cette adresse qui le nomme. Sans lui,
+        // un onglet vidé sans être marqué endormi disparaissait de la colonne — et ne
+        // pouvait plus revenir.
+        #expect(Tab.resolvedURL(live: blank, pending: page, isSleeping: false) == page)
+    }
+
+    @Test func sansAdresseDeRepliOnNInventeRien() {
+        #expect(Tab.resolvedURL(live: blank, pending: nil, isSleeping: false) == blank)
     }
 }
 
