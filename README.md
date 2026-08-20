@@ -22,7 +22,7 @@ Sources/
 ├── InternalPages/     tout ce qui s'ouvre en wuji://
 ├── Scripts/ Settings/ Store/ Tabs/
 └── DesignSystem/      les tokens : couleurs, espacements, métriques
-Resources/             Info.plist, entitlements, icône
+Resources/             Info.plist, icône
 Tests/                 ce qui se vérifie sans fenêtre
 build.sh run.sh dmg.sh uninstall.sh
 ```

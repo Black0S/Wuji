@@ -95,7 +95,6 @@ extension AppDelegate {
             tab.webView.customUserAgent = settings.agent == .safari ? nil
                 : "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
                   + "(KHTML, like Gecko) " + settings.agent.applicationName
-            tab.webView.isInspectable = settings.safariInspection
             // Une couleur dynamique posée sur WebKit est résolue à l'affectation : il faut
             // la réécrire quand le thème change.
             // Une page interne suit le thème par `prefers-color-scheme`, qui reflète

@@ -51,7 +51,6 @@ extension AppDelegate {
         tab.webView.navigationDelegate = self
         tab.webView.uiDelegate = self
         tab.webView.pageZoom = zoom(for: url)
-        tab.webView.isInspectable = settings.safariInspection
         // Un onglet vierge ne montre plus le blanc par défaut de WebKit : il prend le fond
         // du thème. Sans ça, ouvrir un onglet en thème sombre projette une page blanche
         // pleine hauteur, et c'est le contraire d'une interface qui se fait oublier.

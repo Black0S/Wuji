@@ -39,8 +39,7 @@ enum InternalShell {
             Item(title: "Apparence", address: "wuji://settings", symbol: "circle.lefthalf"),
             Item(title: "Confidentialité", address: "wuji://settings/privacy", symbol: "hand.raised"),
             Item(title: "Recherche", address: "wuji://settings/search", symbol: "magnifyingglass"),
-            Item(title: "Sites web", address: "wuji://settings/websites", symbol: "globe"),
-            Item(title: "Développement", address: "wuji://settings/development", symbol: "hammer")
+            Item(title: "Sites web", address: "wuji://settings/websites", symbol: "globe")
         ])
     ]
 

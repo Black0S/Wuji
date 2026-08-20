@@ -37,6 +37,10 @@ cp -R ".build/arm64-apple-macosx/$CONFIG/swift-psl_PublicSuffixList.bundle" "$AP
 
 # Signature ad-hoc, avec l'autorisation de débogage : suffit pour que macOS accorde les
 # permissions localement, et c'est ce qui rend les pages inspectables depuis Safari.
-codesign --force --sign - --entitlements Resources/Wuji.entitlements "$APP" >/dev/null 2>&1 || true
+# Signature ad-hoc, sans entitlement. Le seul qu'il y avait — `get-task-allow` — servait
+# à rendre les pages inspectables depuis Safari, fonction retirée ; et il est de toute
+# façon refusé à la notarisation. Le jour d'une vraie identité, ce fichier reviendra avec
+# ce qu'elle demande.
+codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 
 echo "→ $APP"

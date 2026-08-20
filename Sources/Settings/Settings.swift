@@ -94,9 +94,6 @@ final class Settings {
         didSet { store.set(sleepDelay, forKey: Key.sleepDelay); changed() }
     }
 
-    var safariInspection: Bool {
-        didSet { store.set(safariInspection, forKey: Key.inspection); changed() }
-    }
     /// Rétention de l'historique, en jours. La spec §4.1 la veut configurable : c'est ce
     /// qui rend « vos données restent chez vous » vérifiable plutôt que déclaratif.
     var historyRetention: Int {
@@ -193,7 +190,6 @@ final class Settings {
         static let pageZoom = "pageZoom"
         static let sleepDelay = "sleepDelay"
         static let siteZoom = "siteZoom"
-        static let inspection = "safariInspection"
         static let retention = "historyRetention"
         static let blocking = "blockingEnabled"
         static let blockingExceptions = "blockingExceptions"
@@ -210,7 +206,6 @@ final class Settings {
         pageZoom = store.object(forKey: Key.pageZoom).map { CGFloat($0 as? Double ?? 1) } ?? 1
         sleepDelay = store.object(forKey: Key.sleepDelay) as? Int ?? 300
         siteZoom = store.dictionary(forKey: Key.siteZoom) as? [String: Double] ?? [:]
-        safariInspection = store.bool(forKey: Key.inspection)
         historyRetention = store.object(forKey: Key.retention) as? Int ?? 90
         blockingEnabled = store.object(forKey: Key.blocking) as? Bool ?? true
         blockingExceptions = store.stringArray(forKey: Key.blockingExceptions) ?? []

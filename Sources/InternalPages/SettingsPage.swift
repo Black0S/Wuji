@@ -14,7 +14,7 @@ import Foundation
 enum SettingsPage {
 
     enum Section {
-        case features, appearance, privacy, search, websites, development
+        case features, appearance, privacy, search, websites
 
         static func from(path: String) -> Section {
             switch path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) {
@@ -22,7 +22,6 @@ enum SettingsPage {
             case "privacy":     return .privacy
             case "search":      return .search
             case "websites":    return .websites
-            case "development": return .development
             default:            return .appearance
             }
         }
@@ -34,7 +33,6 @@ enum SettingsPage {
             case .privacy:     return "Confidentialité"
             case .search:      return "Recherche"
             case .websites:    return "Sites web"
-            case .development: return "Développement"
             }
         }
 
@@ -45,7 +43,6 @@ enum SettingsPage {
             case .privacy:     return "wuji://settings/privacy"
             case .search:      return "wuji://settings/search"
             case .websites:    return "wuji://settings/websites"
-            case .development: return "wuji://settings/development"
             }
         }
     }
@@ -54,7 +51,6 @@ enum SettingsPage {
         var theme: String
         var searchEngine: String
         var pageZoom: Double
-        var inspection: Bool
         var retention: Int
         var historyCount: Int
         /// Combien de sites ont laissé des données — cookies, stockage local, cache.
@@ -80,7 +76,6 @@ enum SettingsPage {
         case .privacy:     body = privacy(state)
         case .search:      body = search(state)
         case .websites:    body = websites(state)
-        case .development: body = development(state)
         }
 
         return InternalShell.page(
@@ -131,14 +126,6 @@ enum SettingsPage {
               subtitle: "Du code à vous, exécuté sur les sites que vous désignez. Éteint, "
                   + "l'icône quitte la barre et plus aucun script ne s'exécute.",
               control: toggle(name: "userscripts", isOn: state.userScripts))
-    }
-
-    private static func development(_ state: State) -> String {
-        row(title: "Autoriser l'inspection Safari",
-            subtitle: "Rend les pages de Wuji inspectables depuis Safari : menu "
-                + "Développement, puis cette machine. L'inspecteur ne s'ouvre pas dans "
-                + "Wuji — WebKit ne le propose qu'à Safari.",
-            control: toggle(name: "inspection", isOn: state.inspection))
     }
 
     private static func appearance(_ state: State) -> String {

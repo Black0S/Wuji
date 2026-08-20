@@ -44,7 +44,6 @@ extension AppDelegate {
         SettingsPage.State(theme: settings.theme.rawValue,
                            searchEngine: settings.searchEngine.rawValue,
                            pageZoom: Double(settings.pageZoom),
-                           inspection: settings.safariInspection,
                            retention: settings.historyRetention,
                            historyCount: history.count,
                            siteDataCount: siteDataCount,
@@ -77,7 +76,6 @@ extension AppDelegate {
             switch key {
             case "theme":      settings.theme = Settings.Theme(rawValue: value) ?? .auto
             case "engine":     settings.searchEngine = Settings.SearchEngine(rawValue: value) ?? .duckduckgo
-            case "inspection": settings.safariInspection = (value == "true")
             case "retention":  settings.historyRetention = Int(value) ?? 90
             case "zoom":       settings.pageZoom = (Double(value) ?? 100) / 100
             case "sleep":
