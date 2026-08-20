@@ -21,6 +21,7 @@ Sources/
 ├── WebContent/        hôte du WKWebView, certificat, favicons, menu de page
 ├── Blocking/          les règles, leur asset, le sélecteur d'élément, le journal
 ├── InternalPages/     tout ce qui s'ouvre en wuji://
+├── PublicSuffix/      la liste des suffixes, recopiée : où s'arrête « ce site »
 ├── Scripts/ Settings/ Store/ Tabs/
 └── DesignSystem/      les tokens : couleurs, espacements, métriques
 Resources/             Info.plist, icône
@@ -276,10 +277,12 @@ seule main, sans quoi plus personne ne pourrait relicencier — d'où l'accord d
 décrit dans [CONTRIBUTING.md](CONTRIBUTING.md), qui ne retire rien aux contributeurs et
 laisse leur travail sous GPL-3.0 comme le reste.
 
-La seule dépendance, [swift-psl](https://github.com/ameshkov/swift-psl), est sous MIT —
-compatible, et suivie au mois : elle publie une version tous les trois jours, parce
-qu'elle transporte la liste des suffixes publics, qui change dès qu'un registre ajoute
-une extension. Les règles de `Sources/Blocking/Assets` sont couvertes par la licence du
+**Le projet n'a aucune dépendance.** La liste des suffixes publics vient de
+[swift-psl](https://github.com/ameshkov/swift-psl) et vit dans `Sources/PublicSuffix`,
+recopiée avec sa licence MIT et le copyright de son auteur — compatible. Ce n'est pas une
+préférence : SwiftPM range les ressources d'une dépendance **à la racine** du paquet `.app`,
+et macOS refuse de signer une application qui porte quoi que ce soit à cet endroit. Le
+choix était donc entre la dépendance et la distribution. Les règles de `Sources/Blocking/Assets` sont couvertes par la licence du
 projet ; elles sont écrites à la main, adossées à des listes de référence pour la décision
 de bloquer un domaine, jamais recopiées depuis elles.
 

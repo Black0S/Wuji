@@ -1,5 +1,4 @@
 import Foundation
-import PublicSuffixList
 
 /// Ce qu'on appelle « ce site ».
 ///
