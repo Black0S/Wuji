@@ -1,32 +1,65 @@
 import Testing
 import Foundation
+@testable import Wuji
 
-/// L'asset de blocage, relu comme WebKit le relira.
+/// Les listes de blocage, relues comme WebKit les relira.
 ///
-/// Ce fichier est écrit à la main et part directement dans le compilateur du moteur. Une
-/// virgule oubliée, un point non échappé, un doublon : la liste entière est refusée, sans
-/// bruit, et le navigateur ne bloque plus rien. Ces tests sont la seule barrière entre une
-/// contribution et ce silence-là.
+/// Ces fichiers sont écrits à la main et partent directement dans le compilateur du
+/// moteur. Une virgule oubliée, un point non échappé, un doublon : la liste entière est
+/// refusée, sans bruit, et cette famille-là ne bloque plus rien. Ces tests sont la seule
+/// barrière entre une contribution et ce silence.
+///
+/// Depuis le découpage en plusieurs listes, ils vérifient aussi ce qu'aucune liste seule
+/// ne peut vérifier : que le catalogue annoncé dans les réglages existe sur le disque, et
+/// qu'une même règle n'est pas écrite dans deux familles à la fois.
+@MainActor
 struct RulesAssetTests {
 
-    /// Le fichier tel qu'il vit dans le dépôt — pas la copie du paquet, qui pourrait dater.
-    private static var asset: URL {
+    /// Les fichiers tels qu'ils vivent dans le dépôt — pas la copie du paquet, qui
+    /// pourrait dater.
+    private static func asset(_ file: String) -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()          // WujiTests
             .deletingLastPathComponent()          // Tests
             .deletingLastPathComponent()          // racine
-            .appendingPathComponent("Sources/Blocking/Assets/wuji-rules.json")
+            .appendingPathComponent("Sources/Blocking/Assets/\(file).json")
     }
 
-    /// Les lignes que le chargeur retient : celles qui sont des règles. Les repères de
-    /// lecture en `//` sont ignorés ici comme ils le sont à l'exécution.
-    private func rules() throws -> [[String: Any]] {
-        let text = try String(contentsOf: Self.asset, encoding: .utf8)
-        let kept = text.split(separator: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: ",")) }
-            .filter { $0.hasPrefix("{") && $0.hasSuffix("}") }
-        let json = "[" + kept.joined(separator: ",") + "]"
+    /// Les lignes que le chargeur retient — le tri est celui de l'application, appelé ici
+    /// plutôt que réécrit : un test qui recopie le code qu'il vérifie ne vérifie rien.
+    private func rules(of list: RuleList) throws -> [[String: Any]] {
+        let text = try String(contentsOf: Self.asset(list.file), encoding: .utf8)
+        let json = "[" + ContentBlocker.rules(in: text).joined(separator: ",") + "]"
         return try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]])
+    }
+
+    /// Toutes les règles livrées, toutes listes confondues.
+    private func rules() throws -> [[String: Any]] {
+        try RuleList.all.flatMap { try rules(of: $0) }
+    }
+
+    @Test func chaqueListeDuCatalogueExiste() throws {
+        for list in RuleList.all {
+            #expect(FileManager.default.fileExists(atPath: Self.asset(list.file).path),
+                    "liste annoncée mais absente : \(list.file).json")
+            // Une liste vide serait un interrupteur qui ne pilote rien.
+            #expect(try rules(of: list).count > 1, "liste vide : \(list.id)")
+        }
+    }
+
+    @Test func lesIdentifiantsSontUniques() {
+        #expect(Set(RuleList.all.map(\.id)).count == RuleList.all.count)
+        // L'identifiant nomme la liste compilée dans le magasin de WebKit : deux listes de
+        // même nom s'écraseraient l'une l'autre sans rien dire.
+        #expect(Set(RuleList.all.map(\.identifier)).count == RuleList.all.count)
+    }
+
+    @Test func chaqueListeSeDécritEnUnePhrase() {
+        for list in RuleList.all {
+            #expect(!list.name.isEmpty)
+            // Sans phrase, l'interrupteur demande de deviner ce qu'on éteint.
+            #expect(list.summary.count > 40, "description trop courte : \(list.id)")
+        }
     }
 
     @Test func chaqueRègleEstUnObjetJSONValide() throws {
@@ -71,12 +104,20 @@ struct RulesAssetTests {
     @Test func aucuneRègleNEstÉcriteDeuxFois() throws {
         // La comparaison porte sur la règle entière, pas sur son seul déclencheur : les
         // masquages partagent tous `.*` et ne se distinguent que par leur sélecteur.
-        var seen: Set<String> = []
-        for rule in try rules() {
-            let trigger = (rule["trigger"] as? [String: Any])?["url-filter"] as? String ?? ""
-            let selector = (rule["action"] as? [String: Any])?["selector"] as? String ?? ""
-            let identity = trigger + " " + selector
-            #expect(seen.insert(identity).inserted, "règle en double : \(identity)")
+        //
+        // Et elle porte sur **toutes les listes à la fois** : un domaine recopié dans deux
+        // familles serait bloqué même après en avoir éteint une, ce qui ferait mentir
+        // l'interrupteur.
+        var seen: [String: String] = [:]
+        for list in RuleList.all {
+            for rule in try rules(of: list) {
+                let trigger = (rule["trigger"] as? [String: Any])?["url-filter"] as? String ?? ""
+                let selector = (rule["action"] as? [String: Any])?["selector"] as? String ?? ""
+                let identity = trigger + " " + selector
+                #expect(seen[identity] == nil,
+                        "règle en double : \(identity) — \(seen[identity] ?? "") et \(list.id)")
+                seen[identity] = list.id
+            }
         }
     }
 }

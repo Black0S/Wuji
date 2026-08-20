@@ -153,6 +153,26 @@ final class Settings {
         didSet { store.set(blockingExceptions, forKey: Key.blockingExceptions); changed() }
     }
 
+    /// Les listes de règles **éteintes**, par identifiant.
+    ///
+    /// On enregistre ce qui est éteint et non ce qui est allumé : une liste ajoutée par
+    /// une mise à jour arrive donc active, sans que personne ait à aller la cocher. Le
+    /// contraire aurait figé la protection à ce qu'elle était le jour de l'installation.
+    var disabledRuleLists: [String] {
+        didSet { store.set(disabledRuleLists, forKey: Key.disabledRuleLists); changed() }
+    }
+
+    func isEnabled(_ list: RuleList) -> Bool { !disabledRuleLists.contains(list.id) }
+
+    func setRuleList(_ id: String, enabled: Bool) {
+        guard RuleList.named(id) != nil else { return }
+        if enabled {
+            disabledRuleLists.removeAll { $0 == id }
+        } else if !disabledRuleLists.contains(id) {
+            disabledRuleLists.append(id)
+        }
+    }
+
     /// Les exceptions posées depuis un espace privé.
     ///
     /// **Elles ne sont pas écrites sur le disque et meurent avec la session.** Lever la
@@ -177,6 +197,7 @@ final class Settings {
         static let retention = "historyRetention"
         static let blocking = "blockingEnabled"
         static let blockingExceptions = "blockingExceptions"
+        static let disabledRuleLists = "disabledRuleLists"
         static let agent = "agent"
         static let userScripts = "userScriptsEnabled"
     }
@@ -193,6 +214,7 @@ final class Settings {
         historyRetention = store.object(forKey: Key.retention) as? Int ?? 90
         blockingEnabled = store.object(forKey: Key.blocking) as? Bool ?? true
         blockingExceptions = store.stringArray(forKey: Key.blockingExceptions) ?? []
+        disabledRuleLists = store.stringArray(forKey: Key.disabledRuleLists) ?? []
         agent = Agent(rawValue: store.string(forKey: Key.agent) ?? "") ?? .safari
         userScriptsEnabled = store.object(forKey: Key.userScripts) as? Bool ?? true
     }

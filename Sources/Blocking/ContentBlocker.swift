@@ -3,10 +3,20 @@ import WebKit
 
 /// Le blocage.
 ///
-/// **Les règles arrivent déjà traduites.** L'asset `wuji-rules.json` est écrit dans le format de
-/// `WKContentRuleList` — celui que WebKit compile directement. Il n'y a plus de
-/// convertisseur au démarrage, plus de listes à télécharger, plus d'index à reconstruire :
-/// le navigateur lit un fichier de treize kilo-octets et le donne au moteur.
+/// **Les règles arrivent déjà traduites.** Les assets de `Blocking/Assets` sont écrits dans
+/// le format de `WKContentRuleList` — celui que WebKit compile directement. Il n'y a pas de
+/// convertisseur au démarrage, pas de listes à télécharger, pas d'index à reconstruire :
+/// le navigateur lit des fichiers de quelques kilo-octets et les donne au moteur.
+///
+/// **Une liste compilée par famille de règles**, et non un seul bloc : c'est ce qui permet
+/// d'éteindre les mouchards sans éteindre la publicité, ou la télémétrie d'appareils qu'on
+/// ne possède pas. Voir `RuleList`.
+///
+/// Avec une conséquence qu'il faut connaître avant de toucher à ce fichier : **les
+/// exceptions sont recopiées à la fin de chaque liste.** `ignore-previous-rules` n'annule
+/// que ce qui le précède *dans sa propre liste* — mesuré, une exception compilée à part ne
+/// lève rien ailleurs. Une exception de site posée dans une seule liste laisserait donc les
+/// autres bloquer, et « désactiver la protection sur ce site » ne tiendrait pas parole.
 ///
 /// C'est ce qui a changé, et le prix est assumé. Wuji ne fait plus tourner de scriptlets,
 /// donc il ne retire plus les publicités servies depuis le domaine du site lui-même —
@@ -22,14 +32,20 @@ final class ContentBlocker {
     enum State {
         case off
         case compiling
-        case active(rules: Int)
+        case active(rules: Int, lists: Int)
+        /// Une partie protège, une autre non. **Le cas existe vraiment maintenant** qu'il y
+        /// a plusieurs listes : une refusée n'emporte plus les cinq autres. Le dire vaut
+        /// mieux que d'annoncer « actif » sur une protection amputée.
+        case partial(rules: Int, why: String)
         case failed(String)
 
         var summary: String {
             switch self {
-            case .off:              return "Blocage désactivé"
-            case .compiling:        return "Préparation…"
-            case .active(let rules): return "\(rules) règles actives"
+            case .off:       return "Blocage désactivé"
+            case .compiling: return "Préparation…"
+            case .active(let rules, let lists):
+                return "\(rules) règles actives, \(lists) liste\(lists > 1 ? "s" : "")"
+            case .partial(let rules, let why): return "\(rules) règles actives — \(why)"
             case .failed(let why):  return "Blocage indisponible — \(why)"
             }
         }
@@ -51,7 +67,10 @@ final class ContentBlocker {
     /// L'espace courant est-il privé ? Décide où va une exception posée maintenant.
     var isPrivate: () -> Bool = { false }
 
-    private static let identifier = "wuji.rules"
+    /// Les règles écrites par l'utilisateur vivent dans leur propre liste compilée, à côté
+    /// des listes livrées : elles ne se désactivent pas, et elles n'ont pas à être
+    /// recompilées quand on touche à une liste du catalogue.
+    private static let userIdentifier = "wuji.user"
     private static let signatureKey = "blockingSignature"
 
     private unowned let settings: Settings
@@ -73,91 +92,151 @@ final class ContentBlocker {
 
     // MARK: - Compilation
 
-    /// Le nombre de règles de l'asset, lu une fois. Sert à l'affichage, et à rien d'autre.
+    /// Le catalogue tel qu'il est réellement livré : chaque liste, ce qu'elle pèse, et si
+    /// elle est allumée. Lu à même le paquet et non déclaré à côté — une liste annoncée
+    /// dans les réglages mais absente du paquet est un contrôle mort.
+    private(set) var catalog: [(list: RuleList, count: Int, isEnabled: Bool)] = []
+
+    /// Le nombre de règles réellement posées, livrées et personnelles confondues.
     private(set) var bundledCount = 0
 
     func start() { compile() }
 
-    /// Assemble l'asset, les règles de l'utilisateur et ses exceptions, puis compile.
-    ///
-    /// **Une seule liste compilée.** Elle tient très largement sous le plafond de WebKit, et
-    /// `ignore-previous-rules` n'annulant que dans la liste où il figure, tout doit de toute
-    /// façon vivre au même endroit pour que les exceptions fonctionnent.
+    /// Assemble chaque liste allumée, y recopie les exceptions, puis compile ce qui a changé.
     func compile() {
         guard settings.blockingEnabled else { return apply([], state: .off) }
-        guard let asset = Self.asset() else {
-            return apply([], state: .failed("les règles livrées sont introuvables"))
-        }
 
-        // Déjà au format de WebKit, comme tout le reste : rien à traduire.
-        let mine = userRules.rules
-        // Les exceptions viennent en dernier : `ignore-previous-rules` annule ce qui le
-        // précède, et rien d'autre.
+        // Les exceptions ferment **chaque** liste : `ignore-previous-rules` n'annule que ce
+        // qui le précède dans la sienne. C'est la contrainte qui décide de tout le reste.
         let exceptions = (settings.blockingExceptions + settings.privateBlockingExceptions)
             .map(WebKitRule.exception(for:))
 
-        bundledCount = asset.count
-        let json = "[" + (asset + mine + exceptions).joined(separator: ",") + "]"
-        let total = asset.count + mine.count
+        var catalog: [(list: RuleList, count: Int, isEnabled: Bool)] = []
+        var groups: [(identifier: String, json: String)] = []
+        var missing: [String] = []
+        var total = 0
 
-        // Même contenu qu'au dernier lancement : la liste compilée est encore dans le
-        // magasin de WebKit, on la reprend telle quelle.
-        var hasher = SHA256()
-        hasher.update(data: Data(json.utf8))
-        let signature = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        for list in RuleList.all {
+            guard let rules = Self.asset(list.file) else { missing.append(list.name); continue }
+            let isEnabled = settings.isEnabled(list)
+            catalog.append((list, rules.count, isEnabled))
+            guard isEnabled, !rules.isEmpty else { continue }
+            total += rules.count
+            groups.append((list.identifier, Self.json(rules + exceptions)))
+        }
+        self.catalog = catalog
+
+        // Déjà au format de WebKit, comme tout le reste : rien à traduire.
+        let mine = userRules.rules
+        if !mine.isEmpty {
+            total += mine.count
+            groups.append((Self.userIdentifier, Self.json(mine + exceptions)))
+        }
+        bundledCount = total
+
+        guard !groups.isEmpty else {
+            return apply([], state: missing.isEmpty
+                ? .failed("aucune liste n'est activée")
+                : .failed("les règles livrées sont introuvables"))
+        }
 
         state = .compiling
         onChange?()
 
         Task { [weak self] in
             guard let store = WKContentRuleListStore.default() else { return }
-            if signature == UserDefaults.standard.string(forKey: Self.signatureKey),
-               let known = try? await store.contentRuleList(forIdentifier: Self.identifier) {
-                self?.apply([known], state: .active(rules: total))
-                await Self.sweepStore()
-                return
+            var lists: [WKContentRuleList] = []
+            var refused: [String] = []
+
+            for group in groups {
+                let key = "\(Self.signatureKey).\(group.identifier)"
+                let signature = Self.signature(of: group.json)
+                // Même contenu qu'au dernier lancement : la liste compilée est encore dans
+                // le magasin de WebKit, on la reprend telle quelle.
+                if signature == UserDefaults.standard.string(forKey: key),
+                   let known = try? await store.contentRuleList(forIdentifier: group.identifier) {
+                    lists.append(known)
+                    continue
+                }
+                do {
+                    if let list = try await store.compileContentRuleList(
+                        forIdentifier: group.identifier, encodedContentRuleList: group.json) {
+                        UserDefaults.standard.set(signature, forKey: key)
+                        lists.append(list)
+                    }
+                } catch {
+                    // Une règle écrite à la main peut être refusée par le moteur. Avant, elle
+                    // emportait tout le blocage ; maintenant elle n'emporte que sa liste, et
+                    // on dit laquelle.
+                    UserDefaults.standard.removeObject(forKey: key)
+                    refused.append(RuleList.named(group.identifier
+                        .replacingOccurrences(of: "wuji.", with: ""))?.name ?? "vos règles")
+                }
             }
-            do {
-                guard let list = try await store.compileContentRuleList(
-                    forIdentifier: Self.identifier, encodedContentRuleList: json) else { return }
-                UserDefaults.standard.set(signature, forKey: Self.signatureKey)
-                self?.apply([list], state: .active(rules: total))
-                await Self.sweepStore()
-            } catch {
-                // Une règle écrite à la main peut être refusée par le moteur. On le dit, et
-                // on garde ce qui marchait : un bloqueur amputé vaut mieux qu'un bloqueur
-                // éteint, et un message vaut mieux qu'un silence.
-                self?.apply(self?.compiled ?? [],
-                            state: .failed("une règle a été refusée par le moteur"))
+
+            let posées = lists.count
+            let state: State
+            if lists.isEmpty {
+                state = .failed("aucune liste n'a pu être compilée")
+            } else if !refused.isEmpty {
+                state = .partial(rules: total,
+                                 why: "refusée par le moteur : \(refused.joined(separator: ", "))")
+            } else if !missing.isEmpty {
+                state = .partial(rules: total,
+                                 why: "liste introuvable : \(missing.joined(separator: ", "))")
+            } else {
+                state = .active(rules: total, lists: posées)
             }
+            self?.apply(lists, state: state)
+            await Self.sweepStore(keeping: Set(groups.map(\.identifier)))
         }
     }
 
-    /// L'asset livré avec l'application : une règle par ligne, telle qu'elle est écrite
+    private static func json(_ rules: [String]) -> String {
+        "[" + rules.joined(separator: ",") + "]"
+    }
+
+    private static func signature(of json: String) -> String {
+        var hasher = SHA256()
+        hasher.update(data: Data(json.utf8))
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Une liste livrée avec l'application : une règle par ligne, telle qu'elle est écrite
     /// dans le dépôt.
     ///
     /// Le fichier porte aussi des repères de lecture — les lignes en `//` qui nomment les
     /// sections. On ne retient que les lignes qui sont des règles, donc le moteur ne voit
     /// jamais rien d'autre, et le fichier reste relisible par un humain.
-    nonisolated private static func asset() -> [String]? {
-        guard let url = Bundle.main.url(forResource: "wuji-rules", withExtension: "json"),
+    nonisolated static func asset(_ file: String) -> [String]? {
+        guard let url = Bundle.main.url(forResource: file, withExtension: "json"),
               let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        return text.components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: ",")) }
+        return rules(in: text)
+    }
+
+    /// Le tri des lignes, séparé de la lecture du fichier pour que les tests puissent le
+    /// vérifier sur les assets du dépôt, sans paquet ni fenêtre.
+    nonisolated static func rules(in text: String) -> [String] {
+        text.components(separatedBy: "\n")
+            .map {
+                $0.trimmingCharacters(in: .whitespaces)
+                  .trimmingCharacters(in: CharacterSet(charactersIn: ","))
+            }
             .filter { $0.hasPrefix("{") && $0.hasSuffix("}") }
     }
 
-    /// Efface du magasin de WebKit tout ce qui n'est pas la liste courante.
+    /// Efface du magasin de WebKit tout ce qui n'est plus posé.
     ///
     /// Le magasin garde ce qu'on y a mis, indéfiniment. Les tranches de l'époque où Wuji
     /// compilait vingt-deux listes y occupaient encore soixante-dix-huit mégaoctets alors
-    /// que plus rien ne les réclamait.
-    private static func sweepStore() async {
+    /// que plus rien ne les réclamait. Une liste qu'on éteint dans les réglages passe par
+    /// le même chemin : elle quitte le disque, elle ne dort pas dedans.
+    private static func sweepStore(keeping current: Set<String>) async {
         guard let store = WKContentRuleListStore.default() else { return }
         let identifiers = await withCheckedContinuation { continuation in
             store.getAvailableContentRuleListIdentifiers { continuation.resume(returning: $0 ?? []) }
         }
-        for name in identifiers where name != identifier {
+        for name in identifiers where !current.contains(name) {
             try? await store.removeContentRuleList(forIdentifier: name)
         }
     }

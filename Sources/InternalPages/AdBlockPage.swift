@@ -5,11 +5,12 @@ import Foundation
 /// Trois sujets, trois adresses, une colonne pour passer de l'un à l'autre — la même
 /// grammaire que la fenêtre de réglages, en HTML.
 ///
-/// **Il n'y a plus de catalogue à gérer, donc plus rien à cocher.** Les règles arrivent avec
-/// l'application, déjà écrites dans le format de WebKit. La page ne demande donc plus de
-/// choisir : elle dit ce qui protège, ce qui est exclu, et ce que l'utilisateur a ajouté.
-/// Un bloqueur qui affiche « Protection active » et rien d'autre demande qu'on lui fasse
-/// confiance ; celui-ci montre ses chiffres, et dit aussi ce qu'il ne fait pas.
+/// **Ce qui se règle est dans les réglages ; ici, ce qu'on a écrit soi-même.** Les listes
+/// livrées s'allument et s'éteignent dans Réglages › Fonctions, avec le reste des
+/// interrupteurs. Cette page ne garde que ce qui n'existe qu'ici : les sites exclus et les
+/// règles ajoutées à la main. Trois arguments — le résumé d'état, le nombre de règles
+/// livrées, la compilation en cours — arrivaient jusqu'ici sans jamais être affichés : ils
+/// ont été retirés plutôt que branchés sur un affichage inventé pour les justifier.
 @MainActor
 enum AdBlockPage {
 
@@ -36,8 +37,7 @@ enum AdBlockPage {
         }
     }
 
-    static func html(section: Section, state: String, bundled: Int,
-                     userRules: [String], exceptions: [String], isBusy: Bool) -> String {
+    static func html(section: Section, userRules: [String], exceptions: [String]) -> String {
         let body: String
         switch section {
         case .unactive: body = exceptionsSection(exceptions)

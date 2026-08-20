@@ -63,13 +63,36 @@ chez soi et évidents chez les autres. `--dry-run` liste sans rien toucher.
 
 ## Le blocage
 
-[`Sources/Blocking/Assets/wuji-rules.json`](Sources/Blocking/Assets/wuji-rules.json) —
-**261 règles écrites directement dans le format de `WKContentRuleList`**, celui que WebKit
-compile : 241 blocages et 20 masquages. Rien n'est téléchargé, rien n'est converti
-au démarrage — le navigateur lit le fichier et le donne au moteur.
+[`Sources/Blocking/Assets`](Sources/Blocking/Assets) — **260 règles écrites directement
+dans le format de `WKContentRuleList`**, celui que WebKit compile : 240 blocages et 20
+masquages. Rien n'est téléchargé, rien n'est converti au démarrage — le navigateur lit les
+fichiers et les donne au moteur.
 
 Un convertisseur, si rapide soit-il, refait à chaque lancement un travail dont le résultat
 ne change pas. Autant écrire le résultat.
+
+### Six listes, six interrupteurs
+
+| Liste | Règles | |
+|---|---|---|
+| Mouchards | 72 | audience, comportement, attribution, courtiers d'identité, empreinte |
+| Publicité | 84 | régies, enchères en temps réel, articles sponsorisés |
+| Télémétrie des appareils | 57 | ce que les systèmes et les objets renvoient à leur fabricant |
+| Habillage publicitaire | 20 | masque les éléments dont la classe annonce une publicité |
+| Réseaux sociaux | 15 | boutons et pixels sociaux, hors du site du réseau |
+| Rejeu de session | 12 | l'enregistrement de vos mouvements et de vos frappes |
+
+Chacune se compile **à part** et s'éteint dans Réglages › Fonctions — éteinte, elle quitte
+le moteur et le disque, elle n'y reste pas neutralisée. Le découpage suit cette règle et
+pas une autre : une famille n'existe que si l'on peut vouloir la garder en éteignant les
+autres. La télémétrie d'un téléviseur qu'on ne possède pas ne bloquera jamais rien ; les
+noms de classe (`.ad-slot`) sont les seules règles qui jugent sur le nom et non sur
+l'origine, donc les seules qui puissent se tromper de cible.
+
+Une conséquence a décidé de l'architecture, et elle a été mesurée : **`ignore-previous-rules`
+n'annule que dans sa propre liste.** Une exception compilée à part ne lève rien ailleurs.
+Les exceptions par site sont donc recopiées à la fin de chaque liste — sans quoi « désactiver
+la protection sur ce site » n'aurait tenu parole que pour une famille sur six.
 
 **Un seul format dans toute l'application.** Ce que le sélecteur d'élément produit, ce que
 vous ajoutez à la main, les exceptions par site : toutes des règles WebKit. Il ne reste

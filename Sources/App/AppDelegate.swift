@@ -71,11 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                                         favorites: favorites, icons: favicons)
         pages.adBlock = { [unowned self] path in
             AdBlockPage.html(section: AdBlockPage.Section.from(path: path),
-                             state: blocker.state.summary,
-                             bundled: blocker.bundledCount,
                              userRules: blocker.userRules.rules,
-                             exceptions: settings.blockingExceptions,
-                             isBusy: blocker.state.isBusy)
+                             exceptions: settings.blockingExceptions)
         }
         pages.scripts = { [unowned self] in ScriptsPage.html(scripts: userScripts.scripts) }
         pages.settings = { [unowned self] path in

@@ -1,0 +1,28 @@
+// Rejeu de session.
+//
+// L'enregistrement de ce que vous faites à l'écran : mouvements de souris, frappes,
+// hésitations, rejoué ensuite comme une vidéo par l'éditeur du site.
+//
+// Une famille à part parce que ce qu'elle collecte est d'une autre nature — pas une
+// statistique de visite, la reconstitution de votre séance.
+//
+// Format `WKContentRuleList` : WebKit compile ces lignes telles quelles, rien n'est
+// traduit au démarrage. Les lignes en « // » sont des repères de lecture — le chargeur
+// ne retient que les lignes qui sont des règles, et c'est tout ce que le moteur reçoit.
+//
+// Une ligne par domaine, dans sa section, en ordre alphabétique. La marche à suivre et
+// les critères d'entrée sont dans README.md, à côté de ce fichier.
+
+// ─── Rejeu de session — l'enregistrement de ce que vous faites à l'écran ───
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?fullstory\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?hotjar\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?inspectlet\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?logrocket\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?luckyorange\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?mouseflow\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?quantummetric\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?smartlook\\.com[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?hotjar\\.io[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?clarity\\.ms[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?contentsquare\\.net[/:]"}},
+  {"action":{"type":"block"},"trigger":{"url-filter":"^[^:]+://+([^:/]+\\.)?luckyorange\\.net[/:]"}},

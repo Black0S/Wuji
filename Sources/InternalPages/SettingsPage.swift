@@ -64,6 +64,8 @@ enum SettingsPage {
         var userScripts: Bool
         var agent: String
         var blockingSummary: String
+        /// Les listes livrées, dans l'ordre du catalogue.
+        var ruleLists: [(id: String, name: String, summary: String, count: Int, isOn: Bool)]
         /// Les autorisations accordées ou refusées, par site.
         var permissions: [(host: String, kind: String, isAllowed: Bool)]
     }
@@ -114,6 +116,7 @@ enum SettingsPage {
                 + ". Elles ne visent que des domaines : les publicités servies depuis le "
                 + "domaine du site lui-même, YouTube au premier chef, lui échappent.",
             control: toggle(name: "blocking", isOn: state.blockingEnabled))
+        + ruleLists(state)
         + row(title: "Décharger les onglets inactifs",
               subtitle: "Un onglet qu'on ne regarde plus rend sa mémoire, sans quitter la "
                   + "colonne — le survol le réveille avant même le clic. Aucune valeur ne "
@@ -127,6 +130,36 @@ enum SettingsPage {
               subtitle: "Du code à vous, exécuté sur les sites que vous désignez. Éteint, "
                   + "l'icône quitte la barre et plus aucun script ne s'exécute.",
               control: toggle(name: "userscripts", isOn: state.userScripts))
+    }
+
+    /// Les listes, une par ligne, avec ce qu'elles pèsent.
+    ///
+    /// **Chaque liste se compile à part**, donc en éteindre une la retire réellement du
+    /// moteur au lieu de la neutraliser — elle quitte aussi le disque. Le compte de règles
+    /// est celui du fichier livré, pas une estimation : c'est ce qui rend le choix
+    /// vérifiable plutôt que déclaratif.
+    private static func ruleLists(_ state: State) -> String {
+        let intro = """
+        <div class="row block">
+          <div class="labels">
+            <span class="title">Listes de règles</span>
+            <span class="subtitle">Elles sont livrées avec l'application, écrites dans le
+            format que WebKit compile. En éteindre une la retire du moteur ; vos règles et
+            vos exceptions, elles, s'appliquent toujours.</span>
+          </div>
+        </div>
+        """
+        // Le blocage éteint, ces interrupteurs ne piloteraient rien : on le dit au lieu de
+        // les afficher. Un contrôle mort est pire qu'un contrôle absent.
+        guard state.blockingEnabled else {
+            return intro + #"<p class="none">Le blocage est éteint : aucune liste ne s'applique.</p>"#
+        }
+        return intro + state.ruleLists.map { list in
+            row(title: escape(list.name),
+                subtitle: escape(list.summary)
+                    + " <span class=\"readout inline\">\(list.count) règles</span>",
+                control: toggle(name: "list:\(list.id)", isOn: list.isOn))
+        }.joined()
     }
 
     private static func development(_ state: State) -> String {
@@ -331,6 +364,10 @@ enum SettingsPage {
     .verdict { font-size: 12px; color: var(--muted); }
     .verdict.no { color: var(--danger); }
     .none { color: var(--muted); font-size: 12px; padding-bottom: 16px; }
+    /* Le compte de règles se lit dans la phrase, pas dans une colonne à part : il qualifie
+       la liste, il ne se compare pas d'une ligne à l'autre. */
+    .readout.inline { min-width: 0; text-align: left; font-variant-numeric: tabular-nums;
+                      white-space: nowrap; }
     """
 
     private static let script = """
