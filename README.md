@@ -277,7 +277,9 @@ décrit dans [CONTRIBUTING.md](CONTRIBUTING.md), qui ne retire rien aux contribu
 laisse leur travail sous GPL-3.0 comme le reste.
 
 La seule dépendance, [swift-psl](https://github.com/ameshkov/swift-psl), est sous MIT —
-compatible. Les règles de `Sources/Blocking/Assets` sont couvertes par la licence du
+compatible, et suivie au mois : elle publie une version tous les trois jours, parce
+qu'elle transporte la liste des suffixes publics, qui change dès qu'un registre ajoute
+une extension. Les règles de `Sources/Blocking/Assets` sont couvertes par la licence du
 projet ; elles sont écrites à la main, adossées à des listes de référence pour la décision
 de bloquer un domaine, jamais recopiées depuis elles.
 
