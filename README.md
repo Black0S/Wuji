@@ -53,6 +53,16 @@ aura chez quelqu'un, et macOS ne lui accorde pas les autorisations au même nom.
 La signature est ad-hoc. Sur une autre machine, le premier lancement demandera un clic
 droit → Ouvrir : il faudrait une identité Developer ID et la notarisation pour s'en passer.
 
+**Et les clés d'accès en dépendent.** L'API WebAuthn est bien exposée — `PublicKeyCredential`
+existe, le contexte est sûr — mais `isUserVerifyingPlatformAuthenticatorAvailable()` répond
+`false`, mesuré dans un `WKWebView` nu. C'est exactement ce que Google interroge avant de
+proposer la clé d'accès : il voit qu'il n'y a pas d'authentificateur et bascule sur le mot
+de passe. Toucher au trousseau iCloud depuis une vue web demande l'entitlement
+`com.apple.developer.web-browser-public-key-credential`, qu'Apple réserve aux navigateurs
+et qu'un profil de provisionnement doit porter. Il ne peut pas être ajouté d'ici là :
+mesuré aussi, un paquet signé ad-hoc qui le déclare est tué au lancement (SIGKILL), là où
+le même paquet sans lui démarre.
+
 `uninstall.sh` mérite un mot : supprimer le dossier de l'application ne suffit pas. Les
 réglages restent dans le démon des préférences, les autorisations caméra et position dans
 une base du système. Un test qui repart d'un état non vide fait croire à un premier
