@@ -69,7 +69,6 @@ extension AppDelegate {
             tab.webView.observe(\.url, options: [.initial, .new], changeHandler: sync),
             tab.webView.observe(\.title, options: [.initial, .new], changeHandler: sync),
             tab.webView.observe(\.isLoading, options: [.initial, .new], changeHandler: sync),
-            tab.webView.observe(\.estimatedProgress, options: [.initial, .new], changeHandler: sync),
             tab.webView.observe(\.canGoBack, options: [.initial, .new], changeHandler: sync),
             tab.webView.observe(\.canGoForward, options: [.initial, .new], changeHandler: sync)
         ]
@@ -228,7 +227,6 @@ extension AppDelegate {
         guard !spaces.isEmpty, let tab = currentTab else { return }
         let state = tab.security
         layout.content.border.set(state)
-        layout.content.setProgress(tab.webView.estimatedProgress, isLoading: tab.webView.isLoading)
         layout.topBar.show(url: tab.url,
                            security: state,
                            canGoBack: tab.webView.canGoBack,

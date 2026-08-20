@@ -12,11 +12,6 @@ final class BrowserContent: ThemedView {
     let border = SecurityBorderView()
     private(set) var webView: WKWebView?
 
-    /// Le chargement est le seul retour d'information qui doit rester visible **même
-    /// interface masquée** : sans lui, une page lente est indiscernable d'un clic manqué.
-    /// D'où un filet de 2 pt collé au bord haut du contenu, qui s'efface tout seul.
-    private let progress = NSView()
-
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
@@ -30,10 +25,7 @@ final class BrowserContent: ThemedView {
         layer?.maskedCorners = [.layerMinXMaxYCorner]
         layer?.masksToBounds = true
 
-        progress.wantsLayer = true
-        progress.layer?.opacity = 0
         addSubview(border)
-        addSubview(progress)
     }
 
     @available(*, unavailable)
@@ -43,20 +35,18 @@ final class BrowserContent: ThemedView {
         super.layout()
         webView?.frame = bounds
         border.frame = bounds       // au-dessus du contenu : la page ne se remet jamais en page
-        progress.layer?.backgroundColor = Tokens.textPrimary.cgColor
     }
 
-    func setProgress(_ value: Double, isLoading: Bool) {
-        let height: CGFloat = 2
-        let width = bounds.width * CGFloat(min(max(value, 0), 1))
-
-        CATransaction.begin()
-        CATransaction.setAnimationDuration(0.15)
-        progress.frame = NSRect(x: 0, y: bounds.height - height, width: width, height: height)
-        // On disparaît à l'arrivée, pas à 100 % : la barre ne doit jamais rester à l'écran.
-        progress.layer?.opacity = (isLoading && value < 1) ? 0.55 : 0
-        CATransaction.commit()
-    }
+    // **Pas de barre de chargement.**
+    //
+    // Il y en avait une : un filet clair collé au bord haut du contenu. Elle datait d'une
+    // interface qui s'escamotait, où plus rien n'aurait dit qu'une page travaille. Cette
+    // interface n'existe plus — la colonne marque déjà l'onglet qui charge, et le reste du
+    // temps ce filet ne faisait que traverser l'écran à chaque navigation.
+    //
+    // Ce qu'on gagne en plus du calme : l'avancement du chargement n'est plus observé du
+    // tout, donc le chrome cesse de se resynchroniser plusieurs fois par seconde pendant
+    // qu'une page arrive.
 
     func attach(_ newWebView: WKWebView) {
         guard newWebView !== webView else { return }
