@@ -23,7 +23,7 @@ déclarez :
 1. que vous êtes l'auteur de cette contribution, ou que vous avez le droit de la soumettre ;
 2. qu'elle n'est couverte par aucune obligation contraire — celle d'un employeur, d'un
    client, ou d'une licence incompatible ;
-3. que vous accordez à Black0S une licence **irrévocable, mondiale, sans redevance**
+3. que vous accordez à Liam Jutteau (Black0S) une licence **irrévocable, mondiale, sans redevance**
    pour utiliser, modifier, publier et **redistribuer sous d'autres conditions** votre
    contribution, y compris sous une licence commerciale ;
 4. que vous conservez tous vos droits d'auteur sur ce que vous avez écrit, et le droit de
@@ -31,6 +31,10 @@ déclarez :
 
 Rien n'est à signer : proposer une modification vaut acceptation. Votre nom reste attaché
 à vos commits.
+
+« Black0S » est le pseudonyme sous lequel le projet est publié ; le titulaire des droits est
+Liam Jutteau. Les deux sont écrits ensemble parce qu'un accord de contribution n'a de valeur
+que s'il désigne une personne identifiable.
 
 ## Ce qui est attendu d'une contribution
 

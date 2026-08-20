@@ -2,7 +2,7 @@
 import PackageDescription
 
 // Wuji — un navigateur pour macOS.
-// Copyright © 2026 Black0S. Sous GPL-3.0 : voir le fichier LICENSE.
+// Copyright © 2026 Liam Jutteau (Black0S). Sous GPL-3.0 : voir le fichier LICENSE.
 
 // Exécutable SPM plutôt que projet Xcode : boucle `swift build` en quelques secondes,
 // rien à maintenir, et le bundle .app s'assemble dans run.sh.
