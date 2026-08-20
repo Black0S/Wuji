@@ -14,8 +14,12 @@
 	<string>APPL</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
+	<!-- La version vit ici et nulle part ailleurs : une construction faite à partir d'un
+	     commit donné annonce donc toujours le même numéro, et le `.dmg` publié se rattache
+	     à une ligne de l'historique. `release.sh` la lit et refuse de travailler sur un
+	     dépôt modifié, pour que ce lien tienne. -->
 	<key>CFBundleShortVersionString</key>
-	<string>0.0.1</string>
+	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>

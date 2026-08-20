@@ -51,8 +51,34 @@ AIDE
 fi
 echo "→ identité : $IDENTITE"
 
+# **On ne publie que ce qui est dans l'historique.**
+#
+# Le script compile l'arbre de travail, pas un commit. Sans cette barrière, un `.dmg`
+# distribué pourrait contenir du code qui n'existe nulle part — impossible à retrouver, à
+# corriger ou à vérifier par qui que ce soit. Sur un projet ouvert, c'est la promesse même
+# du dépôt qui tombe.
+if [ -n "$(git status --porcelain)" ]; then
+    echo "Dépôt modifié. Commitez ou remisez avant de publier :" >&2
+    git status --short >&2
+    exit 1
+fi
+
+VERSION="$(plutil -extract CFBundleShortVersionString raw Resources/Info.plist)"
+# Le numéro de construction est le nombre de commits : il augmente tout seul, ne se
+# néglige jamais, et dit exactement d'où vient le paquet.
+CONSTRUCTION="$(git rev-list --count HEAD)"
+echo "→ version $VERSION ($CONSTRUCTION) · $(git rev-parse --short HEAD)"
+
+# Les tests avant la signature, pas après. Signer d'abord reviendrait à apposer son nom
+# sur du code qu'on n'a pas vérifié — et c'est précisément ce que la signature affirme.
+echo "→ tests"
+swift test 2>&1 | tail -1
+
 # ---------------------------------------------------------------- l'application
 ./build.sh release
+
+# Le numéro de construction est posé dans le paquet, donc avant la signature qui le scelle.
+plutil -replace CFBundleVersion -string "$CONSTRUCTION" .build/Wuji.app/Contents/Info.plist
 
 # `--options runtime` : le durcissement de l'exécution, exigé par la notarisation. Il
 # interdit à d'autres processus de s'injecter dans Wuji — ce qui est bien le moins pour un
@@ -112,7 +138,11 @@ xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
 
 echo
-echo "→ $(pwd)/$DMG  ($(du -h "$DMG" | cut -f1))"
+echo "→ $(pwd)/$DMG  ($(du -h "$DMG" | cut -f1))  ·  version $VERSION ($CONSTRUCTION)"
 echo "  vérifications finales :"
 spctl --assess --type open --context context:primary-signature -v "$DMG"
 spctl --assess --type execute -v .build/Wuji.app
+echo
+echo "  pour publier :"
+echo "    git tag -a v$VERSION -m \"Wuji $VERSION\" && git push origin v$VERSION"
+echo "    puis déposer $DMG dans la release du même nom"
