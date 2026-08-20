@@ -262,10 +262,49 @@ extension AppDelegate {
         // Les pages de l'application n'ont pas de point dans leur nom : « wuji://settings »
         // partait en recherche, ce qui est le contraire de ce qu'on demande en le tapant.
         if input.hasPrefix("\(InternalPageHandler.scheme)://") { return URL(string: input) }
+        guard !input.contains(" ") else { return nil }
 
-        guard !input.contains(" "), input.contains(".") else { return nil }
-        let candidate = input.contains("://") ? input : "https://\(input)"
-        guard let url = URL(string: candidate), url.host != nil else { return nil }
+        // Un schéma écrit à la main fait foi : on ne corrige pas ce qui est explicite.
+        if input.contains("://") {
+            guard let url = URL(string: input), url.host != nil else { return nil }
+            return url
+        }
+
+        // Le point ne suffit plus à distinguer une adresse d'une recherche : « localhost:8080 »
+        // n'en a pas et n'est pas une question qu'on pose à un moteur.
+        let authority = input.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
+        let host = authority.split(separator: ":", maxSplits: 1).first.map(String.init) ?? ""
+        let local = isLocalHost(host)
+        guard input.contains(".") || local else { return nil }
+
+        // **`https` par défaut, sauf chez soi.** Un serveur de développement ne présente
+        // presque jamais de certificat : viser `https://pma.localhost` d'abord, c'est
+        // échouer sur une adresse qui marche. Ailleurs le défaut reste le chiffrement —
+        // on ne rétrograde pas le web entier pour le cas du poste local.
+        guard let url = URL(string: "\(local ? "http" : "https")://\(input)"),
+              url.host != nil else { return nil }
         return url
+    }
+
+    /// « Chez soi » : cette machine, ou le réseau qu'on a sous la main.
+    ///
+    /// `localhost` et ses sous-domaines — c'est ainsi qu'un routeur de conteneurs nomme
+    /// chaque service (`pma.localhost`, `api.localhost`) —, les noms Bonjour en `.local`,
+    /// la boucle locale et les plages privées.
+    static func isLocalHost(_ host: String) -> Bool {
+        let host = host.lowercased()
+        if host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local") {
+            return true
+        }
+        if host == "127.0.0.1" || host == "::1" || host == "[::1]" { return true }
+        if host.hasPrefix("192.168.") || host.hasPrefix("10.") || host.hasPrefix("169.254.") {
+            return true
+        }
+        // 172.16.0.0 – 172.31.255.255 : la plage privée qui ne se lit pas au préfixe.
+        let parts = host.split(separator: ".")
+        if parts.count == 4, parts[0] == "172", let second = Int(parts[1]), (16...31).contains(second) {
+            return true
+        }
+        return false
     }
 }

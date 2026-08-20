@@ -152,7 +152,15 @@ extension AppDelegate {
     func installScript(from url: URL) {
         Task { [weak self] in
             guard let (data, _) = try? await URLSession.shared.data(from: url),
-                  let text = String(data: data, encoding: .utf8) else { return }
+                  let text = String(data: data, encoding: .utf8) else {
+                // L'échec était muet : on cliquait sur une adresse en `.user.js`, et il ne
+                // se passait plus jamais rien. Un refus qu'on ne voit pas ressemble à une
+                // fonction cassée.
+                self?.layout.toast.show(url.scheme == "http"
+                    ? "Adresse non chiffrée : un script ne s'installe pas ainsi"
+                    : "Téléchargement impossible")
+                return
+            }
             guard let self else { return }
             let preview = UserScript(text: text, source: url)
             self.layout.toast.ask(

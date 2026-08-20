@@ -22,10 +22,52 @@
 	<string>26.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<!-- **Un navigateur doit pouvoir ouvrir ce qu'on lui demande.**
+
+	     Sans cette clé, App Transport Security refusait toute page en `http://` avant
+	     même la requête : erreur -1022, page blanche, et rien qui dise pourquoi. Le cas
+	     signalé est un conteneur Docker derrière Traefik — `http://pma.localhost/` —,
+	     mais la règle valait pour tout le web en clair.
+
+	     Mesuré avec un `WKWebView` nu dans trois paquets identiques à ceci près :
+	       sans clé ............................ -1022
+	       NSAllowsLocalNetworking seul ........ -1022  (`pma.localhost` est un nom
+	                                                     qualifié : ni `.local`, ni une
+	                                                     adresse IP privée)
+	       NSAllowsArbitraryLoadsInWebContent .. chargé, titre « phpMyAdmin »
+
+	     `NSAllowsLocalNetworking` n'est retenue nulle part : elle ne débloque pas
+	     `pma.localhost`, et une adresse IP privée en `http://` passe déjà sans elle.
+
+	     D'où cette clé, et elle seule : elle libère **le contenu web** et laisse ATS
+	     protéger les requêtes que l'application émet pour son compte. Ce qui circule en
+	     clair reste signalé — triangle contre l'adresse, `http://` en couleur d'alerte. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+		<!-- La page passe, mais pas ce que Wuji va chercher lui-même : sa favicon partait
+		     par `URLSession`, qu'ATS protège toujours — mesuré, -1022 aussi. Un service
+		     local se serait donc affiché sans icône. L'exception ne couvre que `localhost`
+		     et ses sous-domaines, la forme que prend chaque service derrière un routeur de
+		     conteneurs. Le web en clair, lui, reste refusé à l'application : c'est par là
+		     que passe l'installation d'un script utilisateur, et du code téléchargé sur
+		     une connexion que n'importe qui peut réécrire n'a rien à faire ici. -->
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>localhost</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<!-- Sans ces descriptions, une page qui demande la caméra ou le micro échoue en
-	     silence. C'est aussi ce que le liseré « permission active » doit signaler. -->
+	     silence — macOS refuse pour nous, et la page vous attribue le refus. -->
 	<!-- Sans cette déclaration, macOS ne propose même pas Wuji dans la liste des
 	     navigateurs : on ne peut pas devenir le navigateur par défaut si l'on n'a jamais
 	     dit qu'on savait ouvrir une adresse. -->
