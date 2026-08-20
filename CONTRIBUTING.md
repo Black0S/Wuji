@@ -23,7 +23,7 @@ déclarez :
 1. que vous êtes l'auteur de cette contribution, ou que vous avez le droit de la soumettre ;
 2. qu'elle n'est couverte par aucune obligation contraire — celle d'un employeur, d'un
    client, ou d'une licence incompatible ;
-3. que vous accordez à Liam Jutteau une licence **irrévocable, mondiale, sans redevance**
+3. que vous accordez à Black0S une licence **irrévocable, mondiale, sans redevance**
    pour utiliser, modifier, publier et **redistribuer sous d'autres conditions** votre
    contribution, y compris sous une licence commerciale ;
 4. que vous conservez tous vos droits d'auteur sur ce que vous avez écrit, et le droit de

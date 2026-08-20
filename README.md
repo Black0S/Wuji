@@ -264,7 +264,7 @@ sites exclus, scripts, réglages — avec le même sommaire à gauche partout.
 
 ## Licence
 
-**[GPL-3.0](LICENSE).** Copyright © 2026 Liam Jutteau.
+**[GPL-3.0](LICENSE).** Copyright © 2026 Black0S.
 
 Wuji peut être lu, modifié et redistribué par qui veut — mais **pas fermé** : qui publie
 une version modifiée doit en publier le code sous la même licence. Le travail reste ouvert
