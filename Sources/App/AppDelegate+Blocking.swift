@@ -55,6 +55,8 @@ extension AppDelegate {
                            siteZoom: settings.siteZoom.sorted { $0.key < $1.key }
                                .map { ($0.key, Int(($0.value * 100).rounded())) },
                            userScripts: settings.userScriptsEnabled,
+                           version: UpdateCheck.current,
+                           checkUpdates: settings.checkUpdatesAtLaunch,
                            agent: settings.agent.rawValue,
                            blockingSummary: blocker.state.summary,
                            permissions: permissions.decisions.map {
@@ -87,6 +89,8 @@ extension AppDelegate {
             case "blocking":
                 settings.blockingEnabled = (value == "true")
                 blocker.start()
+            case "updates":
+                settings.checkUpdatesAtLaunch = (value == "true")
             case "userscripts":
                 settings.userScriptsEnabled = (value == "true")
                 syncBlockingButton()
@@ -100,6 +104,8 @@ extension AppDelegate {
             }
         case "make-default":
             askToBecomeDefault()
+        case "check-updates":
+            checkForUpdate(announcingWhenCurrent: true)
         case "clear-history":
             history.clear()
             refreshSettingsPages()
@@ -148,6 +154,27 @@ extension AppDelegate {
             siteDataCount = 0
             refreshSettingsPages()
             layout.toast.show("Données de sites effacées")
+        }
+    }
+
+    /// Demande la dernière version publiée, et dit ce qu'elle vaut.
+    ///
+    /// **Le silence n'est pas une réponse acceptable quand on a cliqué.** Une vérification
+    /// demandée qui ne dit rien laisse croire à une fonction cassée ; une vérification faite
+    /// au lancement, elle, ne parle que si elle a quelque chose à annoncer.
+    func checkForUpdate(announcingWhenCurrent: Bool) {
+        Task { @MainActor in
+            guard let dernière = await UpdateCheck.latest() else {
+                if announcingWhenCurrent { layout.toast.show("Vérification impossible") }
+                return
+            }
+            if UpdateCheck.isNewer(dernière.version, than: UpdateCheck.current) {
+                layout.toast.show("Wuji \(dernière.version) est disponible") { [weak self] in
+                    self?.openInNewTab(dernière.page, activate: true)
+                }
+            } else if announcingWhenCurrent {
+                layout.toast.show("Version \(UpdateCheck.current) — c'est la dernière")
+            }
         }
     }
 

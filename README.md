@@ -215,6 +215,12 @@ n'est visible du moteur que si sa signature satisfait *exactement* l'exigence du
 et une signature qui s'en écarte ne produit ni erreur ni avertissement. Un test demande
 maintenant à la classe ce que WebKit lui demande.
 
+**Mises à jour.** Réglages › Fonctions demande à GitHub la dernière version publiée —
+**sans identifiant, et sans dire laquelle vous utilisez** : la comparaison se fait ici.
+Rien n'est téléchargé ni installé tout seul ; la page de la version s'ouvre, et vous
+décidez. La vérification au lancement est **éteinte par défaut**, parce qu'une requête
+automatique contredirait la phrase juste en dessous pour ceux qui ne l'ont pas lue.
+
 **Pages internes** en `wuji://` — favoris, historique, téléchargements, listes de règles,
 sites exclus, scripts, réglages — avec le même sommaire à gauche partout.
 
@@ -241,7 +247,9 @@ sites exclus, scripts, réglages — avec le même sommaire à gauche partout.
 
 - **Aucun contrôle mort.** Un réglage qui ne pilote rien est pire qu'un réglage absent : il
   donne l'illusion d'un produit plus avancé qu'il ne l'est.
-- **Aucune télémétrie.** Rien ne part de cette machine que vous n'ayez demandé.
+- **Aucune télémétrie.** Rien ne part de cette machine que vous n'ayez demandé — la seule
+  requête que Wuji émette pour son propre compte est la vérification de version, et elle
+  ne se déclenche que sur un clic, sauf si vous l'autorisez au lancement.
 - **Aucun mot de passe enregistré.** Stocker des identifiants demande de les remplir, et
   c'est le remplissage qui coûte : au mauvais endroit, dans un cadre tiers ou sur une
   origine voisine, il livre un mot de passe à un site qui ne l'a jamais eu. C'est la seule

@@ -62,6 +62,8 @@ enum SettingsPage {
         var sleepDelay: Int
         var siteZoom: [(site: String, zoom: Int)]
         var userScripts: Bool
+        var version: String
+        var checkUpdates: Bool
         var agent: String
         var blockingSummary: String
         /// Les autorisations accordées ou refusées, par site.
@@ -122,6 +124,13 @@ enum SettingsPage {
                                         ("300", "5 minutes"), ("900", "15 minutes"),
                                         ("1800", "30 minutes"), ("3600", "1 heure")],
                               selected: String(state.sleepDelay)))
+        + row(title: "Mises à jour",
+              subtitle: "Version \(escape(state.version)). La vérification demande la dernière "
+                  + "version publiée à GitHub — sans identifiant, et sans dire laquelle vous "
+                  + "utilisez : la comparaison se fait ici. Rien n'est téléchargé ni installé "
+                  + "tout seul ; on ouvre la page, vous décidez.",
+              control: #"<button class="button" data-action="check-updates">Vérifier</button>"#
+                  + toggle(name: "updates", isOn: state.checkUpdates))
         + row(title: "Scripts utilisateur",
               subtitle: "Du code à vous, exécuté sur les sites que vous désignez. Éteint, "
                   + "l'icône quitte la barre et plus aucun script ne s'exécute.",

@@ -235,6 +235,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         blocker.isPrivate = { [weak self] in self?.isPrivateSpace ?? false }
         blocker.start()
 
+        // Après le reste : une vérification de version n'a aucune raison de retarder
+        // l'affichage de la fenêtre.
+        if settings.checkUpdatesAtLaunch { checkForUpdate(announcingWhenCurrent: false) }
+
         history.purge(olderThan: settings.historyRetention)
         restoreSession()
         window.makeKeyAndOrderFront(nil)

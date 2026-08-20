@@ -139,6 +139,16 @@ final class Settings {
         didSet { store.set(userScriptsEnabled, forKey: Key.userScripts); changed() }
     }
 
+    /// Chercher une version plus récente au lancement.
+    ///
+    /// **Éteint par défaut, et ce n'est pas de la timidité.** Le projet promet que rien ne
+    /// part de cette machine sans qu'on l'ait demandé ; une requête au démarrage
+    /// contredirait cette phrase pour tout le monde, y compris ceux qui ne l'ont pas lue.
+    /// Le bouton « Vérifier » reste disponible à tout moment.
+    var checkUpdatesAtLaunch: Bool {
+        didSet { store.set(checkUpdatesAtLaunch, forKey: Key.checkUpdates); changed() }
+    }
+
     // MARK: - Protection
 
     var blockingEnabled: Bool {
@@ -196,6 +206,7 @@ final class Settings {
         static let disabledRuleLists = "disabledRuleLists"
         static let agent = "agent"
         static let userScripts = "userScriptsEnabled"
+        static let checkUpdates = "checkUpdatesAtLaunch"
     }
 
     init() {
@@ -212,6 +223,7 @@ final class Settings {
         disabledRuleLists = store.stringArray(forKey: Key.disabledRuleLists) ?? []
         agent = Agent(rawValue: store.string(forKey: Key.agent) ?? "") ?? .safari
         userScriptsEnabled = store.object(forKey: Key.userScripts) as? Bool ?? true
+        checkUpdatesAtLaunch = store.bool(forKey: Key.checkUpdates)
     }
 
     private func changed() { onChange?() }
