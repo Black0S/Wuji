@@ -17,6 +17,18 @@ struct SiteTests {
         #expect(Site.name(ofHost: "youtube.com") == "youtube.com")
     }
 
+    @Test func unHôteAccentuéSeRangeSousSaFormeRéseau() {
+        // La seconde barrière : même si une URL mal normalisée arrive jusqu'ici, la clé de
+        // rangement doit être celle que la page annoncera — sinon une exception de blocage
+        // ne correspond à rien.
+        #expect(Site.punycode("caf%C3%A9.fr") == "xn--caf-dma.fr")
+        #expect(Site.name(ofHost: "caf%C3%A9.fr") == "xn--caf-dma.fr")
+        #expect(Site.name(ofHost: "www.m%C3%BCnchen.de") == "xn--mnchen-3ya.de")
+        // Ce qui n'a pas de pourcentage n'est pas touché : la conversion ne s'invite pas.
+        #expect(Site.punycode("exemple.com") == "exemple.com")
+        #expect(Site.name(ofHost: "xn--caf-dma.fr") == "xn--caf-dma.fr")
+    }
+
     @Test func unSuffixePublicNEstPasUnSite() {
         // Deux personnes différentes. Lever la protection sur l'une ne doit rien faire
         // pour l'autre — c'est le cas qui interdit de couper au deuxième point.

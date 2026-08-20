@@ -132,7 +132,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// ailleurs.
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls where url.scheme == "http" || url.scheme == "https" {
-            openInNewTab(url, activate: true)
+            // Un lien cliqué dans une autre application arrive tel qu'il y était écrit —
+            // accents compris. On le normalise comme une saisie de l'omnibox, sinon tout
+            // ce qui se range par hôte hérite d'une forme que le réseau ne connaît pas.
+            openInNewTab(Self.directURL(url.absoluteString) ?? url, activate: true)
         }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()

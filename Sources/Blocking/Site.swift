@@ -22,11 +22,30 @@ enum Site {
     /// Le nom du site pour un hôte donné, ou l'hôte lui-même quand la liste ne tranche
     /// pas — une adresse IP, un nom de machine local.
     static func name(ofHost host: String) -> String {
-        let host = host.lowercased()
+        let host = punycode(host.lowercased())
         if let cached = known[host] { return cached }
         let name = isAddress(host) ? host : (PublicSuffixList.effectiveTLDPlusOne(host) ?? host)
         known[host] = name
         return name
+    }
+
+    /// **Un hôte accentué se range sous sa forme réseau, pas sous celle qu'on a tapée.**
+    ///
+    /// `URL.host()` rend `caf%C3%A9.fr` pour une adresse composée à partir de « café.fr » :
+    /// la forme pourcent-encodée de la saisie, que le réseau ne connaît pas et que la liste
+    /// des suffixes publics ne sait pas découper. Une exception de blocage rangée sous
+    /// cette chaîne n'aurait jamais correspondu à la page, qui s'annonce en punycode.
+    ///
+    /// Les entrées d'URL normalisent déjà en amont ; ceci est la seconde barrière, posée là
+    /// parce que c'est **ici que se fabriquent les clés de rangement**. Foundation fait la
+    /// conversion : il suffit de lui faire composer une URL et de relire la chaîne.
+    static func punycode(_ host: String) -> String {
+        guard host.contains("%"),
+              let decoded = host.removingPercentEncoding,
+              let url = URL(string: "https://" + decoded),
+              let encoded = URLComponents(url: url, resolvingAgainstBaseURL: false)?.encodedHost
+        else { return host }
+        return encoded.lowercased()
     }
 
     /// Une adresse numérique n'a pas de suffixe public, et la liste ne le sait pas.
