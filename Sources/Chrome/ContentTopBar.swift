@@ -34,6 +34,8 @@ final class ContentTopBar: ThemedView {
     private let braces = NSButton()
     private var blocking: Blocking = .off
     private let lock = NSImageView()
+    private let plaque = ThemedView()
+    private var addressHovered = false
     private let address = NSTextField(labelWithString: "")
 
     override init(frame frameRect: NSRect) {
@@ -56,6 +58,17 @@ final class ContentTopBar: ThemedView {
         configure(braces, symbol: "curlybraces", label: "Scripts")
         braces.isHidden = true
 
+        // Une surface discrète derrière l'adresse, visible au survol seulement.
+        //
+        // Cliquer l'adresse ouvre la palette, et rien ne le disait : un texte nu au milieu
+        // d'une barre ne se donne pas pour une cible. Un fond permanent aurait ajouté du
+        // chrome à demeure ; celui-ci n'existe que sous le curseur, au moment où la
+        // question « est-ce que ça se clique ? » se pose.
+        plaque.wantsLayer = true
+        plaque.layer?.cornerRadius = 8
+        plaque.layer?.cornerCurve = .continuous
+        addSubview(plaque)
+
         lock.imageScaling = .scaleProportionallyDown
         // **Le cadenas est cliquable.** Il affirmait « chiffré » sans jamais dire par qui,
         // et c'est précisément la question qu'on se pose au moment où l'on regarde ce
@@ -65,7 +78,7 @@ final class ContentTopBar: ThemedView {
         addSubview(lock)
 
         address.font = .systemFont(ofSize: 13, weight: .medium)
-        address.alignment = .center
+        address.alignment = .left
         address.lineBreakMode = .byTruncatingTail
         addSubview(address)
         address.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(openOmnibox)))
@@ -111,9 +124,6 @@ final class ContentTopBar: ThemedView {
         // la position des icônes.
         let disponible = bounds.width - 2 * (Tokens.Space.l + 4 * size)
         let addressWidth = max(320, min(disponible, bounds.width * 0.52))
-        address.frame = NSRect(x: (bounds.width - addressWidth) / 2, y: (bounds.height - 16) / 2,
-                               width: addressWidth, height: 16)
-
         // Le cadenas se pose contre le texte, pas contre le cadre du champ. Le texte est
         // centré : ancré au cadre, le cadenas s'en éloignait à mesure que le champ
         // grandissait, et qualifiait une adresse dont il était séparé par un vide.
@@ -125,12 +135,33 @@ final class ContentTopBar: ThemedView {
         let mesure = address.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: addressWidth,
                                                               height: 16)).width ?? 0
         let texte = min(max(mesure, 0), addressWidth)
-        let début = address.frame.midX - texte / 2
-        lock.frame = NSRect(x: début - 20, y: (bounds.height - 14) / 2, width: 14, height: 14)
+
+        // **Le cadenas et l'adresse forment un bloc, centré ensemble.**
+        //
+        // Chacun placé de son côté, le cadenas devait deviner où le texte commençait — et
+        // s'est retrouvé dessiné par-dessus quand la mesure rendait zéro. Ici il n'y a plus
+        // rien à deviner : le groupe a une largeur, on la centre, et l'ordre à l'intérieur
+        // est fixe.
+        let écart: CGFloat = 8
+        let largeurGroupe = 14 + écart + texte
+        let gauche = (bounds.width - largeurGroupe) / 2
+
+        lock.frame = NSRect(x: gauche, y: (bounds.height - 14) / 2, width: 14, height: 14)
+        address.frame = NSRect(x: gauche + 14 + écart, y: (bounds.height - 16) / 2,
+                               width: min(texte, addressWidth), height: 16)
+
+        plaque.frame = NSRect(x: gauche - 10, y: (bounds.height - 28) / 2,
+                              width: largeurGroupe + 20, height: 28)
+        plaque.layer?.backgroundColor = addressHovered ? Tokens.selectionFill.cgColor
+                                                       : NSColor.clear.cgColor
+        updateTrackingAreas()
     }
 
     func show(url: URL?, security: SecurityBorderView.State, canGoBack: Bool, canGoForward: Bool) {
         address.attributedStringValue = Self.render(url, insecure: security == .insecure)
+        // Sans ce rappel, le cadenas gardait la position calculée pour l'adresse
+        // précédente — et pour la toute première, celle d'un champ vide : au milieu.
+        needsLayout = true
 
         let insecure = security == .insecure
         lock.image = NSImage(systemSymbolName: insecure ? "exclamationmark.triangle" : "lock",
@@ -225,6 +256,26 @@ final class ContentTopBar: ThemedView {
     var menuButton: NSView { more }
     var blockingButton: NSView { shield }
     var scriptsButton: NSView { braces }
+
+    // Le survol n'est suivi que sur la zone de l'adresse, et elle bouge avec le texte :
+    // la zone se refait donc à chaque mise en page plutôt qu'une fois pour toutes.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: plaque.frame,
+                                       options: [.mouseEnteredAndExited, .activeInKeyWindow],
+                                       owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        addressHovered = true
+        needsLayout = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        addressHovered = false
+        needsLayout = true
+    }
 
     @objc private func openOmnibox() { delegate?.topBarDidRequestOmnibox(self) }
 
