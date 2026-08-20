@@ -9,6 +9,32 @@ import Foundation
 /// qui devait suivre quinze ans de syntaxe Adblock et ses cas particuliers.
 enum WebKitRule {
 
+    /// Cette règle est-elle recevable ?
+    ///
+    /// **Une seule règle mal formée fait refuser toute la liste par le moteur**, sans bruit.
+    /// C'était supportable tant que les règles de l'utilisateur étaient écrites par le
+    /// sélecteur d'élément ; ça ne l'est plus depuis qu'on peut les taper et les corriger à
+    /// la main. On juge donc avant d'écrire, et on dit non plutôt que d'accepter en silence
+    /// quelque chose qui éteindra la protection au prochain démarrage.
+    ///
+    /// Le contrôle porte sur ce que WebKit exige : un objet, une action qu'il exécute
+    /// vraiment, un déclencheur avec son motif — et un sélecteur non vide pour un masquage.
+    static func isValid(_ rule: String) -> Bool {
+        guard let data = rule.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let action = object["action"] as? [String: Any],
+              let type = action["type"] as? String,
+              let trigger = object["trigger"] as? [String: Any],
+              trigger["url-filter"] is String,
+              // Les trois seules que le moteur exécute. `redirect` compile puis est
+              // ignorée — mesuré —, donc l'accepter promettrait ce qui n'arrive pas.
+              ["block", "css-display-none", "ignore-previous-rules"].contains(type)
+        else { return false }
+        guard type == "css-display-none" else { return true }
+        let selector = action["selector"] as? String
+        return !(selector ?? "").isEmpty
+    }
+
     /// Masquer un élément sur un site.
     static func hide(selector: String, on site: String) -> String {
         """

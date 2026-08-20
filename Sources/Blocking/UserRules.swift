@@ -33,6 +33,22 @@ final class UserRules {
         save()
     }
 
+    /// Remplace une règle **à sa place**.
+    ///
+    /// Retirer puis rajouter l'aurait renvoyée en fin de liste : on corrige une règle, on
+    /// ne la réécrit pas — et une liste qui se réordonne à chaque correction ne se relit
+    /// plus. Rend `false` si la règle n'existe plus, si le remplacement est vide, ou s'il
+    /// ferait un doublon.
+    @discardableResult
+    func replace(_ rule: String, with replacement: String) -> Bool {
+        let replacement = replacement.trimmingCharacters(in: .whitespaces)
+        guard !replacement.isEmpty, let index = rules.firstIndex(of: rule) else { return false }
+        guard replacement == rule || !rules.contains(replacement) else { return false }
+        rules[index] = replacement
+        save()
+        return true
+    }
+
     func remove(_ rule: String) {
         rules.removeAll { $0 == rule }
         save()

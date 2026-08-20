@@ -358,7 +358,18 @@ extension AppDelegate {
             blocker.compile()
         case "rule":
             guard let rule = payload["rule"] as? String else { return }
-            blocker.addUserRule(rule)
+            // Le refus se voit. Il était muet : on tapait une règle, le champ se vidait,
+            // et rien n'apparaissait — on ne pouvait pas savoir si elle était en train de
+            // se compiler ou si elle avait été jetée.
+            if !blocker.addUserRule(rule) {
+                layout.toast.show("Règle refusée : ce n'est pas une règle WebKit valide")
+            }
+        case "edit":
+            guard let rule = payload["rule"] as? String,
+                  let replacement = payload["replacement"] as? String else { return }
+            if !blocker.replaceUserRule(rule, with: replacement) {
+                layout.toast.show("Règle refusée : la précédente est conservée")
+            }
         case "unrule":
             guard let rule = payload["rule"] as? String else { return }
             blocker.removeUserRule(rule)

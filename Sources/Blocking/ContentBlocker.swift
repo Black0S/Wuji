@@ -283,9 +283,25 @@ final class ContentBlocker {
 
     // MARK: - Règles de l'utilisateur
 
-    func addUserRule(_ rule: String) {
+    /// Ajoute une règle, si elle en est une. Rend `false` quand elle est refusée — l'appelant
+    /// le dit à l'écran : une règle avalée en silence se cherche longtemps.
+    @discardableResult
+    func addUserRule(_ rule: String) -> Bool {
+        let rule = rule.trimmingCharacters(in: .whitespaces)
+        guard WebKitRule.isValid(rule) else { return false }
         userRules.add(rule)
         compile()
+        return true
+    }
+
+    /// Corrige une règle sans la déplacer.
+    @discardableResult
+    func replaceUserRule(_ rule: String, with replacement: String) -> Bool {
+        let replacement = replacement.trimmingCharacters(in: .whitespaces)
+        guard WebKitRule.isValid(replacement),
+              userRules.replace(rule, with: replacement) else { return false }
+        compile()
+        return true
     }
 
     func removeUserRule(_ rule: String) {

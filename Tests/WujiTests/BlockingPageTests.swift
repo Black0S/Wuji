@@ -47,6 +47,43 @@ struct BlockingPageTests {
         #expect(html.contains("1 liste active, 72 règles"))
     }
 
+    // MARK: - Mes règles
+
+    private func mesRègles(_ rules: [String]) -> String {
+        AdBlockPage.html(section: .myRules, lists: [], isBlockingOn: true,
+                         userRules: rules, exceptions: [])
+    }
+
+    private var deuxSites: [String] {
+        [WebKitRule.hide(selector: "#pub", on: "ledauphine.com"),
+         WebKitRule.hide(selector: "#pub2", on: "ledauphine.com"),
+         WebKitRule.hide(selector: "#offer", on: "youtube.com")]
+    }
+
+    @Test func onChoisitLeSiteQuOnVeutVoir() {
+        let html = mesRègles(deuxSites)
+        #expect(html.contains(#"<select id="site">"#))
+        // Le compte par site est dans le choix : sans lui, on ouvre un paquet pour
+        // découvrir ce qu'il pèse.
+        #expect(html.contains("ledauphine.com · 2"))
+        #expect(html.contains("youtube.com · 1"))
+        #expect(html.contains("Tous les sites · 3"))
+        // Le filtre a besoin de savoir à quel site appartient chaque paquet.
+        #expect(html.contains(#"<section data-site="ledauphine.com">"#))
+    }
+
+    @Test func unSeulSiteNaPasBesoinDeChoix() {
+        // Un menu déroulant à une entrée est un contrôle mort : il ne change rien.
+        let html = mesRègles([WebKitRule.hide(selector: "#pub", on: "ledauphine.com")])
+        #expect(!html.contains(#"<select id="site">"#))
+    }
+
+    @Test func chaqueRègleSeCorrige() {
+        let html = mesRègles(deuxSites)
+        #expect(html.contains(#"data-action="edit""#))
+        #expect(html.contains(#"data-action="unrule""#))
+    }
+
     @Test func blocageÉteintAucunInterrupteurNEstOffert() {
         // Ils ne piloteraient rien : un contrôle mort est pire qu'un contrôle absent.
         let html = page(isBlockingOn: false)

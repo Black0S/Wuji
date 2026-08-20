@@ -101,7 +101,7 @@ enum AdBlockPage {
             <p>\(entête)</p>
           </div>
         </header>
-        <main>
+        <main class="lists">
         \(isBlockingOn
           ? "<ul>\(lists.map(listRow).joined())</ul>"
           : #"<p class="empty">Le blocage est éteint dans Réglages › Fonctions.<br>Ces listes ne s'appliquent pas tant qu'il l'est.</p>"#)
@@ -168,7 +168,7 @@ enum AdBlockPage {
         let sites = bySite.keys.sorted().map { site -> String in
             let entries = bySite[site] ?? []
             return """
-            <section>
+            <section data-site="\(escape(site))">
               <h3>\(escape(site))<span>\(entries.count)</span></h3>
               <ul>\(entries.map(userRule).joined())</ul>
             </section>
@@ -178,11 +178,25 @@ enum AdBlockPage {
         // Une règle qui ne vise aucun site en particulier — un domaine bloqué partout —
         // n'a pas de dossier où aller, et la ranger sous un site inventé serait mentir.
         let everywhere = loose.isEmpty ? "" : """
-        <section>
+        <section data-site="__partout">
           <h3>Partout<span>\(loose.count)</span></h3>
           <ul>\(loose.map(userRule).joined())</ul>
         </section>
         """
+
+        // Le choix du site, dans l'entête. **Une liste à plat marche tant qu'il y en a
+        // trois** ; au trentième, retrouver une règle demande de tout relire. Le tri par
+        // site répondait déjà à « qu'est-ce que j'ai fait sur ce site », mais il fallait
+        // encore faire défiler jusqu'au bon paquet. Ici on le désigne.
+        //
+        // Le filtrage se fait dans la page, sans aller-retour vers l'application : la
+        // liste est déjà là, et un filtre qui attend une réponse ne se sent pas instantané.
+        let choix = ([("", "Tous les sites", rules.count)]
+            + bySite.keys.sorted().map { ($0, $0, bySite[$0]?.count ?? 0) }
+            + (loose.isEmpty ? [] : [("__partout", "Partout", loose.count)]))
+            .map { value, label, count in
+                "<option value=\"\(escape(value))\">\(escape(label)) · \(count)</option>"
+            }.joined()
 
         return """
         <header>
@@ -190,8 +204,10 @@ enum AdBlockPage {
             <h1>Mes Règles</h1>
             <p>\(rules.count) règle\(rules.count > 1 ? "s" : "") sur \(bySite.count + (loose.isEmpty ? 0 : 1)) site\(bySite.count > 1 ? "s" : "")</p>
           </div>
+          \(bySite.count + (loose.isEmpty ? 0 : 1) > 1
+            ? "<select id=\"site\">\(choix)</select>" : "")
         </header>
-        <main>
+        <main class="rules">
         \(rules.isEmpty
           ? #"<p class="empty">Aucune règle.<br>« Bloquer un élément » dans le menu du bouclier en écrit une, au bon format.</p>"#
           : sites + everywhere)
@@ -228,10 +244,17 @@ enum AdBlockPage {
             <span class="name">\(escape(WebKitRule.describe(rule)))</span>
             <span class="detail mono">\(escape(rule))</span>
           </div>
+          <button data-action="edit" title="Modifier">\(pencil)</button>
           <button data-action="unrule" title="Supprimer">\(cross)</button>
         </li>
         """
     }
+
+    private static let pencil = """
+    <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" \
+    stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">\
+    <path d="M11.2 2.6l2.2 2.2L5.6 12.6 2.6 13.4l.8-3z"/></svg>
+    """
 
     private static let cross = """
     <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" \
@@ -256,6 +279,39 @@ enum AdBlockPage {
     .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .detail { color: var(--muted); font-size: 12px;
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* **Une règle longue tient dans la page.** Un sélecteur de cent cinquante caractères
+       sans espace ne trouve aucun endroit où se couper : la ligne sortait de l'écran par
+       la droite, et le reste de la page avec elle. `anywhere` autorise la coupure au
+       milieu d'un mot — c'est du JSON, pas une phrase, il n'y a rien à respecter.
+
+       Deux lignes au plus, et pas d'agrandissement au survol : une ligne qui grandit sous
+       le curseur pousse les suivantes, et on clique sur ce qui n'y est plus. Le texte
+       entier se lit dans l'éditeur, à un clic. */
+    .rules .detail {
+      display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+      white-space: normal; overflow: hidden; overflow-wrap: anywhere; text-overflow: clip;
+    }
+    /* Le champ d'édition remplace la ligne sans la déplacer : ce qu'on corrige reste là
+       où on l'a trouvé. */
+    .editor {
+      width: 100%; min-height: 76px; resize: vertical; padding: 8px 10px;
+      background: var(--hover); color: var(--text); border: 1px solid var(--hairline);
+      border-radius: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px; line-height: 1.5; outline: none;
+    }
+    .editor:focus { border-color: var(--muted); }
+    .editor.invalid { border-color: var(--danger); }
+    .actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .actions .hint { color: var(--muted); font-size: 11px; }
+    .actions .hint.error { color: var(--danger); }
+    li.editing { background: transparent; }
+    li.editing > button { display: none; }
+    select {
+      height: 30px; padding: 0 8px; background: transparent; color: var(--text);
+      border: 1px solid var(--hairline); border-radius: 8px; font: inherit; cursor: pointer;
+      max-width: 260px;
+    }
+    select:hover { border-color: var(--muted); }
     .source { opacity: .7; }
     .mono { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -298,8 +354,8 @@ enum AdBlockPage {
     /// L'interrupteur est le même dessin que dans les réglages : deux formes différentes
     /// pour la même décision feraient deux applications.
     private static let switchStyle = """
-    li .detail { white-space: normal; overflow: visible; line-height: 1.5; }
-    .count { margin-left: 8px; color: var(--muted); font-size: 11px; font-weight: 400;
+    .lists .detail { white-space: normal; overflow: visible; line-height: 1.5; }
+    .lists .count { margin-left: 8px; color: var(--muted); font-size: 11px; font-weight: 400;
              font-variant-numeric: tabular-nums; }
     .switch { position: relative; display: inline-block; width: 40px; height: 24px; flex: none; }
     .switch input { opacity: 0; width: 0; height: 0; }
@@ -354,9 +410,96 @@ enum AdBlockPage {
       const button = event.target.closest('button[data-action]');
       if (!button) return;
       const row = button.closest('li');
+      // Corriger ne quitte pas la page : c'est le seul geste d'ici qui ne demande rien à
+      // l'application tant qu'on n'a pas fini d'écrire.
+      if (button.dataset.action === 'edit') { edit(row); return; }
       send({ action: button.dataset.action, id: row.dataset.id,
              host: row.dataset.host, rule: row.dataset.rule });
       row.remove();
     });
+
+    // Le texte d'une règle est tronqué à deux lignes : cliquer dessus l'ouvre en entier,
+    // là où on peut aussi le corriger. Sans ça, lire une règle longue serait impossible.
+    document.addEventListener('click', (event) => {
+      const body = event.target.closest('.body');
+      const row = body && body.closest('li[data-rule]');
+      if (row && !row.classList.contains('editing')) edit(row);
+    });
+
+    function edit(row) {
+      if (row.classList.contains('editing')) return;
+      const rule = row.dataset.rule;
+      const body = row.querySelector('.body');
+      const previous = body.innerHTML;
+      row.classList.add('editing');
+      body.innerHTML = '<textarea class="editor" spellcheck="false"></textarea>'
+        + '<div class="actions"><button class="ghost" data-edit="save">Enregistrer</button>'
+        + '<button class="ghost" data-edit="cancel">Annuler</button>'
+        + '<span class="hint">⌘⏎ pour enregistrer · échap pour annuler</span></div>';
+
+      const field = body.querySelector('textarea');
+      const hint = body.querySelector('.hint');
+      // `value` et non le HTML : une règle contient des guillemets et des chevrons, et les
+      // recoller dans du balisage les ferait interpréter.
+      field.value = rule;
+      field.focus();
+      field.setSelectionRange(field.value.length, field.value.length);
+
+      const restore = () => { row.classList.remove('editing'); body.innerHTML = previous; };
+
+      const save = () => {
+        const written = field.value.trim();
+        if (written === rule) return restore();
+        // On juge ici aussi, pour le dire tout de suite : l'application refusera de la
+        // même façon, mais après un aller-retour et sans montrer où ça coince.
+        try { JSON.parse(written); } catch (error) {
+          field.classList.add('invalid');
+          hint.classList.add('error');
+          hint.textContent = 'JSON invalide — ' + error.message;
+          return;
+        }
+        send({ action: 'edit', rule: rule, replacement: written });
+        restore();
+      };
+
+      body.querySelector('[data-edit="save"]').addEventListener('click', save);
+      body.querySelector('[data-edit="cancel"]').addEventListener('click', restore);
+      field.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') { event.preventDefault(); restore(); }
+        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          save();
+        }
+      });
+    }
+
+    // Le choix du site. Filtrage dans la page : la liste est déjà là, et un filtre qui
+    // attend une réponse ne se sent pas instantané.
+    //
+    // Le choix survit au rechargement — la page se recharge à chaque règle corrigée ou
+    // supprimée, et repartir de « tous les sites » à chaque fois annulerait le tri qu'on
+    // vient de faire pour trouver la règle qu'on corrige.
+    const site = document.getElementById('site');
+    if (site) {
+      const mémoire = () => {
+        try { return sessionStorage; } catch (error) { return null; }
+      };
+      const store = mémoire();
+      const apply = () => {
+        const wanted = site.value;
+        document.querySelectorAll('main section').forEach((section) => {
+          section.hidden = wanted !== '' && section.dataset.site !== wanted;
+        });
+        if (store) store.setItem('wuji.rules.site', wanted);
+      };
+      const remembered = store && store.getItem('wuji.rules.site');
+      // Un site dont toutes les règles ont été supprimées n'est plus dans la liste : on
+      // retombe sur « tous » plutôt que de n'afficher plus rien.
+      if (remembered && site.querySelector(`option[value="${CSS.escape(remembered)}"]`)) {
+        site.value = remembered;
+      }
+      site.addEventListener('change', apply);
+      apply();
+    }
     """
 }
