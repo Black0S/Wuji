@@ -53,7 +53,6 @@ enum Tokens {
     /// avec les fonctionnalités qu'elles signalent.
     enum Security {
         static let insecure = dynamic(light: hex(0xC7302B), dark: hex(0xE0554F))
-        static let width: CGFloat = 3
     }
 
     // MARK: - Lignes de liste

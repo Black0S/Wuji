@@ -183,10 +183,10 @@ final class Tab {
         webView.load(URLRequest(url: address))
     }
 
-    /// L'état de sécurité déduit de l'URL. Le vrai signal (certificat invalide,
-    /// permission caméra active) arrive en J1/J2 — ici on valide le vocabulaire visuel.
-    var security: SecurityBorderView.State {
-        guard let scheme = url?.scheme?.lowercased() else { return .none }
-        return scheme == "http" ? .insecure : .none
-    }
+    /// **Cette page voyage-t-elle en clair ?**
+    ///
+    /// Une seule question, donc un booléen. C'était une énumération à deux cas, née d'un
+    /// liseré qui n'existe plus — et le type portait le nom de la vue qui l'affichait,
+    /// ce qui faisait dépendre l'onglet d'un dessin.
+    var isInsecure: Bool { url?.scheme?.lowercased() == "http" }
 }

@@ -166,13 +166,12 @@ final class ContentTopBar: ThemedView {
         updateTrackingAreas()
     }
 
-    func show(url: URL?, security: SecurityBorderView.State, canGoBack: Bool, canGoForward: Bool) {
-        address.attributedStringValue = Self.render(url, insecure: security == .insecure)
+    func show(url: URL?, insecure: Bool, canGoBack: Bool, canGoForward: Bool) {
+        address.attributedStringValue = Self.render(url, insecure: insecure)
         // Sans ce rappel, le cadenas gardait la position calculée pour l'adresse
         // précédente — et pour la toute première, celle d'un champ vide : au milieu.
         needsLayout = true
 
-        let insecure = security == .insecure
         lock.image = NSImage(systemSymbolName: insecure ? "exclamationmark.triangle" : "lock",
                              accessibilityDescription: insecure ? "Connexion non chiffrée" : "Connexion chiffrée")
         lock.contentTintColor = insecure ? Tokens.Security.insecure : Tokens.textSecondary

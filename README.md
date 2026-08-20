@@ -17,7 +17,7 @@ Sources/
 ├── App/               point d'entrée, assemblage, menus, délégués WebKit
 ├── Window/            la fenêtre, la géométrie, le journal de blocage
 ├── Chrome/            barre du haut, colonne d'onglets, palette, feuilles, bulles
-├── WebContent/        hôte du WKWebView, liseré de sécurité, favicons, menu de page
+├── WebContent/        hôte du WKWebView, certificat, favicons, menu de page
 ├── Blocking/          les règles, leur asset, le sélecteur d'élément, le journal
 ├── InternalPages/     tout ce qui s'ouvre en wuji://
 ├── Scripts/ Settings/ Store/ Tabs/

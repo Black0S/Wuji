@@ -38,13 +38,12 @@ extension AppDelegate {
         guard let tab = currentTab, let url = tab.url, let host = url.host() else { return [] }
         var items: [ActionItem] = []
 
-        switch tab.security {
-        case .insecure:
+        if tab.isInsecure {
             items.append(ActionItem(title: "Connexion non chiffrée",
                                     symbol: "exclamationmark.triangle", isEnabled: false))
             items.append(ActionItem(title: "Ce que vous tapez ici circule en clair",
                                     symbol: "eye", isEnabled: false))
-        default:
+        } else {
             items.append(ActionItem(title: "Connexion chiffrée avec \(host)",
                                     symbol: "lock", isEnabled: false))
             for line in Certificate.describe(tab.webView.serverTrust) {

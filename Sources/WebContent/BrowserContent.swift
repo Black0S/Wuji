@@ -1,15 +1,10 @@
 import AppKit
 import WebKit
 
-/// Le conteneur de contenu : un `WKWebView` bord à bord, et **son** liseré de sécurité.
-///
-/// Un liseré par conteneur, pas un par fenêtre (spec §4.3). En v1 il n'y a qu'un volet,
-/// donc ça ne se voit pas — mais le jour du Split View, deux volets dont un seul est
-/// chiffré rendent un liseré de fenêtre absurde. Deux heures maintenant, deux semaines plus tard.
+/// Le conteneur de contenu : un `WKWebView` bord à bord, et rien par-dessus.
 @MainActor
 final class BrowserContent: ThemedView {
 
-    let border = SecurityBorderView()
     private(set) var webView: WKWebView?
 
     override init(frame frameRect: NSRect) {
@@ -24,8 +19,6 @@ final class BrowserContent: ThemedView {
         layer?.cornerCurve = .continuous
         layer?.maskedCorners = [.layerMinXMaxYCorner]
         layer?.masksToBounds = true
-
-        addSubview(border)
     }
 
     @available(*, unavailable)
@@ -34,10 +27,20 @@ final class BrowserContent: ThemedView {
     override func layout() {
         super.layout()
         webView?.frame = bounds
-        border.frame = bounds       // au-dessus du contenu : la page ne se remet jamais en page
     }
 
-    // **Pas de barre de chargement.**
+    // **Pas de liseré de sécurité, pas de barre de chargement.**
+    //
+    // Le liseré entourait la page de rouge sur une connexion en clair. La barre du haut
+    // le dit déjà, et mieux : un triangle contre l'adresse, le `http://` écrit dans la
+    // même couleur, et le cadenas qui ouvre le détail. Le liseré répétait cela sur trois
+    // points de large tout autour du contenu, en mangeant le bord de chaque page.
+    //
+    // **Deux surfaces pour un seul fait, c'est une de trop** — et la moins précise est
+    // celle qui n'a pas de mots. Il n'avait qu'un état à montrer : le retirer ne laisse
+    // aucun cas orphelin.
+    //
+    // **Pas de barre de chargement non plus.**
     //
     // Il y en avait une : un filet clair collé au bord haut du contenu. Elle datait d'une
     // interface qui s'escamotait, où plus rien n'aurait dit qu'une page travaille. Cette
@@ -54,7 +57,7 @@ final class BrowserContent: ThemedView {
         webView = newWebView
         newWebView.frame = bounds
         newWebView.autoresizingMask = [.width, .height]
-        addSubview(newWebView, positioned: .below, relativeTo: border)
+        addSubview(newWebView)
         needsLayout = true
     }
 }

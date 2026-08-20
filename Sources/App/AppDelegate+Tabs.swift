@@ -225,10 +225,8 @@ extension AppDelegate {
         // Les observations posées avec `.initial` se déclenchent pendant la construction
         // des onglets — donc avant que `spaces` existe, au moment de la restauration.
         guard !spaces.isEmpty, let tab = currentTab else { return }
-        let state = tab.security
-        layout.content.border.set(state)
         layout.topBar.show(url: tab.url,
-                           security: state,
+                           insecure: tab.isInsecure,
                            canGoBack: tab.webView.canGoBack,
                            canGoForward: tab.webView.canGoForward)
         window.title = tab.title
