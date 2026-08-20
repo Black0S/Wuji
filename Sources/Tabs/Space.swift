@@ -53,28 +53,53 @@ final class Space {
 
     let id = UUID()
     var name: String
-    var symbol: String
+    var symbol: String {
+        didSet {
+            // Un espace privé porte son symbole quoi qu'on lui demande. La règle est ici
+            // et pas seulement dans le menu qui la faisait respecter : une reconnaissance
+            // visuelle ne doit pas dépendre de l'endroit d'où vient la modification.
+            if isPrivate, symbol != Self.privateSymbol { symbol = Self.privateSymbol }
+        }
+    }
 
-    /// **Un espace privé ne laisse rien.**
+    /// **Un espace privé ne laisse rien, et ne cesse jamais de l'être.**
     ///
     /// Ni historique, ni session sur le disque, ni cookies qui survivent : ses vues web
     /// travaillent sur un magasin de données éphémère, que WebKit efface avec lui. C'est
     /// une propriété de l'espace et non d'une fenêtre — on garde ses onglets rangés comme
     /// les autres, et on bascule d'un monde à l'autre par le sélecteur d'espaces.
-    var isPrivate = false {
-        didSet {
-            guard isPrivate != oldValue else { return }
-            symbol = isPrivate ? Self.privateSymbol : Self.symbol(forIndex: 0)
-        }
-    }
+    ///
+    /// **C'est une constante, et ce n'était qu'un interrupteur.** On pouvait rendre privé
+    /// un espace existant, et rendre normal un espace privé — deux promesses que le code
+    /// ne pouvait pas tenir. Le magasin de données est choisi à la naissance de chaque vue
+    /// web : basculer un espace ne changeait rien pour les onglets déjà ouverts, qui
+    /// continuaient d'écrire sur le disque sous un symbole disant le contraire. Dans
+    /// l'autre sens, c'était pire : ce qu'un espace privé avait promis de ne pas garder se
+    /// serait retrouvé dans une session enregistrée.
+    ///
+    /// Un espace privé naît privé — `⇧⌘N`, et rien d'autre — et le reste jusqu'à sa
+    /// fermeture, qui l'efface.
+    let isPrivate: Bool
 
     private(set) var folders: [TabFolder] = []
     private(set) var loose: [Tab] = []
     var current: Tab?
 
-    init(name: String, symbol: String) {
+    private init(name: String, symbol: String, isPrivate: Bool) {
         self.name = name
         self.symbol = symbol
+        self.isPrivate = isPrivate
+    }
+
+    convenience init(name: String, symbol: String) {
+        self.init(name: name, symbol: symbol, isPrivate: false)
+    }
+
+    /// Le seul chemin vers un espace privé. Il n'y en a pas d'autre, et c'est le sujet :
+    /// la confidentialité se décide à la création parce qu'elle ne peut pas se décider
+    /// après coup sans mentir sur ce qui a déjà été écrit.
+    static func makePrivate(named name: String = "Privé") -> Space {
+        Space(name: name, symbol: privateSymbol, isPrivate: true)
     }
 
     // MARK: - Lecture

@@ -136,8 +136,14 @@ Le format et la marche à suivre pour contribuer sont dans
 ## Ce que le navigateur sait faire
 
 **Espaces et dossiers.** Les onglets appartiennent à un espace, pas à l'application. Un
-espace peut être privé : magasin de données éphémère, rien sur le disque, un symbole qui ne
-se change pas — `⇧⌘N`.
+espace naît privé ou ne l'est jamais : `⇧⌘N` en crée un — magasin de données éphémère, rien
+sur le disque, un symbole qui ne se change pas — et il l'est jusqu'à sa fermeture.
+
+Il y avait une bascule privé/normal ; elle mentait dans les deux sens. Le magasin de
+données est choisi quand une vue web naît : « rendre cet espace privé » laissait les
+onglets déjà ouverts écrire sur le disque sous un symbole qui disait le contraire, et
+« rendre cet espace normal » aurait versé dans une session enregistrée ce qu'un espace
+privé avait promis de ne pas garder.
 
 **Un onglet ne se ferme jamais tout seul.** Passé un délai réglable — jamais, une minute,
 jusqu'à une heure — il rend sa mémoire sans quitter la colonne, et le survol le réveille

@@ -265,10 +265,11 @@ extension AppDelegate {
     // MARK: - Dossiers et déplacements
 
     /// Un espace privé neuf, et on y va.
+    ///
+    /// **C'est la seule façon d'en obtenir un.** Un espace existant ne se rend pas privé :
+    /// ses onglets sont déjà nés avec un magasin de données qui écrit sur le disque.
     @objc func newPrivateSpace(_ sender: Any?) {
-        let space = Space(name: "Privé", symbol: Space.privateSymbol)
-        space.isPrivate = true
-        spaces.append(space)
+        spaces.append(Space.makePrivate())
         currentSpaceIndex = spaces.count - 1
         newTab(url: nil)
         openOmnibox()
@@ -495,14 +496,6 @@ extension AppDelegate {
         let items: [ActionItem] = [
             ActionItem(title: "Renommer", symbol: "pencil",
                        action: { [weak panel] in panel?.beginRename(at: index) }),
-            ActionItem(title: spaces.indices.contains(index) && spaces[index].isPrivate
-                              ? "Rendre cet espace normal" : "Rendre cet espace privé",
-                       symbol: spaces.indices.contains(index) && spaces[index].isPrivate
-                              ? "eye" : "eye.slash",
-                       action: { [weak self, weak panel] in
-                           panel?.dismiss()
-                           self?.togglePrivate(at: index)
-                       }),
             .separator,
             ActionItem(title: "Supprimer", symbol: "trash", isEnabled: canDelete,
                        isDestructive: true,
@@ -515,21 +508,15 @@ extension AppDelegate {
         presentSheet(items, at: event)
     }
 
-    /// Bascule un espace entre normal et privé.
-    ///
-    /// Les onglets déjà ouverts ne changent pas de monde : leurs vues web sont nées avec
-    /// un magasin de données, et on ne le remplace pas sous leurs pieds. La bascule vaut
-    /// donc pour la suite, et on le dit plutôt que de laisser croire à un effacement.
-    func togglePrivate(at index: Int) {
-        guard spaces.indices.contains(index) else { return }
-        let space = spaces[index]
-        space.isPrivate.toggle()
-        layout.toast.show(space.isPrivate
-                          ? "« \(space.name) » est privé : rien ne sera enregistré"
-                          : "« \(space.name) » redevient normal")
-        syncSidebar()
-        session.save(snapshot())
-    }
+    // **Il n'y a pas de bascule privé/normal, et c'est délibéré.**
+    //
+    // Le menu d'un espace en proposait une. Elle ne pouvait pas tenir : le magasin de
+    // données est choisi quand une vue web naît, donc « rendre cet espace privé »
+    // laissait les onglets déjà ouverts écrire sur le disque sous un symbole qui disait
+    // le contraire — et « rendre cet espace normal » aurait versé dans une session
+    // enregistrée ce qu'un espace privé avait promis de ne pas garder.
+    //
+    // Un espace privé se crée avec ⇧⌘N et le reste jusqu'à sa fermeture.
 
     func spacesPanel(_ panel: SpacesPanel, didDelete index: Int) {
         guard spaces.indices.contains(index), spaces.count > 1 else { return }
