@@ -89,6 +89,28 @@ extension AppDelegate {
         viewItem.submenu = viewMenu
         main.addItem(viewItem)
 
+        // **Le menu Fenêtre, pour que ⌘M existe.**
+        //
+        // macOS ne fournit rien de lui-même : sans l'entrée de menu, la touche est morte —
+        // et tout Mac s'attend à minimiser avec ⌘M. Wuji n'a qu'une fenêtre de navigation,
+        // ce qui rendait ce menu inutile en apparence ; mais le journal de blocage en est
+        // une seconde, et il n'y avait aucun moyen de revenir à l'une depuis l'autre.
+        //
+        // `windowsMenu` confie la liste des fenêtres au système : elle se tient à jour
+        // toute seule, et on n'écrit pas un inventaire qu'on devrait maintenir.
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Fenêtre")
+        windowMenu.addItem(withTitle: "Minimiser",
+                           action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom",
+                           action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: "Tout ramener au premier plan",
+                           action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        windowItem.submenu = windowMenu
+        main.addItem(windowItem)
+        NSApp.windowsMenu = windowMenu
+
         NSApp.mainMenu = main
     }
 }

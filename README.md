@@ -227,6 +227,7 @@ sites exclus, scripts, réglages — avec le même sommaire à gauche partout.
 | `⌘D` / `⇧⌘B` | Mettre en favori / ouvrir les favoris |
 | `⌘Y` / `⌘J` | Historique / téléchargements |
 | `⌘,` | Réglages |
+| `⌘M` | Minimiser la fenêtre |
 
 ---
 
