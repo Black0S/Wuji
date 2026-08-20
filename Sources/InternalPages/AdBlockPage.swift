@@ -5,25 +5,34 @@ import Foundation
 /// Trois sujets, trois adresses, une colonne pour passer de l'un à l'autre — la même
 /// grammaire que la fenêtre de réglages, en HTML.
 ///
-/// **Ce qui se règle est dans les réglages ; ici, ce qu'on a écrit soi-même.** Les listes
-/// livrées s'allument et s'éteignent dans Réglages › Fonctions, avec le reste des
-/// interrupteurs. Cette page ne garde que ce qui n'existe qu'ici : les sites exclus et les
-/// règles ajoutées à la main. Trois arguments — le résumé d'état, le nombre de règles
-/// livrées, la compilation en cours — arrivaient jusqu'ici sans jamais être affichés : ils
-/// ont été retirés plutôt que branchés sur un affichage inventé pour les justifier.
+/// **Tout ce qui concerne le blocage se cherche sous Blocage.** Les listes livrées, les
+/// sites exclus, les règles écrites à la main : trois questions voisines, qu'on se pose en
+/// même temps. Les interrupteurs des listes ont d'abord vécu dans Réglages › Fonctions,
+/// où six lignes noyaient les trois autres réglages et où personne n'allait les chercher.
+/// Seul l'interrupteur général reste là-bas : il commande une fonction de l'application,
+/// pas le contenu d'une liste.
+///
+/// Trois arguments — le résumé d'état, le nombre de règles livrées, la compilation en
+/// cours — arrivaient ici sans jamais être affichés ; ils ont été retirés plutôt que
+/// branchés sur un affichage inventé pour les justifier. Ce que la page montre maintenant,
+/// elle le montre parce qu'on peut agir dessus.
 @MainActor
 enum AdBlockPage {
 
     enum Section: String {
-        case unactive, myRules
+        case lists, unactive, myRules
 
         static func from(path: String) -> Section {
-            path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) == "unactive"
-                ? .unactive : .myRules
+            switch path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) {
+            case "lists":    return .lists
+            case "unactive": return .unactive
+            default:         return .myRules
+            }
         }
 
         var title: String {
             switch self {
+            case .lists:    return "Listes de règles"
             case .unactive: return "Sans Protection"
             case .myRules:  return "Mes Règles"
             }
@@ -31,26 +40,95 @@ enum AdBlockPage {
 
         var address: String {
             switch self {
+            case .lists:    return "wuji://ad-block/lists"
             case .unactive: return "wuji://ad-block/unactive"
             case .myRules:  return "wuji://ad-block/my-rules"
             }
         }
     }
 
-    static func html(section: Section, userRules: [String], exceptions: [String]) -> String {
+    /// Une liste livrée, telle que la page doit la montrer.
+    struct List {
+        let id: String
+        let name: String
+        let summary: String
+        let count: Int
+        let isOn: Bool
+    }
+
+    static func html(section: Section, lists: [List], isBlockingOn: Bool,
+                     userRules: [String], exceptions: [String]) -> String {
         let body: String
         switch section {
+        case .lists:    body = listsSection(lists, isBlockingOn: isBlockingOn)
         case .unactive: body = exceptionsSection(exceptions)
         case .myRules:  body = rulesSection(userRules)
         }
 
         return InternalShell.page(
             title: section.title, current: section.address,
-            body: body, script: script, style: style)
+            body: body, script: script, style: style + switchStyle)
 
     }
 
     // MARK: - Sections
+
+    /// Les listes livrées, une par ligne, avec ce qu'elles pèsent.
+    ///
+    /// **Chaque liste se compile à part**, donc en éteindre une la retire réellement du
+    /// moteur et du disque au lieu de la neutraliser. Le compte de règles est celui du
+    /// fichier livré, pas une estimation : c'est ce qui rend le choix vérifiable plutôt
+    /// que déclaratif.
+    ///
+    /// Elles vivaient dans Réglages › Fonctions, entre le navigateur par défaut et la
+    /// veille des onglets. Six interrupteurs et six phrases y noyaient les trois autres
+    /// réglages, et surtout ils n'y étaient pas cherchés : ce qui concerne le blocage se
+    /// cherche sous Blocage, à côté des sites exclus et des règles écrites à la main.
+    private static func listsSection(_ lists: [List], isBlockingOn: Bool) -> String {
+        let total = lists.filter(\.isOn).reduce(0) { $0 + $1.count }
+        let actives = lists.filter(\.isOn).count
+
+        // Le blocage éteint, ces interrupteurs ne piloteraient rien : on le dit au lieu
+        // de les afficher allumés. Un contrôle mort est pire qu'un contrôle absent.
+        let entête = isBlockingOn
+            ? "\(actives) liste\(actives > 1 ? "s" : "") active\(actives > 1 ? "s" : ""), \(total) règles"
+            : "Le blocage est éteint"
+
+        return """
+        <header>
+          <div class="titles">
+            <h1>Listes de règles</h1>
+            <p>\(entête)</p>
+          </div>
+        </header>
+        <main>
+        \(isBlockingOn
+          ? "<ul>\(lists.map(listRow).joined())</ul>"
+          : #"<p class="empty">Le blocage est éteint dans Réglages › Fonctions.<br>Ces listes ne s'appliquent pas tant qu'il l'est.</p>"#)
+        <p class="note">
+          Ces listes sont livrées avec l'application, écrites dans le format que WebKit
+          compile — rien n'est téléchargé, rien n'est traduit au démarrage. Chacune est
+          compilée séparément : éteinte, elle quitte le moteur et le disque plutôt que d'y
+          rester neutralisée. Vos règles et vos exceptions par site s'appliquent toujours,
+          quelles que soient les listes allumées.
+        </p>
+        </main>
+        """
+    }
+
+    private static func listRow(_ list: List) -> String {
+        """
+        <li data-id="\(escape(list.id))">
+          <div class="body">
+            <span class="name">\(escape(list.name))<span class="count">\(list.count) règles</span></span>
+            <span class="detail">\(escape(list.summary))</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" class="toggle"\(list.isOn ? " checked" : "")><span></span>
+          </label>
+        </li>
+        """
+    }
 
     private static func exceptionsSection(_ hosts: [String]) -> String {
         """
@@ -215,6 +293,27 @@ enum AdBlockPage {
     summary::-webkit-details-marker { display: none; }
     summary h3::after { content: '▸'; margin-left: 2px; opacity: .5; }
     details[open] summary h3::after { content: '▾'; }
+    """
+
+    /// L'interrupteur est le même dessin que dans les réglages : deux formes différentes
+    /// pour la même décision feraient deux applications.
+    private static let switchStyle = """
+    li .detail { white-space: normal; overflow: visible; line-height: 1.5; }
+    .count { margin-left: 8px; color: var(--muted); font-size: 11px; font-weight: 400;
+             font-variant-numeric: tabular-nums; }
+    .switch { position: relative; display: inline-block; width: 40px; height: 24px; flex: none; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch span {
+      position: absolute; inset: 0; cursor: pointer; border-radius: 24px;
+      background: var(--hairline); transition: background .15s ease;
+    }
+    .switch span::before {
+      content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px;
+      background: #fff; border-radius: 50%; transition: transform .15s ease;
+      box-shadow: 0 1px 2px rgba(0,0,0,.3);
+    }
+    .switch input:checked + span { background: var(--text); }
+    .switch input:checked + span::before { transform: translateX(16px); }
     """
 
     private static let script = """

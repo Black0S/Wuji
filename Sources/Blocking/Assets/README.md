@@ -17,7 +17,7 @@ résultat.
 | `wuji-social.json` | boutons et pixels sociaux, hors du site du réseau | 15 |
 | `wuji-session-replay.json` | l'enregistrement de vos mouvements et de vos frappes | 12 |
 
-**Chaque fichier est compilé séparément**, et chacun s'éteint dans Réglages › Fonctions.
+**Chaque fichier est compilé séparément**, et chacun s'éteint dans `wuji://ad-block/lists`.
 C'est ce qui décide du découpage : une famille n'existe que si l'on peut vouloir la garder
 en éteignant les autres. Ajouter un septième fichier ne suffit pas à créer une liste — il
 faut aussi une entrée dans `RuleList.all`, avec son nom et sa phrase.

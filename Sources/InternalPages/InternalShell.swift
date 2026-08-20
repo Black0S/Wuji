@@ -29,6 +29,7 @@ enum InternalShell {
             Item(title: "Téléchargements", address: "wuji://downloads", symbol: "arrow.down")
         ]),
         ("Blocage", [
+            Item(title: "Listes de règles", address: "wuji://ad-block/lists", symbol: "list.bullet"),
             Item(title: "Sans protection", address: "wuji://ad-block/unactive", symbol: "shield.slash"),
             Item(title: "Mes règles", address: "wuji://ad-block/my-rules", symbol: "pencil"),
             Item(title: "Scripts", address: "wuji://scripts", symbol: "curlybraces")

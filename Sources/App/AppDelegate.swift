@@ -71,6 +71,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                                         favorites: favorites, icons: favicons)
         pages.adBlock = { [unowned self] path in
             AdBlockPage.html(section: AdBlockPage.Section.from(path: path),
+                             // Le catalogue vient du bloqueur et non des réglages : il ne
+                             // montre que les listes réellement présentes dans le paquet.
+                             lists: blocker.catalog.map {
+                                 AdBlockPage.List(id: $0.list.id, name: $0.list.name,
+                                                  summary: $0.list.summary,
+                                                  count: $0.count, isOn: $0.isEnabled)
+                             },
+                             isBlockingOn: settings.blockingEnabled,
                              userRules: blocker.userRules.rules,
                              exceptions: settings.blockingExceptions)
         }

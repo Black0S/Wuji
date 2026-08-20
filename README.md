@@ -82,8 +82,8 @@ ne change pas. Autant écrire le résultat.
 | Réseaux sociaux | 15 | boutons et pixels sociaux, hors du site du réseau |
 | Rejeu de session | 12 | l'enregistrement de vos mouvements et de vos frappes |
 
-Chacune se compile **à part** et s'éteint dans Réglages › Fonctions — éteinte, elle quitte
-le moteur et le disque, elle n'y reste pas neutralisée. Le découpage suit cette règle et
+Chacune se compile **à part** et s'éteint dans `wuji://ad-block/lists`, sous Blocage —
+éteinte, elle quitte le moteur et le disque, elle n'y reste pas neutralisée. Le découpage suit cette règle et
 pas une autre : une famille n'existe que si l'on peut vouloir la garder en éteignant les
 autres. La télémétrie d'un téléviseur qu'on ne possède pas ne bloquera jamais rien ; les
 noms de classe (`.ad-slot`) sont les seules règles qui jugent sur le nom et non sur
@@ -166,8 +166,8 @@ est éteinte.
 révocables. La position passe par deux portes : le site vous demande, et macOS demande à
 Wuji ; accorder la première sans la seconde donnait un refus que la page vous attribuait.
 
-**Pages internes** en `wuji://` — favoris, historique, téléchargements, règles, réglages —
-avec le même sommaire à gauche partout.
+**Pages internes** en `wuji://` — favoris, historique, téléchargements, listes de règles,
+sites exclus, scripts, réglages — avec le même sommaire à gauche partout.
 
 ---
 

@@ -57,11 +57,6 @@ extension AppDelegate {
                            userScripts: settings.userScriptsEnabled,
                            agent: settings.agent.rawValue,
                            blockingSummary: blocker.state.summary,
-                           // Le catalogue vient du bloqueur et non des réglages : il ne
-                           // liste que les listes réellement présentes dans le paquet.
-                           ruleLists: blocker.catalog.map {
-                               ($0.list.id, $0.list.name, $0.list.summary, $0.count, $0.isEnabled)
-                           },
                            permissions: permissions.decisions.map {
                                ($0.host, $0.kind.rawValue, $0.isAllowed)
                            })
@@ -93,17 +88,6 @@ extension AppDelegate {
             case "blocking":
                 settings.blockingEnabled = (value == "true")
                 blocker.start()
-            // Une liste du catalogue : « list:tracking », « list:ads »…
-            case let list where list.hasPrefix("list:"):
-                settings.setRuleList(String(list.dropFirst("list:".count)), enabled: value == "true")
-                // Recompiler et non recharger : la liste éteinte quitte le moteur et le
-                // magasin, elle n'y reste pas neutralisée.
-                blocker.compile()
-                // Rien n'est rechargé d'office, comme pour l'interrupteur général : les
-                // pages ouvertes gardent les règles posées à leur chargement, et recharger
-                // ce que quelqu'un est en train de lire serait l'automatisme dont on ne
-                // veut pas. La page des réglages, elle, se remet à jour toute seule.
-
             case "userscripts":
                 settings.userScriptsEnabled = (value == "true")
                 syncBlockingButton()
@@ -356,6 +340,18 @@ extension AppDelegate {
 
     func handleAdBlockAction(_ action: String, payload: [String: Any]) {
         switch action {
+        // Une liste du catalogue. Le geste porte le nom qu'il portait déjà du temps où la
+        // page servait un catalogue téléchargé — le vocabulaire de la page n'a pas changé,
+        // c'est ce qu'il désigne qui a changé.
+        case "enable":
+            guard let id = payload["id"] as? String,
+                  let value = payload["value"] as? Bool else { return }
+            settings.setRuleList(id, enabled: value)
+            // Recompiler et non recharger : la liste éteinte quitte le moteur et le
+            // magasin, elle n'y reste pas neutralisée. Les pages ouvertes gardent les
+            // règles posées à leur chargement — recharger d'office ce que quelqu'un est en
+            // train de lire serait l'automatisme dont on ne veut pas.
+            blocker.compile()
         case "unexcept":
             guard let host = payload["host"] as? String else { return }
             settings.blockingExceptions.removeAll { $0 == host }
