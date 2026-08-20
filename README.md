@@ -12,6 +12,7 @@ bouton qui ne fait rien.
 ## Le dépôt
 
 ```
+LICENSE CONTRIBUTING.md  GPL-3.0, et l'accord qui la rend tenable
 Package.swift          une seule cible, le chemin des sources dit pourquoi
 Sources/
 ├── App/               point d'entrée, assemblage, menus, délégués WebKit
@@ -263,17 +264,22 @@ sites exclus, scripts, réglages — avec le même sommaire à gauche partout.
 
 ## Licence
 
-[MIT](LICENSE). Le plus permissif des choix courants, et il correspond à ce que le dépôt
-avait déjà décidé sans le dire : le convertisseur d'AdGuard a été retiré en partie parce
-qu'il imposait la GPL-3 à la distribution. Reprendre cette contrainte par la porte de la
-licence aurait été un aller-retour.
+**[GPL-3.0](LICENSE).** Copyright © 2026 Liam Jutteau.
 
-La seule dépendance, [swift-psl](https://github.com/ameshkov/swift-psl), est elle aussi
-sous MIT.
+Wuji peut être lu, modifié et redistribué par qui veut — mais **pas fermé** : qui publie
+une version modifiée doit en publier le code sous la même licence. Le travail reste ouvert
+en aval, ce qu'une licence permissive ne garantit pas.
 
-Les règles de blocage de `Sources/Blocking/Assets` sont couvertes par la même licence.
-Elles sont écrites à la main, adossées à des listes de référence pour la décision de
-bloquer un domaine — jamais recopiées depuis elles.
+Ce choix ne l'empêche pas d'être vendu, ni de recevoir un soutien financier : « libre » n'a
+jamais voulu dire gratuit. Il demande en revanche que les droits restent réunis en une
+seule main, sans quoi plus personne ne pourrait relicencier — d'où l'accord de contribution
+décrit dans [CONTRIBUTING.md](CONTRIBUTING.md), qui ne retire rien aux contributeurs et
+laisse leur travail sous GPL-3.0 comme le reste.
+
+La seule dépendance, [swift-psl](https://github.com/ameshkov/swift-psl), est sous MIT —
+compatible. Les règles de `Sources/Blocking/Assets` sont couvertes par la licence du
+projet ; elles sont écrites à la main, adossées à des listes de référence pour la décision
+de bloquer un domaine, jamais recopiées depuis elles.
 
 ---
 
