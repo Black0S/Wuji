@@ -26,7 +26,7 @@ Sources/
 └── DesignSystem/      les tokens : couleurs, espacements, métriques
 Resources/             Info.plist, icône
 Tests/                 ce qui se vérifie sans fenêtre
-build.sh run.sh dmg.sh uninstall.sh
+build.sh run.sh dmg.sh release.sh uninstall.sh
 ```
 
 Les scripts restent à la racine : ce sont les points d'entrée, et `./run.sh` se tape sans
@@ -48,12 +48,16 @@ aura chez quelqu'un, et macOS ne lui accorde pas les autorisations au même nom.
 |---|---|
 | `./build.sh` | assemble le paquet, sans le lancer — le seul script qui sait ce qu'il y a dedans |
 | `./run.sh` | installe dans `/Applications` et lance (`debug` en argument pour l'autre configuration) |
-| `./dmg.sh` | produit `Wuji.dmg` à côté |
+| `./dmg.sh` | produit `Wuji.dmg` à côté, signé ad-hoc — pour soi |
+| `./release.sh` | le même, **signé, notarisé et agrafé** — pour les autres |
 | `./uninstall.sh` | efface l'application **et tout ce qu'elle a laissé** |
 | `swift test` | la logique pure : fabrication des règles, nom d'un site, validité de l'asset |
 
-La signature est ad-hoc. Sur une autre machine, le premier lancement demandera un clic
-droit → Ouvrir : il faudrait une identité Developer ID et la notarisation pour s'en passer.
+`./dmg.sh` signe en ad-hoc : sur une autre machine, le premier lancement demandera un clic
+droit → Ouvrir. `./release.sh` fait la chaîne complète — durcissement de l'exécution,
+signature horodatée, notarisation, agrafage du ticket — et produit l'image qu'on peut
+donner à quelqu'un. Il refuse de commencer s'il ne trouve pas de certificat *Developer ID
+Application*, plutôt que de livrer une image que Gatekeeper rejettera.
 
 **Et les clés d'accès en dépendent.** L'API WebAuthn est bien exposée — `PublicKeyCredential`
 existe, le contexte est sûr — mais `isUserVerifyingPlatformAuthenticatorAvailable()` répond
