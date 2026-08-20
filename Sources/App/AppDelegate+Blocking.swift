@@ -134,6 +134,18 @@ extension AppDelegate {
     /// formulaire vidé. Un journal est un témoin : il note ce qui se passe pendant qu'il
     /// est ouvert, pas ce qu'il aurait fallu provoquer pour avoir quelque chose à montrer.
     @objc func showBlockLog(_ sender: Any?) {
+        // Bloquer un domaine depuis le journal : c'est là qu'on voit ce qui manque aux
+        // listes, et la règle s'écrit au même format que tout le reste.
+        blockLogWindow.onBlockDomain = { [weak self] domain in
+            guard let self else { return }
+            if self.blocker.addUserRule(WebKitRule.block(domain: domain)) {
+                self.layout.toast.show("\(domain) bloqué") { [weak self] in
+                    self?.openInternal(Self.adBlockPage)
+                }
+            } else {
+                self.layout.toast.show("\(domain) était déjà dans vos règles")
+            }
+        }
         blockLogWindow.show()
         // Les pages déjà ouvertes recevront le mouchard à leur prochaine navigation ; les
         // nouvelles l'ont tout de suite.

@@ -76,6 +76,11 @@ final class ContentBlocker {
     private unowned let settings: Settings
     let userRules: UserRules
 
+    /// À qui attribuer une ressource absente. Il reçoit exactement ce qui part au moteur —
+    /// donc ce qu'il dit du blocage vaut ce que le moteur applique, et pas ce que le
+    /// catalogue contient.
+    let matcher = RuleMatcher()
+
     private var controllers: [WKUserContentController] = []
     private var compiled: [WKContentRuleList] = []
 
@@ -104,7 +109,10 @@ final class ContentBlocker {
 
     /// Assemble chaque liste allumée, y recopie les exceptions, puis compile ce qui a changé.
     func compile() {
-        guard settings.blockingEnabled else { return apply([], state: .off) }
+        guard settings.blockingEnabled else {
+            matcher.load([])
+            return apply([], state: .off)
+        }
 
         // Les exceptions ferment **chaque** liste : `ignore-previous-rules` n'annule que ce
         // qui le précède dans la sienne. C'est la contrainte qui décide de tout le reste.
@@ -113,6 +121,9 @@ final class ContentBlocker {
 
         var catalog: [(list: RuleList, count: Int, isEnabled: Bool)] = []
         var groups: [(identifier: String, json: String)] = []
+        // Les mêmes règles, mais gardées sous le nom lisible de leur liste : le journal
+        // écrit « Mouchards », pas « wuji.tracking ».
+        var attribution: [(list: String, rules: [String])] = []
         var missing: [String] = []
         var total = 0
 
@@ -123,6 +134,7 @@ final class ContentBlocker {
             guard isEnabled, !rules.isEmpty else { continue }
             total += rules.count
             groups.append((list.identifier, Self.json(rules + exceptions)))
+            attribution.append((list.name, rules))
         }
         self.catalog = catalog
 
@@ -131,8 +143,10 @@ final class ContentBlocker {
         if !mine.isEmpty {
             total += mine.count
             groups.append((Self.userIdentifier, Self.json(mine + exceptions)))
+            attribution.append(("Mes règles", mine))
         }
         bundledCount = total
+        matcher.load(attribution)
 
         guard !groups.isEmpty else {
             return apply([], state: missing.isEmpty

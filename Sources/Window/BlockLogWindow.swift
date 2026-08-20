@@ -10,9 +10,16 @@ import AppKit
 /// Elle ne s'ouvre que sur demande, et **rien n'est mesuré tant qu'elle n'a pas servi** au
 /// sens où le journal est borné et vit en mémoire : fermer Wuji l'efface.
 @MainActor
-final class BlockLogWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate {
+final class BlockLogWindow: NSObject, NSWindowDelegate, NSTableViewDataSource,
+                            NSTableViewDelegate, NSMenuDelegate {
 
     private let log: BlockingLog
+
+    /// Écrire une règle depuis le journal. **C'est là qu'on découvre ce qui manque à nos
+    /// listes** — une ligne « aucune règle ne vise cette adresse » sur un mouchard évident
+    /// est exactement le moment où l'on veut le bloquer, et il fallait jusqu'ici retenir le
+    /// domaine, ouvrir une page et taper du JSON.
+    var onBlockDomain: ((String) -> Void)?
     private var window: NSWindow?
     private var table: NSTableView?
     private var subtitle: NSTextField?
@@ -97,7 +104,7 @@ final class BlockLogWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, N
         table.headerView = nil
         table.backgroundColor = .clear
         table.style = .plain
-        table.rowHeight = 38
+        table.rowHeight = 46
         table.intercellSpacing = NSSize(width: 0, height: 0)
         table.gridStyleMask = []
         table.selectionHighlightStyle = .none
@@ -105,6 +112,10 @@ final class BlockLogWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, N
         table.delegate = self
         table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("entry")))
         self.table = table
+
+        let menu = NSMenu()
+        menu.delegate = self
+        table.menu = menu
 
         let scroll = NSScrollView()
         scroll.documentView = table
@@ -118,9 +129,11 @@ final class BlockLogWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, N
         // page qu'on n'ouvre jamais : une ressource peut manquer parce qu'on l'a refusée,
         // ou parce que le site l'a perdue. Wuji ne sait pas trancher, alors il ne tranche pas.
         let note = label("""
-            Wuji note ce qu'il observe : une page refusée par une règle, une ressource qui \
-            n'est jamais venue. WebKit ne dit pas ce qu'il bloque — une ressource absente \
-            peut aussi être une panne du site.
+            WebKit ne dit pas ce qu'il bloque : Wuji note ce qu'il observe, puis relit ses \
+            propres règles pour dire laquelle vise l'adresse. « Aucune règle ne vise cette \
+            adresse » veut donc dire que l'absence ne vient pas de nous — le site l'a \
+            perdue, ou refusée. Clic droit sur une ligne pour copier l'adresse ou bloquer \
+            le domaine.
             """, size: 11, weight: .regular, color: Tokens.textSecondary)
         note.lineBreakMode = .byWordWrapping
         note.maximumNumberOfLines = 4
@@ -184,10 +197,59 @@ final class BlockLogWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, N
 
     private func refresh() {
         let count = log.entries.count
+        let attributed = log.attributed
         subtitle?.stringValue = count == 0
             ? "Rien pour l'instant · cette session"
-            : "\(count) évènement\(count > 1 ? "s" : "") · cette session"
+            // Le second chiffre est le seul qui dise quelque chose de nous : combien de ces
+            // absences une de nos règles explique. Le premier ne compte que ce qu'on a vu.
+            : "\(count) évènement\(count > 1 ? "s" : "") · \(attributed) attribué"
+                + (attributed > 1 ? "s à une liste" : " à une liste")
         table?.reloadData()
+    }
+
+    // MARK: - Menu d'une ligne
+
+    private var clicked: BlockingLog.Entry? {
+        guard let row = table?.clickedRow, log.entries.indices.contains(row) else { return nil }
+        return log.entries[row]
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        guard let entry = clicked else { return }
+
+        menu.addItem(withTitle: "Copier l'adresse", action: #selector(copyAddress), keyEquivalent: "")
+        if let rule = entry.rule, !rule.isEmpty {
+            menu.addItem(withTitle: "Copier la règle", action: #selector(copyRule), keyEquivalent: "")
+        }
+        menu.addItem(.separator())
+
+        // Ce qu'une liste vise déjà n'a pas à être bloqué une seconde fois : on le dit au
+        // lieu d'offrir un geste sans effet.
+        if let list = entry.list {
+            let item = menu.addItem(withTitle: "Déjà visé par \(list)", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+        } else if let domain = URL(string: entry.url)?.host() {
+            menu.addItem(withTitle: "Bloquer \(domain)", action: #selector(blockDomain), keyEquivalent: "")
+        }
+        menu.items.forEach { $0.target = self }
+    }
+
+    @objc private func copyAddress() {
+        guard let entry = clicked else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(entry.url, forType: .string)
+    }
+
+    @objc private func copyRule() {
+        guard let rule = clicked?.rule else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(rule, forType: .string)
+    }
+
+    @objc private func blockDomain() {
+        guard let entry = clicked, let domain = URL(string: entry.url)?.host() else { return }
+        onBlockDomain?(domain)
     }
 
     @objc private func clear() {
@@ -223,13 +285,17 @@ final class BlockLogWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, N
         }
     }
 
-    /// Une ligne de trace : l'heure, la nature, ce dont il s'agit, et où.
+    /// Une ligne de trace : l'heure, ce dont il s'agit, à qui l'attribuer, et où.
+    ///
+    /// **Deux étages plutôt qu'une rangée de colonnes.** L'attribution est une phrase — « script ·
+    /// visé par Mouchards » — et une phrase ne se met pas en colonne sans la couper. Au-dessus,
+    /// ce qu'on cherche du regard : l'adresse. En dessous, ce qui l'explique.
     private final class Row: NSView {
         static let identifier = NSUserInterfaceItemIdentifier("row")
 
         private let time = NSTextField(labelWithString: "")
-        private let kind = NSTextField(labelWithString: "")
         private let detail = NSTextField(labelWithString: "")
+        private let meta = NSTextField(labelWithString: "")
         private let host = NSTextField(labelWithString: "")
 
         private static let clock: DateFormatter = {
@@ -244,33 +310,37 @@ final class BlockLogWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, N
             // l'autre et la colonne cesse d'être une colonne.
             time.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
             time.textColor = Tokens.textSecondary
-            kind.font = .systemFont(ofSize: 10, weight: .medium)
             detail.font = .systemFont(ofSize: 12, weight: .regular)
             detail.textColor = Tokens.textPrimary
             detail.lineBreakMode = .byTruncatingMiddle
+            meta.font = .systemFont(ofSize: 10, weight: .regular)
+            meta.lineBreakMode = .byTruncatingTail
             host.font = .systemFont(ofSize: 11, weight: .regular)
             host.textColor = Tokens.textSecondary
             host.lineBreakMode = .byTruncatingHead
             host.alignment = .right
 
-            for field in [time, kind, detail, host] {
+            for field in [time, detail, meta, host] {
                 field.translatesAutoresizingMaskIntoConstraints = false
                 addSubview(field)
             }
             detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            meta.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             host.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
 
             NSLayoutConstraint.activate([
                 time.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
-                time.centerYAnchor.constraint(equalTo: centerYAnchor),
-                kind.leadingAnchor.constraint(equalTo: time.trailingAnchor, constant: 12),
-                kind.widthAnchor.constraint(equalToConstant: 62),
-                kind.centerYAnchor.constraint(equalTo: centerYAnchor),
-                detail.leadingAnchor.constraint(equalTo: kind.trailingAnchor, constant: 8),
-                detail.centerYAnchor.constraint(equalTo: centerYAnchor),
+                time.firstBaselineAnchor.constraint(equalTo: detail.firstBaselineAnchor),
+
+                detail.leadingAnchor.constraint(equalTo: time.trailingAnchor, constant: 12),
+                detail.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+                meta.leadingAnchor.constraint(equalTo: detail.leadingAnchor),
+                meta.topAnchor.constraint(equalTo: detail.bottomAnchor, constant: 2),
+                meta.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -20),
+
                 host.leadingAnchor.constraint(greaterThanOrEqualTo: detail.trailingAnchor, constant: 12),
                 host.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
-                host.centerYAnchor.constraint(equalTo: centerYAnchor)
+                host.firstBaselineAnchor.constraint(equalTo: detail.firstBaselineAnchor)
             ])
         }
 
@@ -278,12 +348,19 @@ final class BlockLogWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, N
 
         func show(_ entry: BlockingLog.Entry) {
             time.stringValue = Self.clock.string(from: entry.date)
-            kind.stringValue = entry.kind.label
-            // La nature se lit à la valeur, pas à la couleur : « bloqué » est le seul cas
-            // où Wuji a franchement refusé quelque chose, et il est le seul en appuyé.
-            kind.textColor = entry.kind == .blocked ? Tokens.textPrimary : Tokens.textSecondary
             detail.stringValue = entry.detail
             host.stringValue = entry.host
+
+            meta.stringValue = entry.attribution
+            // La nature se lit à la valeur, pas à la couleur — mais une ligne attribuée à
+            // une liste n'est pas de même poids qu'une ligne qu'on ne s'explique pas.
+            meta.textColor = entry.list == nil ? Tokens.textSecondary : Tokens.textPrimary
+
+            // L'adresse entière et la règle exacte au survol : la ligne doit se lire d'un
+            // coup d'œil, et **rien de ce sur quoi l'attribution repose ne doit être caché**
+            // à qui veut vérifier plutôt que croire.
+            toolTip = ([entry.url] + (entry.rule.map { ["", "Règle : " + $0] } ?? []))
+                .joined(separator: "\n")
         }
 
         override func draw(_ dirtyRect: NSRect) {

@@ -167,10 +167,15 @@ extension AppDelegate {
             }
             if message.name == BlockLogWatcher.handler {
                 let host = message.frameInfo.request.url?.host() ?? ""
-                for raw in payload["refused"] as? [String] ?? [] {
-                    guard let url = URL(string: raw) else { continue }
+                for item in payload["refused"] as? [[String: Any]] ?? [] {
+                    guard let raw = item["url"] as? String, let url = URL(string: raw) else { continue }
+                    // L'attribution se fait ici, une fois, à l'arrivée : la fenêtre affiche
+                    // ce qui est écrit, elle ne recalcule rien à chaque défilement.
                     blockLog.record(.refused, host: host,
-                                    detail: (url.host() ?? "") + url.path)
+                                    detail: (url.host() ?? "") + url.path,
+                                    url: raw,
+                                    resource: BlockingLog.Resource(tag: item["tag"] as? String),
+                                    match: blocker.matcher.match(url, on: host))
                 }
                 return
             }

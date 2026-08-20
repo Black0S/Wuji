@@ -33,10 +33,12 @@ enum BlockLogWatcher {
 
       // Groupé : une page qui rate trente ressources d'un coup ne doit pas déclencher
       // trente allers-retours vers l'application.
-      const report = (url) => {
+      const report = (url, tag) => {
         if (!url || seen.has(url) || seen.size > 400) return;
         seen.add(url);
-        queue.push(url);
+        // La balise vient avec l'adresse : un script absent n'explique pas la même chose
+        // qu'une image absente, et la page est le seul endroit où on le sait.
+        queue.push({ url: url, tag: tag || '' });
         if (!timer) timer = setTimeout(flush, 250);
       };
 
@@ -44,7 +46,7 @@ enum BlockLogWatcher {
         const target = event.target;
         if (!target || target === window || !target.tagName) return;
         const url = target.src || target.href || (target.currentSrc || '');
-        if (typeof url === 'string' && url.startsWith('http')) report(url);
+        if (typeof url === 'string' && url.startsWith('http')) report(url, target.tagName);
       }, true);
     })();
     """, injectionTime: .atDocumentStart, forMainFrameOnly: false)

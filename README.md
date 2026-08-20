@@ -158,6 +158,14 @@ défaut. Seuls les écarts sont conservés, et Réglages › Sites web les liste
 compteur : un chiffre qui monte ne se vérifie pas, et il pousse à gonfler ce qu'on mesure.
 Le journal note ce que Wuji observe vraiment, et dit ce qu'il ne sait pas.
 
+Chaque ligne porte **la liste dont une règle vise l'adresse**, et la règle exacte au
+survol. WebKit ne rapporte rien de ce qu'il bloque : cette attribution vient de Wuji
+relisant ses propres règles, ce que la fenêtre écrit plutôt que de la faire passer pour un
+rapport du moteur. L'intérêt est surtout dans l'autre réponse — « aucune règle ne vise
+cette adresse » veut dire que l'absence ne vient pas de nous, et c'est l'ambiguïté dont le
+journal s'excusait jusqu'ici. Clic droit : copier l'adresse, copier la règle, ou bloquer le
+domaine — c'est là qu'on voit ce qui manque aux listes.
+
 **Scripts utilisateur** — installation depuis une adresse en `.user.js`, portée affichée
 avant d'accepter, mise à jour à la demande. Leur icône quitte la barre quand la fonction
 est éteinte.

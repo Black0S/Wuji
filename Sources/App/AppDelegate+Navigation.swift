@@ -60,7 +60,9 @@ extension AppDelegate {
         // Le seul refus dont WebKit nous informe : une adresse principale qu'une règle a
         // arrêtée. C'est peu, et c'est vrai.
         if ErrorPage.isBlocked(error) {
-            blockLog.record(.blocked, host: url.host() ?? "", detail: url.absoluteString)
+            blockLog.record(.blocked, host: url.host() ?? "", detail: url.absoluteString,
+                            url: url.absoluteString, resource: .frame,
+                            match: blocker.matcher.match(url, on: url.host()))
         }
 
         // **Aucun onglet ne se ferme tout seul. Jamais.**
