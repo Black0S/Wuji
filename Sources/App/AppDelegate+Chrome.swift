@@ -267,7 +267,7 @@ extension AppDelegate {
         // Un schéma écrit à la main fait foi : on ne corrige pas ce qui est explicite.
         if input.contains("://") {
             guard let url = URL(string: input), url.host != nil else { return nil }
-            return url
+            return normalised(url)
         }
 
         // Le point ne suffit plus à distinguer une adresse d'une recherche : « localhost:8080 »
@@ -283,7 +283,24 @@ extension AppDelegate {
         // on ne rétrograde pas le web entier pour le cas du poste local.
         guard let url = URL(string: "\(local ? "http" : "https")://\(input)"),
               url.host != nil else { return nil }
-        return url
+        return normalised(url)
+    }
+
+    /// **Un nom de domaine accentué doit ressortir en punycode.**
+    ///
+    /// `URL(string: "https://café.fr")` compose bien `https://xn--caf-dma.fr` — la
+    /// navigation marche. Mais `host()` sur cette URL rend `caf%C3%A9.fr`, la forme
+    /// pourcent-encodée de l'original, et non la forme du réseau. Tout ce que Wuji range
+    /// par hôte hérite alors de cette chaîne : le nom du site devient « caf%c3%a9.fr », et
+    /// une exception de blocage posée là ne correspondrait jamais à la page, qui, elle,
+    /// s'annonce en punycode.
+    ///
+    /// Relire l'URL depuis sa propre chaîne suffit : la chaîne est déjà en punycode, donc
+    /// la seconde lecture donne un hôte que la liste des suffixes publics reconnaît. C'est
+    /// exactement ce que la bibliothèque demande à l'appelant de faire — elle prévient
+    /// qu'elle ne s'occupe ni de la casse ni du punycode.
+    private static func normalised(_ url: URL) -> URL {
+        URL(string: url.absoluteString) ?? url
     }
 
     /// « Chez soi » : cette machine, ou le réseau qu'on a sous la main.

@@ -54,6 +54,18 @@ struct OmniboxInputTests {
         #expect(!AppDelegate.isLocalHost("localhost.exemple.com"))
     }
 
+    @Test func unDomaineAccentuéSortEnPunycode() {
+        // `URL(string:)` compose bien l'adresse, mais son `host()` rend la forme
+        // pourcent-encodée : « caf%C3%A9.fr ». Tout ce qui se range par hôte — exceptions
+        // de blocage, zoom, favicon — héritait de cette chaîne, que le réseau ne connaît
+        // pas et que la liste des suffixes publics ne sait pas découper.
+        #expect(adresse("café.fr") == "https://xn--caf-dma.fr")
+        #expect(AppDelegate.directURL("café.fr")?.host() == "xn--caf-dma.fr")
+        #expect(AppDelegate.directURL("https://münchen.de/x")?.host() == "xn--mnchen-3ya.de")
+        // Et le site s'en déduit correctement, ce qui n'était pas le cas.
+        #expect(Site.name(ofHost: AppDelegate.directURL("café.fr")?.host() ?? "") == "xn--caf-dma.fr")
+    }
+
     @Test func lesPagesInternesRestentDesPages() {
         #expect(adresse("wuji://settings") == "wuji://settings")
     }
