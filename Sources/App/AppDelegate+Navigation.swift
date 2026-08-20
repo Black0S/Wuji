@@ -77,8 +77,18 @@ extension AppDelegate {
         // ne part que si on le ferme. Une page qui échoue montre son échec, y compris dans
         // une fenêtre qu'on n'avait pas demandée — on la ferme d'un ⌘W, ce qui est un
         // geste, pas une surprise.
+        // Le certificat refusé, s'il y en a un pour cet hôte : la page doit montrer ce
+        // qu'elle propose d'accepter.
+        var certificate: [String] = []
+        if ErrorPage.isUntrusted(error), let host = url.host(),
+           let trust = rejectedCertificates[host] {
+            certificate = Certificate.describe(trust)
+            if let print = Certificate.fingerprint(trust) { certificate.append("SHA-256 " + print) }
+        }
+
         webView.loadSimulatedRequest(URLRequest(url: url),
-                                     responseHTML: ErrorPage.html(url: url, error: error))
+                                     responseHTML: ErrorPage.html(url: url, error: error,
+                                                                  certificate: certificate))
     }
 
     /// Une page vue est une page arrivée. Enregistrer au départ de la navigation

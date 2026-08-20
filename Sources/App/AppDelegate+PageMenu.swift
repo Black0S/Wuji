@@ -192,7 +192,13 @@ extension AppDelegate {
                 // « Ne pas bloquer ce site » depuis la page d'erreur : l'exception, puis
                 // la page. Sans le second geste, on resterait devant l'échec en croyant
                 // que le réglage n'a rien fait.
-                if payload["action"] as? String == "allow" { blocker.toggleException(for: url) }
+                switch payload["action"] as? String {
+                case "allow": blocker.toggleException(for: url)
+                // « Continuer quand même » sur un certificat refusé : l'exception vaut pour
+                // cet hôte et cette session, et rien n'en est écrit sur le disque.
+                case "trust": trustHost(of: url)
+                default: break
+                }
                 currentTab?.webView.load(URLRequest(url: url))
                 return
             }

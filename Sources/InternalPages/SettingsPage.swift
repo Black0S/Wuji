@@ -57,6 +57,10 @@ enum SettingsPage {
         var inspection: Bool
         var retention: Int
         var historyCount: Int
+        /// Combien de sites ont laissé des données — cookies, stockage local, cache.
+        /// `nil` tant que WebKit n'a pas répondu : le compte arrive d'un appel asynchrone,
+        /// et annoncer zéro en attendant serait annoncer faux.
+        var siteDataCount: Int?
         var blockingEnabled: Bool
         var isDefaultBrowser: Bool
         var sleepDelay: Int
@@ -155,6 +159,17 @@ enum SettingsPage {
         + row(title: "Effacer l'historique",
               subtitle: "\(state.historyCount) page\(state.historyCount > 1 ? "s" : "") enregistrée\(state.historyCount > 1 ? "s" : ""). L'effacement est immédiat et définitif.",
               control: #"<button class="button danger" data-action="clear-history">Effacer</button>"#)
+        // **Ce qui vous garde connecté n'était effaçable nulle part.** L'historique dit où
+        // l'on est allé ; les cookies et le stockage local sont ce que les sites ont laissé
+        // pour vous reconnaître. Effacer le premier sans pouvoir effacer le second donnait
+        // l'illusion d'un nettoyage.
+        + row(title: "Effacer les données de sites",
+              subtitle: (state.siteDataCount.map {
+                  "\($0) site\($0 > 1 ? "s" : "") ont laissé des cookies ou du stockage local. "
+              } ?? "Cookies, stockage local et caches. ")
+                  + "Les effacer vous déconnecte partout, y compris des sites où vous "
+                  + "restez connecté depuis longtemps.",
+              control: #"<button class="button danger" data-action="clear-site-data">Effacer</button>"#)
     }
 
     private static func search(_ state: State) -> String {

@@ -170,6 +170,19 @@ domaine — c'est là qu'on voit ce qui manque aux listes.
 avant d'accepter, mise à jour à la demande. Leur icône quitte la barre quand la fonction
 est éteinte.
 
+**Serveurs qui demandent qui vous êtes.** Une authentification HTTP ouvre une bulle avec
+identifiant et mot de passe — au même endroit que les autres questions, en bas à droite.
+**Rien n'est retenu** : ce qui est tapé part au serveur et disparaît avec la bulle. Wuji
+n'a pas de trousseau, et un navigateur qui garderait des mots de passe sans en avoir un
+serait le pire des deux mondes.
+
+**Certificats qu'aucune autorité n'atteste.** C'est l'ordinaire d'un service qu'on héberge
+soi-même, et c'était un cul-de-sac. La page d'erreur montre maintenant le certificat —
+délivré à qui, par qui, jusqu'à quand, et son **empreinte SHA-256**, la seule chose qui se
+compare — puis propose de continuer. L'exception vaut **pour cet hôte et cette session
+seulement**, et n'est jamais écrite sur le disque : une exception TLS permanente est un
+trou qu'on oublie avoir creusé.
+
 **Autorisations par site** — caméra, micro, position. Demandées une fois, retenues,
 révocables. La position passe par deux portes : le site vous demande, et macOS demande à
 Wuji ; accorder la première sans la seconde donnait un refus que la page vous attribuait.
@@ -200,6 +213,12 @@ sites exclus, scripts, réglages — avec le même sommaire à gauche partout.
 - **Aucun contrôle mort.** Un réglage qui ne pilote rien est pire qu'un réglage absent : il
   donne l'illusion d'un produit plus avancé qu'il ne l'est.
 - **Aucune télémétrie.** Rien ne part de cette machine que vous n'ayez demandé.
+- **Aucun mot de passe enregistré.** Stocker des identifiants demande de les remplir, et
+  c'est le remplissage qui coûte : au mauvais endroit, dans un cadre tiers ou sur une
+  origine voisine, il livre un mot de passe à un site qui ne l'a jamais eu. C'est la seule
+  fonction où un défaut ne casse pas une page — il donne un compte. À moitié faite, elle
+  serait la pire chose que Wuji puisse embarquer ; les gestionnaires de mots de passe et
+  l'app Mots de passe de macOS remplissent ici comme ailleurs.
 - **Une seule fenêtre, parce qu'il y a les espaces.** Ailleurs, on ouvre une seconde
   fenêtre parce que les onglets n'ont aucun autre moyen d'être groupés — c'est un
   contournement. Ici les espaces font le travail, et mieux : ils persistent, se nomment, se

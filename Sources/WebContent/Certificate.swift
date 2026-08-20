@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Security
 
@@ -34,6 +35,20 @@ enum Certificate {
             lines.append("Valable jusqu'au \(formatter.string(from: until))")
         }
         return lines
+    }
+
+    /// L'empreinte SHA-256 du certificat, en hexadécimal.
+    ///
+    /// **C'est la seule façon de vérifier un certificat que personne n'atteste.** Pour un
+    /// service qu'on héberge soi-même, l'empreinte est la question à poser au serveur — si
+    /// elle correspond, c'est bien lui ; sinon, quelqu'un s'est intercalé. Une page qui
+    /// propose d'accepter un certificat sans le montrer demande un blanc-seing.
+    static func fingerprint(_ trust: SecTrust?) -> String? {
+        guard let trust,
+              let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+              let leaf = chain.first else { return nil }
+        let digest = SHA256.hash(data: SecCertificateCopyData(leaf) as Data)
+        return digest.map { String(format: "%02X", $0) }.joined(separator: ":")
     }
 
     /// La date de fin de validité, lue dans le certificat lui-même.

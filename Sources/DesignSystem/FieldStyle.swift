@@ -46,6 +46,69 @@ final class InsetTextField: NSTextField {
     }
 }
 
+/// Un champ de saisie **dans une boîte dessinée** : bord, coin arrondi, fond en retrait.
+///
+/// Le champ bordé du système apporte son propre dessin — un cadre gris, un liseré bleu au
+/// focus — qui ne ressemble à rien d'autre dans cette application. On le débarrasse de son
+/// habillage et on pose la boîte nous-mêmes, comme l'interrupteur des réglages est dessiné
+/// plutôt qu'emprunté.
+@MainActor
+final class BoxedField: ThemedView {
+
+    private let field: NSTextField
+
+    /// ⏎ dans le champ. Un formulaire qui ne se valide qu'au clic fait taper puis viser.
+    var onSubmit: (() -> Void)?
+
+    init(placeholder: String, isSecure: Bool = false) {
+        field = isSecure ? NSSecureTextField() : NSTextField()
+        super.init(frame: .zero)
+
+        wantsLayer = true
+        layer?.cornerRadius = 7
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = 1
+
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 13)
+        field.placeholderString = placeholder
+        field.target = self
+        field.action = #selector(submit)
+        field.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(field)
+
+        NSLayoutConstraint.activate([
+            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9),
+            field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
+            field.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    var text: String {
+        get { field.stringValue }
+        set { field.stringValue = newValue }
+    }
+
+    /// Le curseur est-il dans ce champ ? Sert à savoir où ⏎ doit mener.
+    var isEditing: Bool { field.currentEditor() != nil }
+
+    func focus() { window?.makeFirstResponder(field) }
+
+    @objc private func submit() { onSubmit?() }
+
+    override func layout() {
+        super.layout()
+        layer?.backgroundColor = Tokens.selectionFill.cgColor
+        layer?.borderColor = Tokens.chromeHairline.cgColor
+        field.textColor = Tokens.textPrimary
+    }
+}
+
 private final class InsetTextFieldCell: NSTextFieldCell {
 
     var contentInset: CGFloat = 10

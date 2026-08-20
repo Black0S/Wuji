@@ -17,15 +17,42 @@ enum ErrorPage {
         error.domain == "WebKitErrorDomain" && error.code == 104
     }
 
+    /// Une connexion dont l'identité n'a pas pu être vérifiée. Ces cinq codes couvrent le
+    /// certificat auto-signé, expiré, pas encore valide, d'autorité inconnue, et l'échec
+    /// TLS général.
+    static func isUntrusted(_ error: NSError) -> Bool {
+        error.domain == NSURLErrorDomain
+            && [NSURLErrorServerCertificateUntrusted,
+                NSURLErrorServerCertificateHasBadDate,
+                NSURLErrorServerCertificateNotYetValid,
+                NSURLErrorServerCertificateHasUnknownRoot,
+                NSURLErrorSecureConnectionFailed].contains(error.code)
+    }
+
     /// Ce qu'on montre, selon ce qui a lâché. Le message dit **ce qui s'est passé** et
     /// **ce qu'on peut faire** — un code d'erreur ne fait ni l'un ni l'autre.
-    static func html(url: URL, error: NSError) -> String {
+    ///
+    /// `certificate` est ce que Wuji a pu lire du certificat refusé, empreinte comprise. Il
+    /// n'est pas décoratif : c'est ce sur quoi porte la décision qu'on demande.
+    static func html(url: URL, error: NSError, certificate: [String] = []) -> String {
         let (title, message, hint) = explain(url: url, error: error)
         let blocked = isBlocked(error)
+        let untrusted = isUntrusted(error)
         // « Réessayer » sur une adresse bloquée échouerait à tous les coups : ce serait un
         // bouton mort. À sa place, la seule action qui change quelque chose.
-        let button = blocked ? "Ne pas bloquer ce site" : "Réessayer"
-        let action = blocked ? #", action: "allow""# : ""
+        let button = blocked ? "Ne pas bloquer ce site"
+                   : untrusted ? "Continuer quand même" : "Réessayer"
+        let action = blocked ? #", action: "allow""#
+                   : untrusted ? #", action: "trust""# : ""
+
+        // Le détail du certificat, entre le message et le bouton : on lit ce qu'on accepte
+        // avant d'avoir le moyen de l'accepter.
+        let details = certificate.isEmpty ? "" : """
+        <div class="certificate">\(certificate.map {
+            let print = $0.hasPrefix("SHA-256") ? #" class="print""# : ""
+            return "<p\(print)>" + escape($0) + "</p>"
+        }.joined())</div>
+        """
 
         return """
         <!doctype html>
@@ -42,6 +69,7 @@ enum ErrorPage {
               <h1>\(escape(title))</h1>
               <p class="message">\(escape(message))</p>
               <p class="host">\(escape(url.host() ?? url.absoluteString))</p>
+              \(details)
               <button id="retry">\(escape(button))</button>
               <p class="hint">\(escape(hint))</p>
             </div>
@@ -90,17 +118,29 @@ enum ErrorPage {
             return ("Connexion interrompue",
                     "La connexion s'est coupée pendant le chargement.",
                     "Réessayer suffit généralement.")
+        case NSURLErrorServerCertificateHasBadDate:
+            return ("Certificat expiré",
+                    "Le certificat de « \(host) » n'est plus valable.",
+                    "C'est souvent un oubli de l'administrateur — mais c'est aussi ce qu'on voit quand un ancien certificat est rejoué. Comparez l'empreinte avant de continuer.")
+        case NSURLErrorServerCertificateNotYetValid:
+            return ("Certificat pas encore valable",
+                    "Le certificat de « \(host) » ne commence que plus tard.",
+                    "L'horloge de cet ordinateur est peut-être fausse : c'est la cause la plus fréquente.")
         case NSURLErrorServerCertificateUntrusted,
-             NSURLErrorServerCertificateHasBadDate,
-             NSURLErrorServerCertificateNotYetValid,
              NSURLErrorServerCertificateHasUnknownRoot,
              NSURLErrorSecureConnectionFailed:
-            // Aucun contournement proposé, et c'est délibéré : un bouton « continuer quand
-            // même » transforme un avertissement en formalité, et c'est exactement ce qu'un
-            // interception de connexion attend de nous.
-            return ("Connexion non sécurisée",
-                    "L'identité de « \(host) » n'a pas pu être vérifiée.",
-                    "Wuji n'ouvre pas cette page. Quelqu'un pourrait s'être placé entre ce site et vous.")
+            // **Un contournement est proposé, et il a un coût.** Il n'y en avait aucun, au
+            // motif qu'un bouton « continuer quand même » transforme un avertissement en
+            // formalité. C'est vrai — et ça rendait inatteignable tout service qu'on héberge
+            // soi-même : un certificat auto-signé n'est pas une attaque, c'est l'ordinaire
+            // d'un serveur local ou d'une machine distante à soi.
+            //
+            // Ce qui rend l'exception acceptable : elle vaut **pour cet hôte**, **pour cette
+            // session seulement**, elle n'est jamais écrite sur le disque, et la page montre
+            // le certificat — empreinte comprise — avant de proposer de l'accepter.
+            return ("Identité non vérifiée",
+                    "Personne n'atteste que « \(host) » est bien qui il prétend être.",
+                    "C'est l'ordinaire d'un serveur qu'on héberge soi-même, avec un certificat qu'aucune autorité n'a signé. Sur un site public, c'est un avertissement sérieux : quelqu'un peut s'être placé entre ce site et vous. Comparez l'empreinte ci-dessus avec celle de votre serveur. L'exception ne vaut que pour cette session.")
         default:
             return ("La page n'a pas pu être chargée",
                     error.localizedDescription,
@@ -132,5 +172,18 @@ enum ErrorPage {
     button:disabled { opacity: .4; cursor: default; }
     /* La cause probable en dernier et en gris : on lit d'abord ce qui s'est passé. */
     .hint { margin: 22px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    /* Le certificat se lit comme une pièce d'identité qu'on nous tend : encadré, à part du
+       propos, et l'empreinte en chasse fixe — deux empreintes ne se comparent pas si leurs
+       caractères ne s'alignent pas. */
+    .certificate {
+      margin: 0 0 22px; padding: 12px 14px; text-align: left;
+      border: 1px solid var(--hairline); border-radius: 10px;
+    }
+    .certificate p { margin: 0 0 4px; color: var(--muted); font-size: 12px; line-height: 1.5;
+                     overflow-wrap: anywhere; }
+    .certificate p:last-child { margin-bottom: 0; }
+    .certificate .print { margin-top: 8px; color: var(--text);
+                          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                          font-size: 11px; }
     """
 }

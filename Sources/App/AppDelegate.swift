@@ -84,8 +84,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         }
         pages.scripts = { [unowned self] in ScriptsPage.html(scripts: userScripts.scripts) }
         pages.settings = { [unowned self] path in
-            SettingsPage.html(section: SettingsPage.Section.from(path: path),
-                              state: settingsState)
+            // Le compte des sites vient de WebKit et se fait attendre : on le demande à
+            // chaque ouverture, et la page se remet à jour quand la réponse arrive. Un
+            // chiffre affiché doit être celui d'aujourd'hui.
+            countSiteData()
+            return SettingsPage.html(section: SettingsPage.Section.from(path: path),
+                                     state: settingsState)
         }
         config.setURLSchemeHandler(pages, forURLScheme: InternalPageHandler.scheme)
         config.userContentController.add(self, name: "wujiHistory")
@@ -288,6 +292,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     /// Une page à recharger dès que la liste compilée sera en place.
     var reloadAfterBlocking = false
+
+    /// Les hôtes dont on a accepté le certificat refusé, **pour cette session seulement**.
+    ///
+    /// En mémoire et nulle part ailleurs : quitter Wuji les oublie. Une exception TLS
+    /// écrite sur le disque survit à la raison qui l'a fait accorder — le serveur de test
+    /// d'un après-midi devient une porte ouverte permanente, sur un nom d'hôte qui peut
+    /// changer de main.
+    var trustedHosts: Set<String> = []
+
+    /// Le nombre de sites ayant laissé des données, relu à l'ouverture des réglages.
+    var siteDataCount: Int?
+
+    /// Le dernier certificat refusé par hôte, gardé pour que la page d'erreur puisse
+    /// montrer ce qu'elle propose d'accepter.
+    var rejectedCertificates: [String: SecTrust] = [:]
     /// Une page est arrivée avant que les règles soient posées.
     var loadedBeforeRules = false
     var lastProgressPush = Date.distantPast

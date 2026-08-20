@@ -47,6 +47,7 @@ extension AppDelegate {
                            inspection: settings.safariInspection,
                            retention: settings.historyRetention,
                            historyCount: history.count,
+                           siteDataCount: siteDataCount,
                            blockingEnabled: settings.blockingEnabled,
                            isDefaultBrowser: isDefaultBrowser,
                            sleepDelay: settings.sleepDelay,
@@ -104,6 +105,14 @@ extension AppDelegate {
         case "clear-history":
             history.clear()
             refreshSettingsPages()
+        case "clear-site-data":
+            // Une confirmation, parce que c'est irréversible et que la conséquence n'est
+            // pas dans le nom du bouton : on n'efface pas des fichiers, on se déconnecte.
+            layout.toast.ask(title: "Effacer les données de tous les sites ?",
+                             message: "Cookies, stockage local et caches. Vous serez déconnecté "
+                                 + "partout. L'historique et les favoris ne sont pas touchés.",
+                             confirm: "Effacer", isDestructive: true,
+                             onCancel: {}) { [weak self] in self?.clearSiteData() }
         case "forget-zoom":
             guard let site = payload["site"] as? String else { return }
             settings.siteZoom.removeValue(forKey: site)
@@ -114,6 +123,33 @@ extension AppDelegate {
             permissions.forget(host: host, kind: payload["kind"] as? String)
         default:
             break
+        }
+    }
+
+    /// Combien de sites ont laissé des données. Relu quand on ouvre les réglages, parce
+    /// qu'un chiffre affiché doit être celui d'aujourd'hui, pas celui du lancement.
+    func countSiteData() {
+        Task { @MainActor in
+            let records = await WKWebsiteDataStore.default()
+                .dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
+            guard siteDataCount != records.count else { return }
+            siteDataCount = records.count
+            refreshSettingsPages()
+        }
+    }
+
+    /// Efface tout ce que les sites ont laissé, sur toute la durée.
+    ///
+    /// Les espaces privés n'ont rien à effacer ici : leur magasin est éphémère et vit en
+    /// mémoire. C'est le magasin persistant — celui des espaces ordinaires — qu'on vide.
+    func clearSiteData() {
+        Task { @MainActor in
+            let store = WKWebsiteDataStore.default()
+            await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
+                                   modifiedSince: .distantPast)
+            siteDataCount = 0
+            refreshSettingsPages()
+            layout.toast.show("Données de sites effacées")
         }
     }
 
