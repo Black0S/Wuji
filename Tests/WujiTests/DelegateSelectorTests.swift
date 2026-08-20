@@ -54,6 +54,12 @@ struct DelegateSelectorTests {
         #expect(répond("_webView:requestGeolocationPermissionForFrame:decisionHandler:"))
     }
 
+    @Test func leChoixDUnFichierEstVisible() {
+        // Sans lui, un champ « choisir un fichier » ne fait rien du tout : le clic part,
+        // la page attend, et rien n'arrive.
+        #expect(répond("webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:"))
+    }
+
     @Test func lesMessagesDesPagesSontVisibles() {
         #expect(répond("userContentController:didReceiveScriptMessage:"))
     }

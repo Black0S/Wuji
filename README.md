@@ -183,6 +183,12 @@ compare — puis propose de continuer. L'exception vaut **pour cet hôte et cett
 seulement**, et n'est jamais écrite sur le disque : une exception TLS permanente est un
 trou qu'on oublie avoir creusé.
 
+**Téléverser un fichier.** Un champ « choisir un fichier » ouvre le panneau du système,
+en feuille sur la fenêtre. C'est le seul endroit où le panneau de macOS est le bon : la
+règle qui envoie les questions de Wuji dans la bulle vaut pour les questions que *Wuji*
+pose, et c'est ici le navigateur de fichiers du système qu'on demande — avec ses favoris,
+sa recherche et ses raccourcis.
+
 **Autorisations par site** — caméra, micro, position. Demandées une fois, retenues,
 révocables. La position passe par deux portes : le site vous demande, et macOS demande à
 Wuji ; accorder la première sans la seconde donnait un refus que la page vous attribuait.
@@ -241,6 +247,22 @@ sites exclus, scripts, réglages — avec le même sommaire à gauche partout.
   ce que vous visitez.
 - **Aucune règle écrite pour faire passer un test.** Les pages de conformité proposent
   leurs propres filtres ; les adopter donne un bon score et ne protège personne.
+
+---
+
+## Licence
+
+[MIT](LICENSE). Le plus permissif des choix courants, et il correspond à ce que le dépôt
+avait déjà décidé sans le dire : le convertisseur d'AdGuard a été retiré en partie parce
+qu'il imposait la GPL-3 à la distribution. Reprendre cette contrainte par la porte de la
+licence aurait été un aller-retour.
+
+La seule dépendance, [swift-psl](https://github.com/ameshkov/swift-psl), est elle aussi
+sous MIT.
+
+Les règles de blocage de `Sources/Blocking/Assets` sont couvertes par la même licence.
+Elles sont écrites à la main, adossées à des listes de référence pour la décision de
+bloquer un domaine — jamais recopiées depuis elles.
 
 ---
 

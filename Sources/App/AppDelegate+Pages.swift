@@ -118,6 +118,42 @@ extension AppDelegate {
             })
     }
 
+    /// Le choix d'un fichier à téléverser.
+    ///
+    /// **Sans cette méthode, `<input type="file">` ne fait rien.** WebKit n'ouvre aucun
+    /// sélecteur de lui-même : le clic est reçu, la page attend, et rien n'arrive. Joindre
+    /// une pièce à un message, envoyer une photo, importer un document dans une application
+    /// web — trois gestes ordinaires qui échouaient sans un mot.
+    ///
+    /// **Et ici, le panneau du système est le bon.** La règle qui envoie les questions de
+    /// Wuji dans la bulle vaut pour les questions que Wuji pose ; celle-ci n'en est pas une.
+    /// C'est le navigateur de fichiers de macOS qu'on demande, avec ses favoris, sa
+    /// recherche et ses raccourcis — le refaire serait le refaire moins bien.
+    ///
+    /// Annuler rend `nil` et non une liste vide : la page doit pouvoir distinguer « aucun
+    /// fichier choisi » de « choix abandonné ».
+    @objc
+    func webView(_ webView: WKWebView,
+                 runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping @MainActor ([URL]?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        // Les deux réglages viennent de la page : `multiple` et `webkitdirectory`. Les
+        // ignorer laisserait choisir ce que le formulaire ne sait pas recevoir.
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.prompt = "Choisir"
+
+        // En feuille sur la fenêtre plutôt qu'en fenêtre flottante : le choix appartient à
+        // la page qu'on regarde, et une fenêtre séparée se perdrait derrière.
+        panel.beginSheetModal(for: window) { response in
+            MainActor.assumeIsolated {
+                completionHandler(response == .OK ? panel.urls : nil)
+            }
+        }
+    }
+
     /// La position, demandée par `navigator.geolocation`.
     ///
     /// **WebKit ne l'expose pas dans `WKUIDelegate` public**, et sans réponse il refuse en
