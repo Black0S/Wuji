@@ -70,6 +70,9 @@ final class ContentTopBar: ThemedView {
         addSubview(plaque)
 
         lock.imageScaling = .scaleProportionallyDown
+        // Caché tant qu'on ne sait pas quoi certifier : au premier affichage, il n'y a pas
+        // encore de page, et un cadenas posé là parle d'une connexion qui n'existe pas.
+        lock.isHidden = true
         // **Le cadenas est cliquable.** Il affirmait « chiffré » sans jamais dire par qui,
         // et c'est précisément la question qu'on se pose au moment où l'on regarde ce
         // symbole. Un indicateur qui ne mène à rien demande qu'on lui fasse confiance.
@@ -142,12 +145,18 @@ final class ContentTopBar: ThemedView {
         // s'est retrouvé dessiné par-dessus quand la mesure rendait zéro. Ici il n'y a plus
         // rien à deviner : le groupe a une largeur, on la centre, et l'ordre à l'intérieur
         // est fixe.
+        //
+        // **Et quand il ne s'affiche pas, il ne prend pas de place.** Compter ses vingt-deux
+        // points alors qu'il est caché poussait l'adresse de onze points vers la droite —
+        // un décentrage qu'on voit sans savoir le nommer, et qui tombait précisément sur
+        // l'onglet vide, la première chose qu'on regarde en ouvrant la fenêtre.
         let écart: CGFloat = 8
-        let largeurGroupe = 14 + écart + texte
+        let place: CGFloat = lock.isHidden ? 0 : 14 + écart
+        let largeurGroupe = place + texte
         let gauche = (bounds.width - largeurGroupe) / 2
 
         lock.frame = NSRect(x: gauche, y: (bounds.height - 14) / 2, width: 14, height: 14)
-        address.frame = NSRect(x: gauche + 14 + écart, y: (bounds.height - 16) / 2,
+        address.frame = NSRect(x: gauche + place, y: (bounds.height - 16) / 2,
                                width: min(texte, addressWidth), height: 16)
 
         plaque.frame = NSRect(x: gauche - 10, y: (bounds.height - 28) / 2,
@@ -167,13 +176,30 @@ final class ContentTopBar: ThemedView {
         lock.image = NSImage(systemSymbolName: insecure ? "exclamationmark.triangle" : "lock",
                              accessibilityDescription: insecure ? "Connexion non chiffrée" : "Connexion chiffrée")
         lock.contentTintColor = insecure ? Tokens.Security.insecure : Tokens.textSecondary
-        lock.isHidden = url == nil
+        lock.isHidden = !Self.certifies(url)
 
         back.isEnabled = canGoBack
         forward.isEnabled = canGoForward
         // « Différencier sans couleur » : l'état désactivé passe par l'opacité.
         back.alphaValue = canGoBack ? 1 : 0.35
         forward.alphaValue = canGoForward ? 1 : 0.35
+    }
+
+    /// Y a-t-il quelque chose à certifier ?
+    ///
+    /// Le cadenas ne dit qu'une chose : *cette page vient d'un serveur distant, et voici
+    /// l'état du transport*. Il lui faut donc un hôte et un protocole de transport. Sur une
+    /// page interne, sur un onglet vide, sur un fichier local, il n'y a pas de connexion —
+    /// et un cadenas posé là **affirme un chiffrement qui n'a pas lieu**. C'est le pire
+    /// défaut possible pour un indicateur de sécurité : il ne se trompe pas de forme, il se
+    /// trompe de vérité.
+    ///
+    /// Le cas vu à l'écran : un onglet neuf dont la vue annonce `about:blank`. L'adresse
+    /// n'était pas nulle, seulement sans hôte — la barre affichait `🔒 wuji://`.
+    static func certifies(_ url: URL?) -> Bool {
+        guard let url, let host = url.host(), !host.isEmpty,
+              let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "https" || scheme == "http"
     }
 
     /// L'adresse, écrite pour répondre à une seule question : **sur quel site suis-je ?**
@@ -198,8 +224,19 @@ final class ContentTopBar: ThemedView {
             ]))
         }
 
-        guard let url, let host = url.host() else {
-            append("wuji://", Tokens.textSecondary)
+        guard let url, let host = url.host(), !host.isEmpty else {
+            // Pas d'hôte du tout : ou bien il n'y a pas de page — onglet neuf, vue vidée par
+            // la veille, qui annoncent `about:blank` —, et alors on est chez Wuji ; ou bien
+            // c'est une adresse d'une autre nature, un fichier local par exemple, et
+            // l'annoncer comme une page de Wuji serait un mensonge de plus.
+            guard let url, let scheme = url.scheme, scheme != "about", !url.path.isEmpty else {
+                append("wuji://", Tokens.textSecondary)
+                return result
+            }
+            let dossier = url.deletingLastPathComponent().path
+            append(scheme + "://" + (dossier.hasSuffix("/") ? dossier : dossier + "/"),
+                   Tokens.textSecondary)
+            append(url.lastPathComponent, Tokens.textPrimary, weight: .semibold)
             return result
         }
 
