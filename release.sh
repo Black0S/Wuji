@@ -69,6 +69,26 @@ codesign --force --sign "$IDENTITE" --options runtime --timestamp \
 codesign --verify --deep --strict --verbose=2 .build/Wuji.app
 spctl --assess --type execute --verbose .build/Wuji.app || true
 
+# --------------------------------------------------------------- la notarisation
+# **L'application part chez Apple avant l'image, et pas l'inverse.**
+#
+# Notariser l'image seule suffit à la faire ouvrir : Gatekeeper trouve son ticket agrafé au
+# moment du téléchargement. Mais l'application qu'on glisse ensuite dans `/Applications`
+# n'en porte aucun — elle est alors vérifiée en ligne au premier lancement, et refusée si
+# la machine est hors réseau ce jour-là. Vérifié : `stapler validate Wuji.app` répondait
+# « does not have a ticket stapled to it ».
+#
+# On notarise donc l'application, on lui agrafe son ticket, **puis** on construit l'image
+# autour d'elle. Les deux chemins portent alors leur preuve.
+echo "→ notarisation de l'application (une à quelques minutes)"
+ARCHIVE="$(mktemp -d)/Wuji.zip"
+ditto -c -k --keepParent .build/Wuji.app "$ARCHIVE"
+xcrun notarytool submit "$ARCHIVE" --keychain-profile "$PROFIL" --wait
+
+echo "→ agrafage de l'application"
+xcrun stapler staple .build/Wuji.app
+xcrun stapler validate .build/Wuji.app
+
 # ------------------------------------------------------------------------ l'image
 echo "→ image disque"
 ETAPE="$(mktemp -d)"
@@ -82,17 +102,17 @@ hdiutil create -volname "Wuji" -srcfolder "$ETAPE" -ov -format UDZO -quiet "$DMG
 # en premier.
 codesign --force --sign "$IDENTITE" --timestamp "$DMG"
 
-# ------------------------------------------------------------------ la notarisation
-echo "→ notarisation (une à quelques minutes)"
+echo "→ notarisation de l'image"
 xcrun notarytool submit "$DMG" --keychain-profile "$PROFIL" --wait
 
 # L'agrafage colle le ticket sur l'image : sans lui, une première ouverture sans réseau
 # est refusée, alors même que la notarisation a réussi.
-echo "→ agrafage"
+echo "→ agrafage de l'image"
 xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
 
 echo
 echo "→ $(pwd)/$DMG  ($(du -h "$DMG" | cut -f1))"
-echo "  vérification finale :"
+echo "  vérifications finales :"
 spctl --assess --type open --context context:primary-signature -v "$DMG"
+spctl --assess --type execute -v .build/Wuji.app
