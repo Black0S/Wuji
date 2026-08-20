@@ -17,20 +17,26 @@ import WebKit
 /// garderait des identifiants sans en avoir un serait le pire des deux mondes.
 extension AppDelegate {
 
-    /// **La forme à complétion, et pas la forme `async`.** Mesuré : écrite en `async`, cette
-    /// méthode n'est jamais appelée — WebKit ne la voit pas, le défi part en traitement par
-    /// défaut, et tout se passe comme s'il n'y avait aucun délégué. C'est la seule du
-    /// projet dans ce cas, et la seule dont la complétion prend **deux** valeurs ; les
-    /// délégués asynchrones à retour simple — politique de navigation, capture média — sont
-    /// bien appelés, vérifié dans le même essai.
+    /// **La complétion est annotée `@MainActor`, et ce n'est pas décoratif.**
     ///
-    /// Un défaut silencieux : rien ne compile en erreur, rien ne s'affiche, la fonction
-    /// n'existe simplement pas. D'où cette note plutôt qu'une réécriture « plus moderne »
-    /// un jour de ménage.
+    /// WebKit demande à l'objet s'il répond au sélecteur ; Swift n'expose une méthode à
+    /// Objective-C que si elle satisfait *exactement* l'exigence du protocole. Une
+    /// signature qui s'en écarte compile sans une erreur ni un avertissement, et la méthode
+    /// n'existe simplement pas pour le moteur. Mesuré dans le mode de langage du projet :
+    ///
+    ///     forme `async` .............................. ne répond pas
+    ///     complétion sans `@MainActor` ............... ne répond pas
+    ///     complétion avec `@MainActor` ............... répond, la page se charge
+    ///
+    /// C'est ce qui a fait vivre une première version de ce fichier entièrement morte :
+    /// aucune invite, aucun certificat lu, aucun message — exactement comme s'il n'existait
+    /// pas. `DelegateSelectorTests` demande maintenant à la classe ce que WebKit lui
+    /// demande, pour que le prochain silence de ce genre soit un test rouge.
+    @objc
     func webView(_ webView: WKWebView,
                  didReceive challenge: URLAuthenticationChallenge,
-                 completionHandler: @escaping (URLSession.AuthChallengeDisposition,
-                                               URLCredential?) -> Void) {
+                 completionHandler: @escaping @MainActor (URLSession.AuthChallengeDisposition,
+                                                          URLCredential?) -> Void) {
         let space = challenge.protectionSpace
 
         switch space.authenticationMethod {

@@ -187,6 +187,12 @@ trou qu'on oublie avoir creusé.
 révocables. La position passe par deux portes : le site vous demande, et macOS demande à
 Wuji ; accorder la première sans la seconde donnait un refus que la page vous attribuait.
 
+La demande caméra/micro passait par WebKit et non par Wuji : la méthode existait, compilait,
+et n'était appelée par personne — la réponse n'était donc retenue nulle part. Un délégué
+n'est visible du moteur que si sa signature satisfait *exactement* l'exigence du protocole,
+et une signature qui s'en écarte ne produit ni erreur ni avertissement. Un test demande
+maintenant à la classe ce que WebKit lui demande.
+
 **Pages internes** en `wuji://` — favoris, historique, téléchargements, listes de règles,
 sites exclus, scripts, réglages — avec le même sommaire à gauche partout.
 

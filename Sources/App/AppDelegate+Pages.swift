@@ -74,10 +74,20 @@ extension AppDelegate {
     /// précis où l'on veut que la personne lise ce qu'elle accorde.
     ///
     /// Le refus est le défaut : fermer la feuille sans choisir, c'est refuser.
+    ///
+    /// **Écrite en `async`, cette méthode n'existait pas pour WebKit.** Elle compilait sans
+    /// une erreur, sans un avertissement, et n'était jamais appelée : le moteur posait sa
+    /// propre question à la place, si bien que tout paraissait fonctionner — sauf que la
+    /// réponse n'était retenue nulle part et que Réglages › Sites web restait vide. La
+    /// complétion doit être annotée `@MainActor` pour satisfaire l'exigence du protocole,
+    /// faute de quoi la méthode n'est pas exposée à Objective-C. Voir `DelegateSelectorTests`,
+    /// qui demande à la classe ce que WebKit lui demande.
+    @objc
     func webView(_ webView: WKWebView,
                  requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                  initiatedByFrame frame: WKFrameInfo,
-                 type: WKMediaCaptureType) async -> WKPermissionDecision {
+                 type: WKMediaCaptureType,
+                 decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void) {
         let host = origin.host
         let kind: Permissions.Kind = switch type {
         case .camera: .camera
@@ -87,23 +97,25 @@ extension AppDelegate {
 
         // Déjà tranché pour ce site : on ne redemande pas.
         if let known = permissions.decision(host: host, kind: kind) {
-            return known ? .grant : .deny
+            return decisionHandler(known ? .grant : .deny)
         }
 
-        return await withCheckedContinuation { continuation in
-            layout.toast.ask(
-                title: "Autoriser \(kind.label) ?",
-                message: "« \(host) » demande l'accès à \(kind.label). Cette réponse sera retenue pour ce site, et modifiable dans les réglages.",
-                confirm: "Autoriser", isDestructive: false,
-                onCancel: { [weak self] in
-                    self?.permissions.remember(host: host, kind: kind, isAllowed: false)
-                    continuation.resume(returning: .deny)
-                },
-                onConfirm: { [weak self] in
-                    self?.permissions.remember(host: host, kind: kind, isAllowed: true)
-                    continuation.resume(returning: .grant)
-                })
-        }
+        // Une question à la fois dans la bulle : une seconde chasserait la première, et la
+        // page qui l'attendait resterait sans réponse.
+        guard !layout.toast.isAsking else { return decisionHandler(.deny) }
+
+        layout.toast.ask(
+            title: "Autoriser \(kind.label) ?",
+            message: "« \(host) » demande l'accès à \(kind.label). Cette réponse sera retenue pour ce site, et modifiable dans les réglages.",
+            confirm: "Autoriser", isDestructive: false,
+            onCancel: { [weak self] in
+                self?.permissions.remember(host: host, kind: kind, isAllowed: false)
+                decisionHandler(.deny)
+            },
+            onConfirm: { [weak self] in
+                self?.permissions.remember(host: host, kind: kind, isAllowed: true)
+                decisionHandler(.grant)
+            })
     }
 
     /// La position, demandée par `navigator.geolocation`.
