@@ -22,8 +22,27 @@ extension AppDelegate {
             installPageScripts(for: navigationAction.request.url, in: webView)
         }
 
+        // **La page a demandé un téléchargement, pas une navigation.**
+        //
+        // C'est ce que dit `shouldPerformDownload` : un lien porteur de l'attribut
+        // `download`, ou un `blob:`/`data:` qu'un script fait cliquer pour livrer un
+        // fichier. Sans ce test, l'attribut était purement décoratif — le fichier
+        // s'affichait dans l'onglet quand son type était affichable, et le nom demandé par
+        // la page était perdu. Mesuré sur les cinq formes du banc d'essai : aucune ne
+        // téléchargeait.
+        if navigationAction.shouldPerformDownload { return .download }
+
         // Une adresse en `.user.js` est une offre d'installation, pas une page à lire.
-        if let url = navigationAction.request.url, url.path.hasSuffix(".user.js"),
+        // Le type du document appartient à la page affichée : une nouvelle navigation le
+        // périme. Sans cette remise à zéro, une page interne — qui n'a pas de réponse
+        // réseau — hériterait du type du PDF qu'on regardait, et garderait son bouton de
+        // téléchargement.
+        if navigationAction.targetFrame?.isMainFrame ?? false,
+           let tab = tab(for: webView) {
+            tab.documentMIME = nil
+        }
+
+        if let url = navigationAction.request.url, Self.looksLikeUserScript(url),
            navigationAction.targetFrame?.isMainFrame ?? true {
             installScript(from: url)
             return .cancel
@@ -57,21 +76,13 @@ extension AppDelegate {
               !(error.domain == "WebKitErrorDomain" && error.code == 102) else { return }
 
         guard let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL ?? webView.url else { return }
-        // Le seul refus dont WebKit nous informe : une adresse principale qu'une règle a
-        // arrêtée. C'est peu, et c'est vrai.
-        if ErrorPage.isBlocked(error) {
-            blockLog.record(.blocked, host: url.host() ?? "", detail: url.absoluteString,
-                            url: url.absoluteString, resource: .frame,
-                            match: blocker.matcher.match(url, on: url.host()))
-        }
-
         // **Aucun onglet ne se ferme tout seul. Jamais.**
         //
         // Une fenêtre ouverte par un script et dont l'adresse échouait se refermait
         // d'elle-même. L'intention était bonne — personne n'avait demandé cette fenêtre —
         // mais le drapeau qui la désignait restait posé pour toute la vie de l'onglet :
-        // n'importe quel échec ultérieur, un réveil de veille compris, le faisait
-        // disparaître de la colonne. Des onglets s'évanouissaient sans raison visible.
+        // n'importe quel échec ultérieur le faisait disparaître de la colonne. Des
+        // onglets s'évanouissaient sans raison visible.
         //
         // La règle est donc absolue, et c'est celle du propriétaire du produit : un onglet
         // ne part que si on le ferme. Une page qui échoue montre son échec, y compris dans
@@ -94,17 +105,16 @@ extension AppDelegate {
     /// Une page vue est une page arrivée. Enregistrer au départ de la navigation
     /// compterait les redirections et les erreurs comme des visites.
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // **Une page arrivée avant les règles n'est pas protégée, et rien ne le disait.**
-        //
-        // WebKit applique une liste au moment de la requête : la poser après coup ne
-        // change rien à la page déjà là. Au lancement, la compilation prend un instant, et
-        // la première page part souvent avant. On le note pour le dire — pas pour la
-        // recharger d'office, ce qui ferait clignoter ce qu'on est en train de lire.
-        if !blocker.isReady { loadedBeforeRules = true }
+        offerScriptInstall(in: webView)
+
+        // Une navigation quitte le mode lecture : le document qu'on avait remplacé n'est
+        // plus là, et laisser la marque poserait un « Quitter le mode lecture » sur une page
+        // qui n'y est pas.
+        if let tab = tab(for: webView) { readingTabs.remove(tab.id) }
 
         // L'onglet retient où il en est. Sans ce rappel, sa mémoire resterait celle de la
         // session restaurée et vieillirait à chaque navigation.
-        if let tab = spaces.flatMap(\.allTabs).first(where: { $0.webView === webView }),
+        if let tab = tab(for: webView),
            let arrivée = webView.url {
             tab.remember(url: arrivée)
         }
@@ -112,6 +122,18 @@ extension AppDelegate {
         // Le zoom suit le site, donc il se réévalue à l'arrivée : d'un onglet qui va de
         // `a.com` à `b.com`, on attend la taille de `b.com`.
         webView.pageZoom = zoom(for: webView.url)
+
+        // Y a-t-il un article ici ? La question se pose une fois, à l'arrivée, et le bouton
+        // du mode lecture s'affiche ou non selon la réponse.
+        webView.evaluateJavaScript(Reader.detect) { [weak self] found, _ in
+            MainActor.assumeIsolated {
+                guard let self, let tab = self.tab(for: webView) else { return }
+                let article = found as? Bool == true
+                guard tab.hasArticle != article else { return }
+                tab.hasArticle = article
+                self.syncChrome()
+            }
+        }
 
         guard let url = webView.url else { return }
         // Rien n'est noté depuis un espace privé — c'est tout ce qu'il promet.
@@ -122,8 +144,101 @@ extension AppDelegate {
     /// Une réponse que WebKit ne sait pas afficher est un fichier, pas une page.
     func webView(_ webView: WKWebView,
                  decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
-        navigationResponse.canShowMIMEType ? .allow : .download
+        // Le suffixe convenu court-circuite l'affichage : `.user.js` **est** une offre
+        // d'installation, et une redirection peut l'avoir amené jusqu'ici sans passer par
+        // le test de l'action.
+        if navigationResponse.isForMainFrame, let url = navigationResponse.response.url,
+           Self.looksLikeUserScript(url) {
+            installScript(from: url)
+            return .cancel
+        }
+
+        // **Le serveur peut dire « ceci se télécharge », et il faut l'écouter.**
+        //
+        // `canShowMIMEType` ne répond qu'à « saurais-je l'afficher ? ». Un `text/plain`
+        // servi avec `Content-Disposition: attachment` sait s'afficher et ne doit pas
+        // l'être : c'est une pièce jointe, et le serveur vient de le dire. Mesuré, elle
+        // s'ouvrait dans l'onglet — le fichier n'arrivait jamais, et le nom que le serveur
+        // proposait était perdu avec lui.
+        if Self.isAttachment(navigationResponse.response) { return .download }
+
+        // Le type du document est **retenu ici**, parce qu'il n'est nulle part ailleurs :
+        // `WKWebView` ne l'expose pas, et c'est lui qui dit si la page affichée est du
+        // texte — donc, peut-être, un script utilisateur.
+        if navigationResponse.isForMainFrame,
+           let tab = tab(for: webView) {
+            tab.documentMIME = navigationResponse.response.mimeType?.lowercased()
+        }
+
+        return navigationResponse.canShowMIMEType ? .allow : .download
     }
+
+    /// La réponse s'annonce-t-elle comme une pièce jointe ?
+    ///
+    /// La comparaison est faite sur le premier segment et sans tenir compte de la casse :
+    /// l'en-tête s'écrit `attachment; filename="…"`, et `Attachment` est aussi valide que
+    /// `attachment`. Chercher le mot n'importe où dans l'en-tête ferait prendre un
+    /// `inline; filename="attachment.pdf"` pour une pièce jointe.
+    static func isAttachment(_ response: URLResponse) -> Bool {
+        guard let http = response as? HTTPURLResponse,
+              let header = http.value(forHTTPHeaderField: "Content-Disposition") else {
+            return false
+        }
+        let type = header.split(separator: ";").first ?? ""
+        return type.trimmingCharacters(in: .whitespaces).lowercased() == "attachment"
+    }
+
+    /// Une page qui **est** un script utilisateur propose de l'installer.
+    ///
+    /// **L'adresse ment souvent.** Un dépôt sert son script sous `/refs/heads/main/x.js`,
+    /// un lien raccourci perd le suffixe, une redirection le mange : on tombait alors sur
+    /// un mur de JavaScript affiché en texte, et il fallait deviner qu'il y avait quelque
+    /// chose à faire. Le suffixe `.user.js`, lui, est une déclaration explicite et
+    /// court-circuite l'affichage plus haut.
+    ///
+    /// **Ce n'est plus la page qu'on interroge.** On lui demandait, en JavaScript, si son
+    /// corps ressemblait à un script. Mesuré sur `raw.githubusercontent.com` :
+    /// `evaluateJavaScript` **échoue** dans un document texte — WebKit n'y exécute rien, et
+    /// l'offre n'arrivait donc jamais sur exactement le genre de page où elle sert. C'est
+    /// maintenant le type du document qui décide, retenu à la réponse, et l'en-tête du
+    /// fichier qui confirme.
+    ///
+    /// **Et la page reste affichée.** Un script utilisateur s'exécute avec les pouvoirs des
+    /// pages qu'il vise ; le proposer par-dessus son propre code est la seule façon de
+    /// pouvoir le lire avant de dire oui.
+    func offerScriptInstall(in webView: WKWebView) {
+        guard settings.userScriptsEnabled, !layout.toast.isAsking,
+              let url = webView.url, url.scheme == "https" || url.scheme == "http",
+              !Self.looksLikeUserScript(url),
+              let tab = tab(for: webView), Self.isTextDocument(tab.documentMIME),
+              url.path.lowercased().hasSuffix(".js") else { return }
+
+        // Le fichier est relu pour de bon : c'est son en-tête qui tranche, pas son nom.
+        // `installScript` ne pose la question que s'il en trouve un.
+        installScript(from: url, requiringHeader: true)
+    }
+
+    /// Le document affiché est-il du texte ou du JavaScript ?
+    ///
+    /// Une page HTML qui parlerait de scripts n'a pas ce type-là, et ne sera donc jamais
+    /// prise pour un script — c'est la moitié de la garde, l'autre étant l'en-tête.
+    static func isTextDocument(_ mime: String?) -> Bool {
+        guard let mime else { return false }
+        return ["text/plain", "text/javascript", "application/javascript",
+                "application/x-javascript", "text/x-javascript"].contains(mime)
+    }
+
+    /// L'adresse annonce-t-elle un script utilisateur ?
+    ///
+    /// Le suffixe `.user.js` est la convention de Greasemonkey, respectée par Greasy Fork,
+    /// OpenUserJS et les dépôts. Il se lit sur le **chemin** et non sur l'adresse entière :
+    /// `…/loop.user.js?version=1420` en est un, et le chercher dans la chaîne complète le
+    /// manquerait.
+    static func looksLikeUserScript(_ url: URL) -> Bool {
+        url.path.hasSuffix(".user.js")
+    }
+
+
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction,
                  didBecome download: WKDownload) {
@@ -158,14 +273,31 @@ extension AppDelegate {
     /// `⌘0` efface l'écart plutôt que de poser 100 % : revenir au défaut et *imposer* cent
     /// pour cent sont deux gestes différents, et c'est le premier qu'on attend d'une remise
     /// à zéro.
+    /// **Aucune bulle pour le zoom.** Elle annonçait « Zoom 90 % sur exemple.fr » à chaque
+    /// pression, en bas à droite — pendant que la barre du haut affichait déjà le chiffre,
+    /// à demeure et à l'endroit où l'on regarde en réglant. Deux surfaces pour un seul
+    /// fait, et la bulle était la moins utile des deux : elle s'efface au bout de quelques
+    /// secondes, là où le badge reste tant que le zoom n'est pas celui par défaut.
     @objc func zoomIn(_ sender: Any?)  { setZoom(zoomForCurrentSite + 0.1) }
     @objc func zoomOut(_ sender: Any?) { setZoom(zoomForCurrentSite - 0.1) }
 
     @objc func zoomReset(_ sender: Any?) {
-        guard let site = Site.name(of: currentTab?.url) else { return }
+        guard let site = Site.name(of: currentTab?.url) else {
+            // Une page interne n'a pas de site à qui retirer un écart. `⌘+` y règle le zoom
+            // général : `⌘0` doit donc l'y ramener à cent, sans quoi les deux gestes ne
+            // parleraient pas de la même chose au même endroit.
+            guard settings.pageZoom != 1 else { return }
+            settings.pageZoom = 1
+            syncChrome()
+            return
+        }
         settings.siteZoom.removeValue(forKey: site)
         applySettings()
-        layout.toast.show("Zoom par défaut sur \(site)")
+        // **Le badge doit suivre, et il ne suivait pas.** `applySettings` change les pages,
+        // pas le chrome : le chiffre restait affiché — « 60 % » sur une page revenue à sa
+        // taille normale. C'est déjà la raison du `syncChrome` de `setZoom` ; il manquait
+        // ici, où l'on remet justement les choses en place.
+        syncChrome()
     }
 
     /// Le zoom en vigueur ici : celui du site s'il en a un, le réglage général sinon.
@@ -182,7 +314,7 @@ extension AppDelegate {
             // pour le réglage général, comme avant.
             guard clamped != settings.pageZoom else { return }
             settings.pageZoom = clamped
-            layout.toast.show("Zoom \(Int(clamped * 100)) %")
+            syncChrome()
             return
         }
         guard clamped != zoomForCurrentSite else { return }
@@ -192,7 +324,10 @@ extension AppDelegate {
             settings.siteZoom[site] = Double(clamped)
         }
         applySettings()
-        layout.toast.show("Zoom \(Int(clamped * 100)) % sur \(site)")
+        // Le badge de la barre suit tout de suite : `applySettings` change les pages, pas
+        // le chrome, et attendre le prochain signal de WebKit ferait afficher l'ancien
+        // chiffre — ou rien du tout sur une page qui a fini de charger.
+        syncChrome()
     }
 
     @objc func goBack(_ sender: Any?) { currentTab?.webView.goBack() }

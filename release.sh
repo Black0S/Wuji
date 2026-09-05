@@ -86,9 +86,44 @@ plutil -replace CFBundleVersion -string "$CONSTRUCTION" .build/Wuji.app/Contents
 #
 # `--timestamp` : un horodatage signé par Apple. Sans lui, la signature expire avec le
 # certificat, et une version distribuée cesserait de s'ouvrir un an plus tard.
+# **Le droit du trousseau, et pourquoi il est fabriqué ici.**
+#
+# Un élément de trousseau gardé par l'Enclave sécurisée — c'est ce qui fait que Touch ID
+# ouvre le coffre — demande `keychain-access-groups`, dont le groupe commence par
+# l'identifiant de l'équipe. Cet identifiant est dans le certificat, pas dans le dépôt :
+# l'écrire en dur ferait un fichier faux pour tout le monde sauf une machine. On le lit
+# donc dans l'identité qu'on vient de trouver, et on écrit le fichier au moment de signer.
+#
+# Sans ce droit, `SecItemAdd` rend -34018 et Wuji retombe sur sa protection logicielle —
+# ce qu'il dit alors dans ses réglages, plutôt que de laisser croire à l'Enclave.
+EQUIPE="$(security find-certificate -c "$IDENTITE" -p 2>/dev/null \
+    | openssl x509 -noout -subject 2>/dev/null \
+    | sed -n 's/.*OU *= *\([A-Z0-9]*\).*/\1/p' | head -1)"
+DROITS=".build/wuji.entitlements"
+if [ -n "$EQUIPE" ]; then
+  cat > "$DROITS" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>keychain-access-groups</key>
+  <array><string>${EQUIPE}.com.wuji.browser</string></array>
+</dict></plist>
+PLIST
+  echo "→ droits : keychain-access-groups ${EQUIPE}.com.wuji.browser"
+else
+  echo "→ droits : identifiant d'équipe introuvable, signature sans keychain-access-groups"
+  echo "  (Touch ID retombera sur la protection logicielle)"
+  rm -f "$DROITS"
+fi
+
 echo "→ signature"
-codesign --force --sign "$IDENTITE" --options runtime --timestamp \
-         --generate-entitlement-der .build/Wuji.app
+if [ -f "$DROITS" ]; then
+  codesign --force --sign "$IDENTITE" --options runtime --timestamp \
+           --entitlements "$DROITS" --generate-entitlement-der .build/Wuji.app
+else
+  codesign --force --sign "$IDENTITE" --options runtime --timestamp \
+           --generate-entitlement-der .build/Wuji.app
+fi
 
 # On vérifie avant d'aller plus loin : la notarisation coûte une minute d'attente, autant
 # ne pas l'engager sur un paquet mal formé.

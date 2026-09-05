@@ -25,22 +25,20 @@ cp ".build/$CONFIG/Wuji" "$APP/Contents/MacOS/Wuji"
 # grise en dessous de 128 px. `swift Resources/Icon/make-icon.swift` la régénère.
 [ -f Resources/Icon/AppIcon.icns ] && cp Resources/Icon/AppIcon.icns "$APP/Contents/Resources/"
 
-# Les règles de Wuji, déjà dans le format de WebKit : rien à convertir, ni ici ni au
-# démarrage.
-# Les listes de règles, une par famille : le bloqueur en compile une par fichier.
-cp Sources/Blocking/Assets/wuji-*.json "$APP/Contents/Resources/"
-
 # La liste des suffixes publics. Elle va dans les ressources comme le reste — c'est ce que
 # macOS exige pour signer le paquet, et c'est là que le code la cherche. Son absence est
 # fatale au lancement : elle décide où s'arrête « ce site ».
 cp Sources/PublicSuffix/Data/*.bin "$APP/Contents/Resources/"
 
-# Signature ad-hoc, avec l'autorisation de débogage : suffit pour que macOS accorde les
-# permissions localement, et c'est ce qui rend les pages inspectables depuis Safari.
-# Signature ad-hoc, sans entitlement. Le seul qu'il y avait — `get-task-allow` — servait
-# à rendre les pages inspectables depuis Safari, fonction retirée ; et il est de toute
-# façon refusé à la notarisation. Le jour d'une vraie identité, ce fichier reviendra avec
-# ce qu'elle demande.
+# Signature ad-hoc, sans droits. Le seul qu'il y avait — `get-task-allow` — servait à rendre
+# les pages inspectables depuis Safari, fonction retirée ; et il est de toute façon refusé à
+# la notarisation.
+#
+# **Une copie signée ad-hoc n'a pas tous les pouvoirs de la version publiée**, et c'est
+# mesuré, pas supposé : un élément de trousseau à contrôle biométrique rend -34018 ici, et
+# Wuji retombe alors sur sa protection logicielle en le disant dans ses réglages.
+# `release.sh` signe avec l'identité Developer ID et fabrique le fichier de droits qui va
+# avec.
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 
 echo "→ $APP"

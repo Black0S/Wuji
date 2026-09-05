@@ -1,14 +1,14 @@
 #!/bin/bash
 # Désinstalle Wuji et efface tout ce qu'il a laissé sur la machine.
 #
-# **Un test qui repart d'un dossier non vide ne prouve rien.** Les réglages, le cache des
-# règles compilées, les cookies et les autorisations survivent à une simple suppression de
+# **Un test qui repart d'un dossier non vide ne prouve rien.** Les réglages, le stockage
+# des extensions, les cookies et les autorisations survivent à une simple suppression de
 # l'application : on croit alors observer un premier lancement alors qu'on observe le
 # précédent. C'est ce qui rend certains défauts invisibles chez soi et évidents chez les
 # autres.
 #
 # **C'est irréversible, et ça touche à vos données** — historique, favoris, session,
-# règles écrites à la main. D'où la liste avant, et la confirmation.
+# scripts écrits à la main. D'où la liste avant, et la confirmation.
 #
 #   ./uninstall.sh              montre puis demande
 #   ./uninstall.sh --dry-run    montre seulement
@@ -29,9 +29,9 @@ done
 # Rangé par ce que ça représente, pas par chemin : on doit pouvoir décider en lisant.
 TARGETS=(
     "/Applications/Wuji.app"                                  # l'application
-    "$HOME/Library/Application Support/Wuji"                  # historique, favoris, session, règles
+    "$HOME/Library/Application Support/Wuji"                  # historique, favoris, session, scripts, coffre
     "$HOME/Library/Preferences/$BUNDLE.plist"                 # réglages
-    "$HOME/Library/WebKit/$BUNDLE"                            # règles compilées, données des sites
+    "$HOME/Library/WebKit/$BUNDLE"                            # extensions, données des sites
     "$HOME/Library/Caches/$BUNDLE"                            # cache réseau
     "$HOME/Library/HTTPStorages/$BUNDLE"                      # stockage local des sites
     "$HOME/Library/HTTPStorages/$BUNDLE.binarycookies"        # cookies

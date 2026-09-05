@@ -16,9 +16,16 @@ extension AppDelegate {
     /// imbriqués, où les coordonnées de la page ne sont plus celles de la fenêtre.
     func showPageMenu(_ target: PageContextMenu.Target) {
         let items = contextItems(for: target)
-        guard !items.isEmpty, let window, let layout else { return }
+        // Ce que les extensions ajoutent au clic droit, sous un séparateur : c'est leur
+        // place dans tous les navigateurs, et elle dit d'où vient l'entrée sans qu'on ait
+        // à l'étiqueter.
+        let fromExtensions = currentTab.map { tab in
+            extensions.loaded.flatMap { $0.menuItems(for: tab) }
+        } ?? []
+        guard !items.isEmpty || !fromExtensions.isEmpty, let window, let layout else { return }
         let inWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
-        layout.actionSheet.present(items, at: layout.convert(inWindow, from: nil))
+        NativeMenu.popUp(items, appending: fromExtensions,
+                         at: layout.convert(inWindow, from: nil), in: layout)
     }
 
     /// Le menu parle de ce qui est sous le curseur, et de rien d'autre. Sur un lien il
@@ -103,22 +110,20 @@ extension AppDelegate {
         return items
     }
 
-    /// Assez de la sélection pour la reconnaître, jamais assez pour couper la ligne.
+    /// Assez de la sélection pour la reconnaître, jamais assez pour étirer le menu.
     ///
-    /// La citation est raccourcie **jusqu'à ce qu'elle tienne**, et non à un nombre de
-    /// caractères choisi d'avance : une troncature par la feuille emporterait le guillemet
-    /// fermant, et on ne saurait plus où finit ce qu'on a sélectionné.
+    /// **La coupe se fait ici et pas dans le menu.** `NSMenu` tronque de lui-même, mais au
+    /// milieu du libellé : le guillemet fermant partait, et on ne savait plus où finissait
+    /// ce qu'on avait sélectionné. Quarante-huit caractères, parce qu'un menu de page tient
+    /// autour de cette largeur sans qu'une seule ligne le fasse doubler.
+    static let selectionLimit = 48
+
     static func searchTitle(for selection: String) -> String {
         let flat = selection.replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespaces)
-        func title(_ quote: String) -> String { "Rechercher « \(quote) »" }
-        guard !ActionSheet.fits(title: title(flat)) else { return title(flat) }
-
-        var candidate = flat
-        while !candidate.isEmpty, !ActionSheet.fits(title: title(candidate + "…")) {
-            candidate.removeLast()
-        }
-        return title(candidate.trimmingCharacters(in: .whitespaces) + "…")
+        guard flat.count > selectionLimit else { return "Rechercher « \(flat) »" }
+        let court = flat.prefix(selectionLimit).trimmingCharacters(in: .whitespaces)
+        return "Rechercher « \(court)… »"
     }
 
     static func copy(_ text: String) {
@@ -139,14 +144,62 @@ extension AppDelegate {
         openInternal(URL(string: "wuji://history")!)
     }
 
-    /// Dans l'onglet courant s'il est vierge ou s'il montre déjà cette page, dans un
-    /// nouveau sinon : consulter deux fois l'historique ne doit pas laisser deux onglets.
+    /// Ouvre une page de l'application — et **il n'y en a qu'une par espace**.
+    ///
+    /// Pas une par page : **une, pour toutes.** Les favoris, l'historique, les extensions,
+    /// les réglages ne sont pas quatre destinations, ce sont les sections d'un même endroit
+    /// — elles partagent le sommaire, et y cliquer « Historique » depuis les favoris navigue
+    /// sur place. Le raccourci fait ce que fait le lien, sans quoi les deux chemins d'une
+    /// même intention ne mènent pas au même endroit. Un espace finissait sinon avec quatre
+    /// onglets qui affichaient la même colonne à quatre lignes de sélection près.
+    ///
+    /// **Deux onglets sur la même page de l'application ne sont pas deux vues, ce sont deux
+    /// vérités.** Elles divergent à la première modification — on éteint un réglage d'un
+    /// côté, l'autre continue d'afficher l'ancien état — et la seule façon de savoir
+    /// laquelle a raison est de recharger celle qu'on regarde. Un site peut se permettre
+    /// deux onglets ; une page qui pilote l'application, non.
+    ///
+    /// **L'espace courant d'abord.** On y travaille : y rester est le comportement qui ne
+    /// surprend jamais. Ce n'est qu'à défaut qu'on rejoint l'onglet ouvert ailleurs, parce
+    /// qu'il n'y a bien qu'un historique et qu'un jeu de réglages. Un espace privé n'est
+    /// jamais rejoint : on n'en sort pas les pages, et l'on n'y entre pas par un raccourci.
+    ///
+    /// **Rien n'est refermé.** Un espace qui portait déjà plusieurs de ces onglets les
+    /// garde : aucun onglet ne se ferme sans qu'on l'ait fermé, et la règle vaut aussi
+    /// quand c'est nous qui aurions rangé.
     func openInternal(_ url: URL) {
-        if let tab = currentTab, tab.url == nil || tab.url == Self.blankPage || tab.url == url {
-            tab.webView.load(URLRequest(url: url))
-        } else {
-            newTab(url: url)
+        if let found = internalTab(preferring: url.host()) {
+            if found.space != currentSpaceIndex { currentSpaceIndex = found.space }
+            currentSpace.current = found.tab
+            activateCurrentTab()
+            // Recharger la même adresse pour rien perdrait le défilement et l'état de la page.
+            if found.tab.url != url { found.tab.webView.load(URLRequest(url: url)) }
+            return
         }
+        newTab(url: url)
+    }
+
+    /// L'onglet de l'application, où qu'il soit.
+    ///
+    /// Trois préférences, dans cet ordre. **Celui qui affiche déjà la page demandée** : un
+    /// espace hérité d'avant la règle peut en porter plusieurs, et ⌘Y doit alors tomber sur
+    /// l'historique ouvert plutôt que de transformer les favoris. **Puis n'importe lequel
+    /// qui montre quelque chose.** **L'onglet vierge en dernier** : il annonce `wuji://`,
+    /// donc il compte, et c'est voulu — il ne montre rien qu'on perdrait ; mais le préférer
+    /// à un onglet qui travaille laisserait les deux ouverts.
+    func internalTab(preferring host: String?) -> (space: Int, tab: Tab)? {
+        func find(_ index: Int) -> (Int, Tab)? {
+            guard spaces.indices.contains(index), !spaces[index].isPrivate else { return nil }
+            let internals = spaces[index].allTabs.filter {
+                $0.url?.scheme == InternalPageHandler.scheme
+            }
+            let chosen = internals.first { $0.url?.host() == host && host != nil }
+                ?? internals.first { !isBlank($0) }
+                ?? internals.first
+            return chosen.map { (index, $0) }
+        }
+        if let here = find(currentSpaceIndex) { return here }
+        return spaces.indices.lazy.compactMap(find).first
     }
 
     /// Les actions des pages internes. Elles ne touchent à rien elles-mêmes : elles
@@ -158,46 +211,41 @@ extension AppDelegate {
             if message.name == MediaWatcher.handler {
                 // La page dit ce qu'elle joue ; l'onglet le retient pour la sidebar.
                 let playing = payload["playing"] as? Bool ?? false
-                if let tab = spaces.flatMap(\.allTabs).first(where: { $0.webView === message.webView }),
+                if let tab = message.webView.flatMap(tab(for:)),
                    tab.isPlayingMedia != playing {
                     tab.isPlayingMedia = playing
                     syncSidebar()
                 }
                 return
             }
-            if message.name == BlockLogWatcher.handler {
-                let host = message.frameInfo.request.url?.host() ?? ""
-                for item in payload["refused"] as? [[String: Any]] ?? [] {
-                    guard let raw = item["url"] as? String, let url = URL(string: raw) else { continue }
-                    // L'attribution se fait ici, une fois, à l'arrivée : la fenêtre affiche
-                    // ce qui est écrit, elle ne recalcule rien à chaque défilement.
-                    blockLog.record(.refused, host: host,
-                                    detail: (url.host() ?? "") + url.path,
-                                    url: raw,
-                                    resource: BlockingLog.Resource(tag: item["tag"] as? String),
-                                    match: blocker.matcher.match(url, on: host))
-                }
-                return
-            }
-            if message.name == ElementPicker.handler {
-                addPickedRule(payload["selector"] as? String ?? "")
-                return
-            }
             if message.name == PageContextMenu.handler {
                 showPageMenu(PageContextMenu.Target(payload: payload))
                 return
             }
+            if message.name == PasswordForm.handler {
+                handlePasswordMessage(message, payload: payload)
+                return
+            }
+            if message.name == RouteWatcher.handler {
+                // La vue qui parle, et pas l'onglet courant : un onglet de fond change
+                // d'adresse lui aussi, et ses scripts lui appartiennent.
+                if let webView = message.webView { replayUserScripts(in: webView) }
+                return
+            }
             if message.name == "wujiError" {
                 guard let raw = payload["url"] as? String, let url = URL(string: raw) else { return }
-                // « Ne pas bloquer ce site » depuis la page d'erreur : l'exception, puis
-                // la page. Sans le second geste, on resterait devant l'échec en croyant
-                // que le réglage n'a rien fait.
                 switch payload["action"] as? String {
-                case "allow": blocker.toggleException(for: url)
                 // « Continuer quand même » sur un certificat refusé : l'exception vaut pour
                 // cet hôte et cette session, et rien n'en est écrit sur le disque.
-                case "trust": trustHost(of: url)
-                default: break
+                case "trust":
+                    trustHost(of: url)
+                // Une règle de contenu vient forcément d'une extension : on mène là où
+                // elle se lève, plutôt que de recharger une adresse qui échouera encore.
+                case "extensions":
+                    showExtensions(nil)
+                    return
+                default:
+                    break
                 }
                 currentTab?.webView.load(URLRequest(url: url))
                 return
@@ -212,6 +260,7 @@ extension AppDelegate {
                 return
             }
             if message.name == "wujiSettings" {
+                handlePasswordAction(action, payload: payload)
                 handleSettingsAction(action, payload: payload)
                 return
             }
@@ -219,8 +268,8 @@ extension AppDelegate {
                 handleScriptAction(action, payload: payload)
                 return
             }
-            if message.name == "wujiAdBlock" {
-                handleAdBlockAction(action, payload: payload)
+            if message.name == "wujiExtensions" {
+                handleExtensionAction(action, payload: payload)
                 return
             }
             switch action {
@@ -261,12 +310,30 @@ extension AppDelegate {
             }
 
         case "resume":
-            guard let item = downloads.item(id: id), let data = item.resumeData,
-                  let webView = currentTab?.webView else { return }
+            guard let item = downloads.item(id: id), let webView = currentTab?.webView else {
+                return
+            }
             item.state = .running
-            item.resumeData = nil
-            webView.resumeDownload(fromResumeData: data) { [weak self] download in
-                MainActor.assumeIsolated { self?.attach(download, to: item) }
+
+            // **Avec les données de reprise si on les a, du début sinon.**
+            //
+            // Une pause les fournit ; une fermeture de l'application, non — WebKit ne les
+            // rend qu'à l'annulation, et il n'y a pas de temps pour la demander en partant.
+            // Repartir de zéro est alors la seule chose honnête, et le fichier visé reste le
+            // même : c'est ce qu'on attendait de la ligne qu'on vient de rouvrir.
+            if let data = item.resumeData {
+                item.resumeData = nil
+                webView.resumeDownload(fromResumeData: data) { [weak self] download in
+                    MainActor.assumeIsolated { self?.attach(download, to: item) }
+                }
+            } else {
+                if let destination = item.destination {
+                    try? FileManager.default.removeItem(at: destination)
+                    item.destination = nil
+                }
+                webView.startDownload(using: URLRequest(url: item.source)) { [weak self] download in
+                    MainActor.assumeIsolated { self?.attach(download, to: item) }
+                }
             }
 
         case "cancel":

@@ -43,6 +43,14 @@ enum Tokens {
     /// c'est un écart de valeur, et il doit rester lisible sous « Différencier sans couleur ».
     static let selectionFill = dynamic(light: hex(0x000000, alpha: 0.07),
                                        dark: hex(0xFFFFFF, alpha: 0.10))
+
+    /// Le fond du champ d'adresse, **à demeure**.
+    ///
+    /// Il n'apparaissait qu'au survol : on ne pouvait pas viser la barre de recherche sans
+    /// l'avoir déjà trouvée. Plus sourd que `selectionFill`, qui reste ce que le survol
+    /// ajoute par-dessus — deux valeurs, donc un état visible sans changer de vocabulaire.
+    static let field = dynamic(light: hex(0x000000, alpha: 0.04),
+                               dark: hex(0xFFFFFF, alpha: 0.06))
     static let separator = dynamic(light: hex(0x000000, alpha: 0.08),
                                    dark: hex(0xFFFFFF, alpha: 0.10))
 

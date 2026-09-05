@@ -47,4 +47,10 @@ enum MediaWatcher {
       window.addEventListener('pagehide', () => send(false));
     })();
     """, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+
+    /// Met la vidéo la plus grande en incrustation, ou l'en retire.
+    ///
+    /// **La plus grande, et non la première.** Une page d'article porte souvent une vidéo
+    /// d'en-tête muette de deux cents pixels avant celle qu'on regarde ; prendre la
+    /// première incrusterait le décor.
 }

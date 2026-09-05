@@ -9,7 +9,7 @@ import Foundation
 @MainActor
 enum ScriptsPage {
 
-    static func html(scripts: [UserScript]) -> String {
+    static func html(scripts: [UserScript], isEnabled: Bool) -> String {
         let rows = scripts.map(row).joined()
         let empty = scripts.isEmpty ? """
             <p class="empty">Aucun script.<br>
@@ -22,8 +22,15 @@ enum ScriptsPage {
               <header>
                 <div class="titles">
                   <h1>Scripts</h1>
-                  <p>\(scripts.count) script\(scripts.count > 1 ? "s" : "") · exécutés sur cette machine</p>
+                  <p>\(scripts.count) script\(scripts.count > 1 ? "s" : "") · \(isEnabled ? "exécutés sur cette machine" : "tous éteints")</p>
                 </div>
+                <!-- **L'interrupteur général est ici et non dans « Fonctions ».** Un réglage
+                     rangé loin de ce qu'il commande oblige à traverser l'application pour
+                     comprendre pourquoi rien ne s'exécute. -->
+                <label class="master">
+                  <input type="checkbox" id="master"\(isEnabled ? " checked" : "")>
+                  <span>Scripts utilisateur</span>
+                </label>
               </header>
               <main>
                 <ul>\(rows)</ul>\(empty)
@@ -39,6 +46,9 @@ enum ScriptsPage {
                   Les instructions <code>@grant</code>, <code>@require</code> et
                   <code>@resource</code> ne sont pas gérées — elles supposent une API
                   d'extension que Wuji n'a pas.
+                  <br><br>
+                  L'interrupteur du haut éteint tout d'un coup : l'icône quitte la barre et plus
+                  aucun script ne s'exécute. Ce qui est installé reste installé.
                 </p>
               </main>
               """,
@@ -107,6 +117,12 @@ enum ScriptsPage {
       border: 1px solid var(--hairline); border-radius: 8px; font: inherit; outline: none;
     }
     form input:focus { border-color: var(--muted); }
+    /* L'interrupteur général : dans l'en-tête, à droite du compte, là où l'on regarde
+       déjà pour savoir combien de scripts tournent. */
+    header { display: flex; align-items: flex-start; gap: 12px; }
+    header .titles { flex: 1; min-width: 0; }
+    .master { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+    .master input { accent-color: var(--text); width: 15px; height: 15px; }
     .note { margin-top: 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
     .note code { font-size: 11px; background: var(--hover); padding: 1px 5px; border-radius: 4px; }
     .empty code { font-size: 12px; background: var(--hover); padding: 1px 5px; border-radius: 4px; }
@@ -124,6 +140,9 @@ enum ScriptsPage {
     });
 
     document.addEventListener('change', (event) => {
+      if (event.target.id === 'master') {
+        return send({ action: 'master', value: event.target.checked });
+      }
       if (!event.target.classList.contains('toggle')) return;
       send({ action: 'enable', id: event.target.closest('li').dataset.id,
              value: event.target.checked });

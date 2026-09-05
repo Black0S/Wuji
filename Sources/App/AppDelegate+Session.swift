@@ -53,18 +53,34 @@ extension AppDelegate {
         // contraire de ce qu'il promet.
         StoredSession(
             spaces: spaces.filter { !$0.isPrivate }.map { space in
-                let order = space.allTabs
+                // **Le rang de l'onglet actif se compte dans ce qui est écrit, pas dans ce
+                // qu'il y a.** Il se comptait sur tous les onglets alors que les vierges
+                // n'étaient pas enregistrés : un seul onglet neuf ouvert quelque part
+                // décalait tout, et l'on rouvrait la session sur la page d'à côté.
+                let kept = space.allTabs.filter(isStorable)
                 return StoredSpace(
                     name: space.name,
                     symbol: space.symbol,
                     folders: space.folders.map { folder in
                         StoredFolder(name: folder.name, isExpanded: folder.isExpanded,
-                                     tabs: folder.tabs.filter { !isBlank($0) }.map(store))
+                                     tabs: folder.tabs.filter(isStorable).map(store))
                     },
-                    loose: space.loose.filter { !isBlank($0) }.map(store),
-                    currentTab: order.firstIndex { $0 === space.current })
+                    loose: space.loose.filter(isStorable).map(store),
+                    currentTab: kept.firstIndex { $0 === space.current })
             },
             currentSpace: currentSpaceIndex)
+    }
+
+    /// Cet onglet mérite-t-il d'être réécrit demain ?
+    ///
+    /// Un onglet vierge ne désigne rien. **Et une page d'extension ne se retrouve pas :**
+    /// son adresse porte l'identifiant que WebKit a tiré au sort pour cette installation,
+    /// il change quand l'extension est rechargée, et il ne veut plus rien dire du jour où
+    /// l'extension est retirée. Enregistrer cette adresse, c'est promettre un onglet qui
+    /// rouvrira sur une page blanche sous un nom illisible — mesuré, et c'est exactement
+    /// ce qu'on voyait. Le tableau de bord d'une extension se rouvre depuis l'extension.
+    func isStorable(_ tab: Tab) -> Bool {
+        !isBlank(tab) && !isExtensionPage(tab.url)
     }
 
     func store(_ tab: Tab) -> StoredTab {
@@ -89,6 +105,10 @@ extension AppDelegate {
         NSApp.appearance = settings.theme.appearance
 
         for tab in spaces.flatMap(\.allTabs) {
+            // Un onglet qui n'a rien chargé n'a pas de page à régler, et lui en poser une
+            // lancerait son processus de rendu pour rien — voir `Tab.hasLoaded`. Il prendra
+            // ces réglages à son premier affichage, par `activateCurrentTab`.
+            guard tab.hasLoaded || tab === currentTab else { continue }
             // Chaque onglet prend le zoom de **son** site, pas celui de l'onglet courant :
             // c'est une propriété de la page qu'on regarde, pas de la fenêtre.
             tab.webView.pageZoom = zoom(for: tab.url)
@@ -105,7 +125,8 @@ extension AppDelegate {
             }
         }
 
-        spaces.flatMap(\.allTabs).forEach(applyPageBackground)
+        spaces.flatMap(\.allTabs).filter { $0.hasLoaded || $0 === currentTab }
+            .forEach(applyPageBackground)
     }
 
     /// Le fond hors page — celui qu'on découvre au rebond du défilement.
@@ -120,7 +141,7 @@ extension AppDelegate {
     }
 
     func refreshInternalPages() {
-        for tab in spaces.flatMap(\.allTabs) {
+        for tab in spaces.flatMap(\.allTabs) where tab.hasLoaded || tab === currentTab {
             applyPageBackground(to: tab)
             if tab.url?.scheme == InternalPageHandler.scheme { tab.webView.reload() }
         }
@@ -144,6 +165,19 @@ extension AppDelegate {
             return true
         case #selector(reopenClosedTab(_:)):
             return !closedTabs.isEmpty
+        // Rien à enregistrer sur un onglet vierge : la ligne se grise plutôt que d'ouvrir
+        // un panneau qui écrirait une page blanche.
+        case #selector(savePage(_:)), #selector(printPage(_:)):
+            return currentTab.map { !isBlank($0) } ?? false
+        case #selector(toggleReader(_:)):
+            guard let tab = currentTab, !isBlank(tab) else { return false }
+            item.title = readingTabs.contains(tab.id) ? "Quitter le mode lecture" : "Mode lecture"
+            return true
+        // Un seul espace : les deux entrées ne mèneraient qu'à lui-même. Grisées, elles
+        // disent pourquoi rien ne se passe — c'est la seule chose qu'un raccourci muet ne
+        // sait pas dire.
+        case #selector(nextSpace(_:)), #selector(previousSpace(_:)), #selector(closeSpace(_:)):
+            return spaces.count > 1
         default:
             return true
         }

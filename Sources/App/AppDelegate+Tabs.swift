@@ -38,7 +38,7 @@ extension AppDelegate {
     }
 
     func newTab(url: URL?) {
-        let tab = makeTab()
+        let tab = makeTab(configuration: extensionConfiguration(for: url))
         currentSpace.append(tab)
         activateCurrentTab()
         tab.webView.load(URLRequest(url: url ?? Self.blankPage))
@@ -50,27 +50,68 @@ extension AppDelegate {
                       url: url, title: title)
         tab.webView.navigationDelegate = self
         tab.webView.uiDelegate = self
-        tab.webView.pageZoom = zoom(for: url)
-        // Un onglet vierge ne montre plus le blanc par défaut de WebKit : il prend le fond
-        // du thème. Sans ça, ouvrir un onglet en thème sombre projette une page blanche
-        // pleine hauteur, et c'est le contraire d'une interface qui se fait oublier.
-        // Le fond des pages internes est celui de la sidebar : la fenêtre reste une seule
-        // surface, sans cadre autour d'une page qui appartient à l'application.
-        applyPageBackground(to: tab)
+        // **Rien qui touche à la page ici.** `pageZoom` et `underPageBackgroundColor` sont
+        // des propriétés de page : les poser oblige WebKit à instancier la page, donc à
+        // lancer un processus de rendu — pour un onglet restauré que personne ne regarde
+        // encore. Ils sont posés à l'affichage, par `activateCurrentTab`.
+        if url != nil || title != nil {
+            // Un onglet restauré : il attendra d'être regardé.
+        } else {
+            tab.webView.pageZoom = zoom(for: nil)
+            // Un onglet vierge ne montre plus le blanc par défaut de WebKit : il prend le
+            // fond du thème. Sans ça, ouvrir un onglet en thème sombre projette une page
+            // blanche pleine hauteur, et c'est le contraire d'une interface qui se fait
+            // oublier.
+            applyPageBackground(to: tab)
+        }
 
         // Chaque onglet s'observe lui-même, pas seulement celui qui est affiché : sinon un
         // onglet ouvert en arrière-plan reste figé sur son titre provisoire et son marqueur
         // de chargement jusqu'au prochain événement venu d'ailleurs.
+        //
+        // **Sans `.initial`.** L'observation se déclenchait à la pose, sur une vue qui
+        // n'avait encore ni adresse ni titre : cinq synchronisations complètes du chrome
+        // par onglet créé, soit soixante-cinq pour une session de treize onglets, toutes
+        // sur du vide. Chaque chemin qui crée un onglet finit par `activateCurrentTab`,
+        // qui synchronise une fois — ce qui suffit et ce qui est vrai.
         let sync: @Sendable (WKWebView, Any) -> Void = { [weak self] _, _ in
             MainActor.assumeIsolated { self?.syncChrome() }
         }
         tab.observations = [
-            tab.webView.observe(\.url, options: [.initial, .new], changeHandler: sync),
-            tab.webView.observe(\.title, options: [.initial, .new], changeHandler: sync),
-            tab.webView.observe(\.isLoading, options: [.initial, .new], changeHandler: sync),
-            tab.webView.observe(\.canGoBack, options: [.initial, .new], changeHandler: sync),
-            tab.webView.observe(\.canGoForward, options: [.initial, .new], changeHandler: sync)
+            tab.webView.observe(\.url, options: [.new], changeHandler: sync),
+            tab.webView.observe(\.title, options: [.new], changeHandler: sync),
+            tab.webView.observe(\.isLoading, options: [.new], changeHandler: sync),
+            tab.webView.observe(\.canGoBack, options: [.new], changeHandler: sync),
+            tab.webView.observe(\.canGoForward, options: [.new], changeHandler: sync)
         ]
+
+        // Ce qui bouge dans la page, dit aux extensions telle que chacune l'attend :
+        // `onUpdated` porte ce qui a changé, et pas « quelque chose a changé ».
+        tab.observations += [
+            // L'adresse seulement : rejouer ici les scripts de l'utilisateur ferait deux
+            // mécanismes pour un seul propos. C'est `RouteWatcher` qui s'en charge, et lui
+            // sait distinguer une vraie navigation d'un `pushState` — cette observation, non.
+            tab.webView.observe(\.url, options: [.new]) { [weak self, weak tab] _, _ in
+                MainActor.assumeIsolated {
+                    guard let tab else { return }
+                    self?.extensionsDidChange(.URL, in: tab)
+                }
+            },
+            tab.webView.observe(\.title, options: [.new]) { [weak self, weak tab] _, _ in
+                MainActor.assumeIsolated {
+                    guard let tab else { return }
+                    self?.extensionsDidChange(.title, in: tab)
+                }
+            },
+            tab.webView.observe(\.isLoading, options: [.new]) { [weak self, weak tab] _, _ in
+                MainActor.assumeIsolated {
+                    guard let tab else { return }
+                    self?.extensionsDidChange(.loading, in: tab)
+                }
+            }
+        ]
+
+        extensionsDidOpen(tab)
         return tab
     }
 
@@ -139,85 +180,21 @@ extension AppDelegate {
 
     func activateCurrentTab() {
         guard let tab = currentSpace.current ?? currentSpace.allTabs.first else { return }
+        let previous = activeTab
+        activeTab = tab
         currentSpace.current = tab
-        tab.lastSeen = Date()
-        tab.wake()
+        extensionsDidActivate(tab, previous: previous)
         // C'est ici que le chargement différé se dénoue : un onglet restauré ne va
-        // chercher sa page qu'au moment où on le regarde.
+        // chercher sa page qu'au moment où on le regarde — et c'est ici, pas avant, qu'il
+        // reçoit ce qui touche à sa page.
+        tab.webView.pageZoom = zoom(for: tab.url)
+        applyPageBackground(to: tab)
         tab.loadIfPending()
+        // La complétion est ancrée à un champ de la page qu'on quitte : elle n'a plus
+        // rien à désigner dès que la vue change.
+        layout.suggestions.dismiss()
         layout.content.attach(tab.webView)
         syncChrome()
-        scheduleSleep()
-    }
-
-    /// Endort les onglets qu'on ne regarde plus depuis un moment.
-    ///
-    /// **Un onglet en veille rend son processus de rendu et sa mémoire.** Une vue web
-    /// invisible les garde : WebKit n'offre aucune API pour l'endormir, la seule façon est
-    /// de vider la page en conservant de quoi la reconstruire. Dix minutes, parce que
-    /// revenir sur un onglet après dix minutes coûte un rechargement qu'on accepte, alors
-    /// qu'après trente secondes il surprendrait.
-    /// Au bout de combien de temps un onglet qu'on ne regarde plus rend sa mémoire.
-    ///
-    /// **Cinq minutes.** Deux, c'était trop court à l'usage : on revenait sur un onglet
-    /// quitté le temps d'une recherche et il fallait le recharger. Le survol le réveille
-    /// avant le clic, mais ça ne rachète pas un délai qui se déclenche pendant qu'on
-    /// travaille.
-    ///
-    /// Le processeur, lui, n'attend pas ce délai : une page qui n'est pas à l'écran est
-    /// déjà bridée par WebKit, ses minuteries comprises.
-    ///
-    /// La valeur d'usine seulement : le délai réel vient des réglages, parce qu'aucune
-    /// durée ne convient à toutes les machines ni à tous les usages.
-    static let defaultSleepDelay = 300
-
-    func scheduleSleep() {
-        sleepTimer?.invalidate()
-        sleepTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.sleepIdleTabs() }
-        }
-    }
-
-    /// Réveille un onglet survolé, s'il l'est encore dans un cinquième de seconde.
-    func prewake(_ id: UUID) {
-        prewakeItem?.cancel()
-        guard let tab = spaces.flatMap(\.allTabs).first(where: { $0.id == id }), tab.isSleeping
-        else { return }
-        let item = DispatchWorkItem { [weak self, weak tab] in
-            MainActor.assumeIsolated {
-                guard let tab, tab.isSleeping else { return }
-                tab.wake()
-                self?.syncSidebar()
-            }
-        }
-        prewakeItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: item)
-    }
-
-    func sleepIdleTabs() {
-        // Zéro veut dire jamais, et jamais se vérifie ici : aucun onglet n'est examiné.
-        let delay = settings.sleepDelay
-        guard delay > 0 else { return }
-        let now = Date()
-        for space in spaces {
-            for tab in space.allTabs where tab !== space.current {
-                guard now.timeIntervalSince(tab.lastSeen) > TimeInterval(delay), !tab.isSleeping,
-                      tab.webView.url != nil else { continue }
-                // **On demande au moteur, pas à la page.** Le drapeau posé par la page vient
-                // d'un évènement `play` ou `pause` ; il suffit qu'un lecteur change de piste,
-                // ou que WebKit bride l'onglet en arrière-plan, pour qu'un `pause` passe et
-                // qu'on croie la musique finie. On endormait alors un onglet qui jouait, et
-                // le son s'arrêtait — exactement ce que la mise en veille promettait
-                // d'éviter.
-                tab.webView.requestMediaPlaybackState { [weak self, weak tab] state in
-                    MainActor.assumeIsolated {
-                        guard let tab, state != .playing, !tab.isPlayingMedia else { return }
-                        tab.sleep()
-                        self?.syncSidebar()
-                    }
-                }
-            }
-        }
     }
 
     func syncChrome() {
@@ -227,9 +204,22 @@ extension AppDelegate {
         layout.topBar.show(url: tab.url,
                            insecure: tab.isInsecure,
                            canGoBack: tab.webView.canGoBack,
-                           canGoForward: tab.webView.canGoForward)
+                           canGoForward: tab.webView.canGoForward,
+                           extensionName: extensionName(for: tab.url))
+        // **L'écart se mesure au réglage par défaut, pas à cent pour cent.**
+        //
+        // Le badge disparaissait à 100 %. Quelqu'un dont le zoom général vaut 80 % voyait
+        // donc « 80 % » sur chaque page, pour toujours — et `⌘0`, qui rend justement le
+        // zoom par défaut, laissait le chiffre à l'écran comme si le geste n'avait pas
+        // abouti. Le badge dit ce qui *diffère* de ce qu'on a choisi ; quand plus rien ne
+        // diffère, il n'a rien à dire.
+        let percent = Int((zoom(for: tab.url) * 100).rounded())
+        let byDefault = Int((settings.pageZoom * 100).rounded())
+        layout.topBar.setZoom(percent == byDefault ? nil : percent)
+        let reading = readingTabs.contains(tab.id)
+        layout.topBar.setReader(available: tab.hasArticle || reading, active: reading)
         window.title = tab.title
-        syncBlockingButton()
+        syncToolbarButtons()
         syncSidebar()
     }
 
@@ -258,305 +248,6 @@ extension AppDelegate {
     func item(for tab: Tab, depth: Int) -> SidebarItem {
         .tab(id: tab.id, title: tab.title, host: tab.url?.host() ?? "",
              isLoading: tab.webView.isLoading, favicon: favicons.icon(for: tab.url),
-             depth: depth, isPlaying: tab.isPlayingMedia, isSleeping: tab.isSleeping)
-    }
-
-    // MARK: - Dossiers et déplacements
-
-    /// Un espace privé neuf, et on y va.
-    ///
-    /// **C'est la seule façon d'en obtenir un.** Un espace existant ne se rend pas privé :
-    /// ses onglets sont déjà nés avec un magasin de données qui écrit sur le disque.
-    @objc func newPrivateSpace(_ sender: Any?) {
-        spaces.append(Space.makePrivate())
-        currentSpaceIndex = spaces.count - 1
-        newTab(url: nil)
-        openOmnibox()
-        layout.toast.show("Espace privé : rien ne sera enregistré")
-    }
-
-    @objc func newFolder(_ sender: Any?) {
-        let folder = currentSpace.addFolder(named: "Dossier \(currentSpace.folders.count + 1)")
-        // Le nouvel onglet courant y entre : créer un dossier vide qu'il faudrait ensuite
-        // remplir à la main serait deux gestes pour une intention.
-        if let tab = currentSpace.current { currentSpace.place(tab, at: .into(folder)) }
-        syncSidebar()
-    }
-
-    func toggleFolder(_ id: UUID) {
-        guard let folder = currentSpace.folder(with: id) else { return }
-        folder.isExpanded.toggle()
-        syncSidebar()
-    }
-
-    func drop(tabID: UUID, on drop: SidebarDrop) {
-        let space = currentSpace
-
-        // Un dossier glissé ne porte pas d'onglet : c'est le même geste et le même
-        // rappel, mais une autre collection.
-        if let folder = space.folder(with: tabID) {
-            switch drop {
-            case .folderBefore(let otherID):
-                if let other = space.folder(with: otherID) { space.moveFolder(folder, before: other) }
-            case .folderEnd:
-                space.moveFolderToEnd(folder)
-            default:
-                break
-            }
-            syncSidebar()
-            return
-        }
-
-        guard let tab = space.tab(with: tabID) else { return }
-        switch drop {
-        case .before(let otherID):
-            guard let other = space.tab(with: otherID) else { return }
-            space.place(tab, at: .before(other))
-        case .into(let folderID):
-            guard let folder = space.folder(with: folderID) else { return }
-            space.place(tab, at: .into(folder))
-        case .end:
-            space.place(tab, at: .looseEnd)
-        case .folderBefore, .folderEnd:
-            break
-        }
-        syncSidebar()
-    }
-
-    func showTabMenu(_ id: UUID, _ event: NSEvent) {
-        let space = currentSpace
-        guard space.tab(with: id) != nil else { return }
-
-        // Le glisser-déposer reste le geste principal ; ce niveau est le chemin
-        // équivalent pour qui préfère ne pas viser.
-        var destinations = space.folders.map { folder in
-            ActionItem(title: folder.name, symbol: "folder",
-                       action: { [weak self] in
-                           guard let self, let tab = self.currentSpace.tab(with: id) else { return }
-                           self.currentSpace.place(tab, at: .into(folder))
-                           self.syncSidebar()
-                       })
-        }
-        if !destinations.isEmpty { destinations.append(.separator) }
-        destinations.append(ActionItem(title: "Hors dossier", symbol: "tray",
-                                       action: { [weak self] in
-                                           guard let self, let tab = self.currentSpace.tab(with: id) else { return }
-                                           self.currentSpace.place(tab, at: .looseEnd)
-                                           self.syncSidebar()
-                                       }))
-
-        // **Envoyer, et non glisser.** Traîner un onglet jusqu'à un espace qu'on ne voit
-        // pas — il faudrait d'abord ouvrir le sélecteur — demande de viser une cible qui
-        // n'est pas à l'écran. Nommer la destination est plus sûr et plus rapide.
-        let elsewhere = spaces.filter { $0 !== space }.map { target in
-            ActionItem(title: target.name, symbol: target.symbol,
-                       action: { [weak self] in self?.send(tabID: id, to: target) })
-        }
-
-        var items: [ActionItem] = [
-            ActionItem(title: "Déplacer vers", symbol: "arrow.right.doc.on.clipboard",
-                       children: destinations)
-        ]
-        // Rien à proposer s'il n'y a qu'un espace : une entrée qui ouvrirait une liste vide
-        // est un contrôle mort.
-        if !elsewhere.isEmpty {
-            items.append(ActionItem(title: "Envoyer vers l'espace", symbol: "arrow.turn.up.right",
-                                    children: elsewhere))
-        }
-        items += [
-            .separator,
-            ActionItem(title: "Fermer l'onglet", symbol: "xmark", shortcut: "⌘W",
-                       isDestructive: true,
-                       action: { [weak self] in self?.close(tabID: id) })
-        ]
-        presentSheet(items, at: event)
-    }
-
-    /// Déplace un onglet vers un autre espace.
-    ///
-    /// **L'onglet part avec sa page vivante.** On ne recharge pas : la vue web est la même,
-    /// elle change seulement d'appartenance. Recharger ferait perdre le défilement, un
-    /// formulaire à moitié rempli, une vidéo en cours — pour un déplacement de rangement.
-    ///
-    /// Le cas qui compte est celui d'un espace privé. Y envoyer un onglet ordinaire ne le
-    /// rend pas privé pour autant : sa vue garde le magasin de données avec lequel elle est
-    /// née, et le contraire serait un mensonge tranquille. On le dit plutôt que de laisser
-    /// croire.
-    func send(tabID: UUID, to target: Space) {
-        guard let tab = currentSpace.tab(with: tabID) else { return }
-        let wasCurrent = currentSpace.current === tab
-        currentSpace.remove(tab)
-        target.append(tab)
-
-        if wasCurrent { activateCurrentTab() }
-        syncSidebar()
-
-        let warning = target.isPrivate && !currentSpace.isPrivate
-            ? " — sa page reste hors du privé" : ""
-        layout.toast.show("Envoyé vers \(target.name)\(warning)") { [weak self] in
-            guard let self, let index = self.spaces.firstIndex(where: { $0 === target }) else { return }
-            self.spacesPanel(self.layout.spacesPanel, didSelect: index)
-        }
-    }
-
-    func showFolderMenu(_ id: UUID, _ event: NSEvent) {
-        let items: [ActionItem] = [
-            ActionItem(title: "Renommer", symbol: "pencil",
-                       action: { [weak self] in self?.renameFolder(id) }),
-            ActionItem(title: "Supprimer le dossier", symbol: "trash", isDestructive: true,
-                       action: { [weak self] in self?.deleteFolder(id) })
-        ]
-        presentSheet(items, at: event)
-    }
-
-    func presentSheet(_ items: [ActionItem], at event: NSEvent) {
-        let point = layout.convert(event.locationInWindow, from: nil)
-        layout.actionSheet.present(items, at: point)
-    }
-
-    /// Renommer un dossier passe par une boîte de dialogue, faute d'une ligne qui puisse
-    /// devenir éditable comme dans le panneau des espaces — la sidebar reconstruit ses
-    /// lignes à chaque changement, l'édition en place n'y survivrait pas.
-    func renameFolder(_ id: UUID) {
-        guard let folder = currentSpace.folder(with: id) else { return }
-        layout.actionSheet.presentPrompt(title: "Renommer le dossier",
-                                         value: folder.name,
-                                         confirm: "Renommer") { [weak self] name in
-            guard let self, let folder = self.currentSpace.folder(with: id) else { return }
-            folder.name = name
-            self.syncSidebar()
-        }
-    }
-
-    /// Supprimer un dossier ne ferme pas ses onglets : ils redeviennent des onglets de
-    /// passage. Rien à confirmer, rien n'est perdu.
-    func deleteFolder(_ id: UUID) {
-        guard let folder = currentSpace.folder(with: id) else { return }
-        currentSpace.removeFolder(folder)
-        syncSidebar()
-    }
-
-    // MARK: - Espaces
-
-    var spaceSnapshots: [SpaceRowSnapshot] {
-        spaces.map {
-            SpaceRowSnapshot(name: $0.name, symbol: $0.symbol, tabCount: $0.tabCount)
-        }
-    }
-
-    func showSpacesPanel(from anchor: NSView) {
-        layout.spacesPanel.present(spaces: spaceSnapshots,
-                                   current: currentSpaceIndex,
-                                   symbol: currentSpace.symbol,
-                                   anchor: anchor)
-    }
-
-    func spacesPanel(_ panel: SpacesPanel, didSelect index: Int) {
-        guard spaces.indices.contains(index), index != currentSpaceIndex else { return }
-        currentSpaceIndex = index
-        // Un espace vide n'existe pas : on y entre toujours sur un onglet.
-        if currentSpace.isEmpty {
-            newTab(url: nil)
-        } else {
-            activateCurrentTab()
-        }
-    }
-
-    func spacesPanel(_ panel: SpacesPanel, didPick symbol: String) {
-        // Le symbole d'un espace privé ne se change pas : c'est à quoi on le reconnaît.
-        guard !currentSpace.isPrivate else {
-            layout.toast.show("Le symbole d'un espace privé ne change pas")
-            return
-        }
-        currentSpace.symbol = symbol
-        refreshSpaces(panel)
-    }
-
-    func spacesPanel(_ panel: SpacesPanel, didRename index: Int, to name: String) {
-        guard spaces.indices.contains(index) else { return }
-        spaces[index].name = name
-        refreshSpaces(panel)
-    }
-
-    func spacesPanel(_ panel: SpacesPanel, didMove index: Int, to destination: Int) {
-        guard spaces.indices.contains(index), spaces.indices.contains(destination) else { return }
-        // L'espace courant est suivi par son identité, pas par sa position : réordonner
-        // ne doit pas faire basculer l'utilisateur dans un autre espace.
-        let staying = currentSpace
-        let moved = spaces.remove(at: index)
-        spaces.insert(moved, at: destination)
-        if let position = spaces.firstIndex(where: { $0 === staying }) {
-            currentSpaceIndex = position
-        }
-        refreshSpaces(panel)
-    }
-
-    func spacesPanel(_ panel: SpacesPanel, menuFor index: Int, canDelete: Bool, at event: NSEvent) {
-        let items: [ActionItem] = [
-            ActionItem(title: "Renommer", symbol: "pencil",
-                       action: { [weak panel] in panel?.beginRename(at: index) }),
-            .separator,
-            ActionItem(title: "Supprimer", symbol: "trash", isEnabled: canDelete,
-                       isDestructive: true,
-                       action: { [weak self, weak panel] in
-                           panel?.dismiss()
-                           guard let self else { return }
-                           self.spacesPanel(panel ?? self.layout.spacesPanel, didDelete: index)
-                       })
-        ]
-        presentSheet(items, at: event)
-    }
-
-    // **Il n'y a pas de bascule privé/normal, et c'est délibéré.**
-    //
-    // Le menu d'un espace en proposait une. Elle ne pouvait pas tenir : le magasin de
-    // données est choisi quand une vue web naît, donc « rendre cet espace privé »
-    // laissait les onglets déjà ouverts écrire sur le disque sous un symbole qui disait
-    // le contraire — et « rendre cet espace normal » aurait versé dans une session
-    // enregistrée ce qu'un espace privé avait promis de ne pas garder.
-    //
-    // Un espace privé se crée avec ⇧⌘N et le reste jusqu'à sa fermeture.
-
-    func spacesPanel(_ panel: SpacesPanel, didDelete index: Int) {
-        guard spaces.indices.contains(index), spaces.count > 1 else { return }
-        let doomed = spaces[index]
-
-        // Supprimer un espace ferme ses onglets, et rien ne les rouvrira tant qu'il n'y a
-        // pas d'historique : c'est une perte, donc on demande.
-        guard !doomed.isEmpty else { return removeSpace(at: index) }
-        layout.toast.ask(
-            title: "Supprimer « \(doomed.name) » ?",
-            message: doomed.tabCount == 1
-                ? "Son onglet sera fermé, et rien ne le rouvrira."
-                : "Ses \(doomed.tabCount) onglets seront fermés, et rien ne les rouvrira.",
-            confirm: "Supprimer", isDestructive: true, onCancel: {},
-            onConfirm: { [weak self] in self?.removeSpace(at: index) })
-    }
-
-    func removeSpace(at index: Int) {
-        guard spaces.indices.contains(index), spaces.count > 1 else { return }
-        spaces.remove(at: index)
-        currentSpaceIndex = min(currentSpaceIndex, spaces.count - 1)
-        if currentSpace.isEmpty {
-            newTab(url: nil)
-        } else {
-            activateCurrentTab()
-        }
-    }
-
-    /// Le panneau reste ouvert pendant qu'on règle un espace : il faut donc rafraîchir
-    /// les deux surfaces, la sidebar et le panneau lui-même.
-    func refreshSpaces(_ panel: SpacesPanel) {
-        syncSidebar()
-        panel.reload(spaces: spaceSnapshots,
-                     current: currentSpaceIndex,
-                     symbol: currentSpace.symbol)
-    }
-
-    func spacesPanelDidRequestNew(_ panel: SpacesPanel) {
-        let index = spaces.count
-        spaces.append(Space(name: "Espace \(index + 1)", symbol: Space.symbol(forIndex: index)))
-        currentSpaceIndex = index
-        newTab(url: nil)
+             depth: depth, isPlaying: tab.isPlayingMedia)
     }
 }

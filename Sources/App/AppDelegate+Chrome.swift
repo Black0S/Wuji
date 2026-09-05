@@ -19,11 +19,23 @@ extension AppDelegate {
         switch action {
         case .back:    currentTab?.webView.goBack()
         case .forward: currentTab?.webView.goForward()
-        case .menu:    layout.actionSheet.present(mainMenu(), below: bar.menuButton)
-        case .blocking: layout.actionSheet.present(blockingMenu(), below: bar.blockingButton)
-        case .scripts:  layout.actionSheet.present(scriptsMenu(), below: bar.scriptsButton)
-        case .security: layout.actionSheet.present(securityMenu(), below: bar.securityButton)
+        case .menu:       NativeMenu.popUp(mainMenu(), below: bar.menuButton)
+        case .extensions: NativeMenu.popUp(extensionsMenu(), below: bar.extensionsButton)
+        case .scripts:    NativeMenu.popUp(scriptsMenu(), below: bar.scriptsButton)
+        case .security:   NativeMenu.popUp(securityMenu(), below: bar.securityButton)
+        case .zoomReset:  zoomReset(nil)
+        case .reader:     toggleReader(nil)
         }
+    }
+
+    /// Un clic sur une icône épinglée : exactement ce que ferait la ligne du menu.
+    func topBar(_ bar: ContentTopBar, didTriggerExtension id: String) {
+        guard let context = extensions.contexts[id] else { return }
+        perform(context)
+    }
+
+    func topBar(_ bar: ContentTopBar, menuForExtension id: String) -> [ActionItem] {
+        pinnedMenu(for: id)
     }
 
     /// Ce que le cadenas promet, en clair.
@@ -33,22 +45,69 @@ extension AppDelegate {
     /// où l'on va taper quelque chose. Un indicateur de sécurité qui ne mène à rien demande
     /// qu'on lui fasse confiance, ce qui est le contraire de son rôle.
     ///
+    /// **Deux lignes qui répondent, puis cinq portes.** Il a d'abord montré tout le
+    /// certificat à plat : onze entrées, dont une empreinte de quatre-vingt-quinze
+    /// caractères qui étirait le menu jusqu'au bord de l'écran. Ce n'était pas trop
+    /// d'information, c'était la mauvaise forme — on ne lit pas un certificat en entier, on
+    /// y cherche une chose. L'essentiel se lit sans cliquer ; le reste attend derrière le
+    /// groupe qui le concerne.
+    ///
     /// Rien n'est inventé : ce qui n'est pas lisible dans le certificat n'est pas affiché.
     func securityMenu() -> [ActionItem] {
         guard let tab = currentTab, let url = tab.url, let host = url.host() else { return [] }
-        var items: [ActionItem] = []
 
-        if tab.isInsecure {
-            items.append(ActionItem(title: "Connexion non chiffrée",
-                                    symbol: "exclamationmark.triangle", isEnabled: false))
-            items.append(ActionItem(title: "Ce que vous tapez ici circule en clair",
-                                    symbol: "eye", isEnabled: false))
-        } else {
-            items.append(ActionItem(title: "Connexion chiffrée avec \(host)",
-                                    symbol: "lock", isEnabled: false))
-            for line in Certificate.describe(tab.webView.serverTrust) {
-                items.append(ActionItem(title: line, symbol: "checkmark.seal", isEnabled: false))
-            }
+        guard !tab.isInsecure else {
+            return [
+                ActionItem(title: "Connexion non chiffrée", symbol: "exclamationmark.triangle",
+                           isEnabled: false),
+                ActionItem(title: "Ce que vous tapez ici circule en clair", symbol: "eye",
+                           isEnabled: false),
+                .separator,
+                ActionItem(title: "Copier l'adresse de la page", symbol: "link",
+                           action: { Self.copy(url.absoluteString) })
+            ]
+        }
+
+        let trust = tab.webView.serverTrust
+        var items = [ActionItem(title: "Connexion chiffrée avec \(host)",
+                                symbol: "lock", isEnabled: false)]
+        if let authority = Certificate.authority(trust) {
+            items.append(ActionItem(title: "Certificat attesté par \(authority)",
+                                    symbol: "checkmark.seal", isEnabled: false))
+        }
+
+        items.append(contentsOf: passwordItems(for: host))
+
+        let sections = Certificate.sections(trust)
+        guard !sections.isEmpty else {
+            // Pas de certificat lisible : le dire, plutôt que d'ouvrir des sous-menus vides.
+            // Le cas arrive sur une page servie depuis le cache avant que la connexion soit
+            // établie.
+            items.append(ActionItem(title: "Certificat illisible pour l'instant",
+                                    symbol: "questionmark.circle", isEnabled: false))
+            return items
+        }
+
+        items.append(.separator)
+        for section in sections {
+            // Chaque ligne du détail se copie d'un clic : l'empreinte et le numéro de série
+            // n'existent que pour être comparés ailleurs, et les retaper à la main est le
+            // meilleur moyen de se tromper d'un caractère sans le voir.
+            items.append(ActionItem(title: section.title, symbol: section.symbol,
+                                    children: section.details.map { detail in
+                                        ActionItem(title: detail.label.isEmpty
+                                                       ? detail.value
+                                                       : "\(detail.label) \(detail.value)",
+                                                   action: { Self.copy(detail.value) })
+                                    }))
+        }
+
+        // L'empreinte entière, en un seul morceau : elle est découpée en quatre lignes pour
+        // se lire, et c'est d'un bloc qu'elle se colle ailleurs.
+        if let print = Certificate.fingerprint(trust) {
+            items.append(.separator)
+            items.append(ActionItem(title: "Copier l'empreinte", symbol: "doc.on.doc",
+                                    action: { Self.copy(print) }))
         }
         return items
     }
@@ -61,10 +120,10 @@ extension AppDelegate {
         var items: [ActionItem] = [
             ActionItem(title: "Nouvel onglet", symbol: "plus", shortcut: "⌘T",
                        action: { [weak self] in self?.newTab(nil) }),
-            // ⇧⌘N appartient à l'espace privé, ici comme dans la barre de menus. La
-            // feuille annonçait encore l'ancien raccourci : un libellé qui ment sur ce
-            // qu'il faut taper est pire que pas de libellé du tout.
-            ActionItem(title: "Nouveau dossier", symbol: "folder.badge.plus", shortcut: "⌥⌘N",
+            // Le dossier a repris ⇧⌘N, que l'espace privé lui empruntait : un espace se
+            // crée avec ⌥, comme tous les autres gestes qui le visent. Un libellé qui
+            // ment sur ce qu'il faut taper est pire que pas de libellé du tout.
+            ActionItem(title: "Nouveau dossier", symbol: "folder.badge.plus", shortcut: "⇧⌘N",
                        action: { [weak self] in self?.newFolder(nil) })
         ]
         // Seulement quand il y a quelque chose à rouvrir : une entrée grisée en

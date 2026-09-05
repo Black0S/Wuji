@@ -78,7 +78,7 @@ enum UpdateCheck {
         request.setValue("Wuji", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = try? await Fetch.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let objet = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let adresse = objet["html_url"] as? String, let page = URL(string: adresse)

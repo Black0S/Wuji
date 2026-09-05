@@ -8,7 +8,7 @@ import PackageDescription
 // rien à maintenir, et le bundle .app s'assemble dans run.sh.
 //
 // Les sous-dossiers de Sources nomment les domaines du projet — DesignSystem, Chrome,
-// WebContent, Blocking, Settings… Une seule cible pour l'instant : on n'extrait un paquet
+// WebContent, Extensions, Settings… Une seule cible pour l'instant : on n'extrait un paquet
 // que le jour où un module doit devenir désactivable.
 let package = Package(
     name: "Wuji",
@@ -26,11 +26,11 @@ let package = Package(
             // le nom trois fois pour atteindre un fichier. Une seule cible ici, donc rien
             // à départager — le jour où il en faudra deux, ce sera à revoir.
             path: "Sources",
-            // Les règles ne sont pas une ressource SwiftPM : elles sont copiées dans le
-            // paquet par `build.sh`, à côté de l'application, pas dans un bundle de
-            // module. Le dire évite l'avertissement — et surtout évite qu'on les embarque
+            // La liste des suffixes n'est pas une ressource SwiftPM : elle est copiée
+            // dans le paquet par `build.sh`, à côté de l'application, pas dans un bundle
+            // de module. Le dire évite l'avertissement — et surtout évite qu'on l'embarque
             // deux fois le jour où quelqu'un « corrige » l'avertissement à l'aveugle.
-            exclude: ["Blocking/Assets", "PublicSuffix/Data", "PublicSuffix/LICENSE"]
+            exclude: ["PublicSuffix/Data", "PublicSuffix/LICENSE"]
         ),
         // Les tests visent la logique pure : fabriquer une règle, nommer un site, relire
         // l'asset. Rien qui demande une fenêtre — ce qui se vérifie à l'œil se vérifie à
@@ -38,7 +38,11 @@ let package = Package(
         .testTarget(
             name: "WujiTests",
             dependencies: ["Wuji"],
-            path: "Tests/WujiTests"
+            // `Tests` et non `Tests/WujiTests` : le dossier intermédiaire ne portait aucune
+            // information — une seule cible de test, dont le nom est déjà là. Il ajoutait un
+            // niveau à traverser pour atteindre chaque fichier, et un nom de plus à changer
+            // le jour où la cible se renomme.
+            path: "Tests"
         )
     ]
 )

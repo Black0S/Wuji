@@ -83,7 +83,7 @@ final class FaviconStore {
 
         Task { [weak self] in
             let data: Data? = await withCheckedContinuation { continuation in
-                URLSession.shared.dataTask(with: iconURL) { data, _, _ in
+                Fetch.session.dataTask(with: Fetch.request(iconURL)) { data, _, _ in
                     continuation.resume(returning: data)
                 }.resume()
             }

@@ -4,7 +4,7 @@ import Foundation
 /// droite.
 ///
 /// **Une seule façon de se déplacer.** Avant, chaque page interne était une île — on
-/// arrivait sur l'historique par un raccourci, sur les listes de blocage par un menu, sur
+/// arrivait sur l'historique par un raccourci, sur les scripts par un menu, sur
 /// les réglages par une fenêtre séparée, et rien ne disait qu'il en existait d'autres. Le
 /// sommaire les rassemble : ce que l'application sait montrer tient dans une colonne.
 ///
@@ -28,10 +28,8 @@ enum InternalShell {
             Item(title: "Historique", address: "wuji://history", symbol: "clock"),
             Item(title: "Téléchargements", address: "wuji://downloads", symbol: "arrow.down")
         ]),
-        ("Blocage", [
-            Item(title: "Listes de règles", address: "wuji://ad-block/lists", symbol: "list.bullet"),
-            Item(title: "Sans protection", address: "wuji://ad-block/unactive", symbol: "shield.slash"),
-            Item(title: "Mes règles", address: "wuji://ad-block/my-rules", symbol: "pencil"),
+        ("Modules", [
+            Item(title: "Extensions", address: "wuji://extensions", symbol: "puzzlepiece"),
             Item(title: "Scripts", address: "wuji://scripts", symbol: "curlybraces")
         ]),
         ("Réglages", [
@@ -39,7 +37,12 @@ enum InternalShell {
             Item(title: "Apparence", address: "wuji://settings", symbol: "circle.lefthalf"),
             Item(title: "Confidentialité", address: "wuji://settings/privacy", symbol: "hand.raised"),
             Item(title: "Recherche", address: "wuji://settings/search", symbol: "magnifyingglass"),
-            Item(title: "Sites web", address: "wuji://settings/websites", symbol: "globe")
+            Item(title: "Sites web", address: "wuji://settings/websites", symbol: "globe"),
+            Item(title: "Mots de passe", address: "wuji://settings/passwords", symbol: "key"),
+            Item(title: "Zoom par site", address: "wuji://settings/zoom",
+                 symbol: "plus.magnifyingglass"),
+            Item(title: "Autorisations", address: "wuji://settings/permissions",
+                 symbol: "hand.raised.square")
         ])
     ]
 

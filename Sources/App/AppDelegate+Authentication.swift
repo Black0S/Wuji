@@ -107,8 +107,28 @@ extension AppDelegate {
         -> (URLSession.AuthChallengeDisposition, URLCredential?) {
         guard let trust = space.serverTrust else { return (.performDefaultHandling, nil) }
 
+        // L'exception d'abord : c'est le seul cas où notre réponse diffère de celle du
+        // système, et il ne demande aucune évaluation.
+        if trustedHosts.contains(space.host) {
+            return (.useCredential, URLCredential(trust: trust))
+        }
+
+        // **Un hôte déjà vérifié ne l'est pas deux fois.**
+        //
+        // `SecTrustEvaluateWithError` valide la chaîne entière, sur le fil principal, et il
+        // était appelé à **chaque** poignée de main : une page ordinaire en ouvre des
+        // dizaines vers la même poignée d'hôtes. C'est le seul symbole à nous qu'un profil
+        // pris pendant un chargement ait fait ressortir — vingt-six échantillons, tous ici.
+        //
+        // Rien n'est perdu côté sûreté, et c'est ce qui rend le cache légitime : notre
+        // évaluation ne décide de rien. Nous répondons `performDefaultHandling`, donc c'est
+        // **WebKit qui tranche**, à chaque fois, avec sa propre évaluation. La nôtre ne sert
+        // qu'à savoir s'il faut garder le certificat pour la page d'erreur.
+        if verifiedHosts.contains(space.host) { return (.performDefaultHandling, nil) }
+
         var problem: CFError?
         if SecTrustEvaluateWithError(trust, &problem) {
+            verifiedHosts.insert(space.host)
             return (.performDefaultHandling, nil)
         }
 
@@ -116,9 +136,7 @@ extension AppDelegate {
         // ce qu'elle propose d'accepter — demander une exception sans dire sur quoi, c'est
         // demander un blanc-seing.
         rejectedCertificates[space.host] = trust
-
-        guard trustedHosts.contains(space.host) else { return (.performDefaultHandling, nil) }
-        return (.useCredential, URLCredential(trust: trust))
+        return (.performDefaultHandling, nil)
     }
 
     /// Accorde l'exception, puis recharge : sans le second geste, on resterait devant

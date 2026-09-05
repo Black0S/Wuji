@@ -13,6 +13,14 @@ final class UserScriptStore {
 
     private let directory: URL
     private let index: URL
+    /// Le corps des scripts, gardé en mémoire.
+    ///
+    /// **Il était relu sur le disque à chaque navigation.** `matching(_:)` est appelé dans
+    /// `decidePolicyFor`, c'est-à-dire sur le chemin critique de chaque page — et sur celui
+    /// de chaque changement d'adresse d'un site en une seule page. Une lecture synchrone y
+    /// retarde la requête réseau elle-même, pour un fichier qui ne change qu'à
+    /// l'installation. Quelques kilo-octets par script : le cache tient dans rien.
+    private var bodies: [UUID: String] = [:]
 
     init(root: URL = Storage.directory) {
         directory = root.appendingPathComponent("userscripts", isDirectory: true)
@@ -28,7 +36,12 @@ final class UserScriptStore {
     }
 
     func code(for script: UserScript) -> String? {
-        try? String(contentsOf: file(for: script), encoding: .utf8)
+        if let cached = bodies[script.id] { return cached }
+        guard let text = try? String(contentsOf: file(for: script), encoding: .utf8) else {
+            return nil
+        }
+        bodies[script.id] = text
+        return text
     }
 
     /// Les scripts actifs qui visent cette adresse.
@@ -53,6 +66,7 @@ final class UserScriptStore {
             scripts.append(script)
         }
         try? text.write(to: file(for: script), atomically: true, encoding: .utf8)
+        bodies[script.id] = text
         save()
         return script
     }
@@ -66,6 +80,7 @@ final class UserScriptStore {
     func remove(id: String?) {
         guard let index = scripts.firstIndex(where: { $0.id.uuidString == id }) else { return }
         try? FileManager.default.removeItem(at: file(for: scripts[index]))
+        bodies[scripts[index].id] = nil
         scripts.remove(at: index)
         save()
     }

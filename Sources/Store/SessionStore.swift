@@ -40,10 +40,20 @@ struct StoredSession: Codable {
 final class SessionStore {
 
     private let url: URL
+    /// La session d'avant la dernière écriture.
+    ///
+    /// **Perdre une session est irréversible, et c'est la seule chose ici qui le soit.**
+    /// L'historique se refait, les favoris sont ailleurs, un réglage se remet ; trente
+    /// onglets ouverts depuis une semaine, non. Une écriture qui les remplacerait par
+    /// moins — un défaut, un état transitoire attrapé au mauvais moment — ne laisserait
+    /// rien à récupérer. Un fichier de plus, réécrit à chaque enregistrement, transforme
+    /// cette perte en un `mv` : c'est cher payé pour ce que ça coûte de ne pas l'avoir.
+    private let previous: URL
     private var pendingSave: DispatchWorkItem?
 
     init(directory: URL = Storage.directory) {
         url = directory.appendingPathComponent("session.json")
+        previous = directory.appendingPathComponent("session-précédente.json")
     }
 
     var fileURL: URL { url }
@@ -70,6 +80,15 @@ final class SessionStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(session) else { return }
+
+        // La copie de sûreté est prise **avant** l'écriture, et seulement si elle change
+        // quelque chose : réécrire un fichier identique à chaque battement userait le
+        // disque pour rien et ferait perdre l'état d'avant au premier vrai changement.
+        if let existing = try? Data(contentsOf: url), existing != data {
+            try? existing.write(to: previous, options: .atomic)
+        }
         try? data.write(to: url, options: .atomic)
     }
+
+    var previousURL: URL { previous }
 }

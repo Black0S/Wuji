@@ -27,17 +27,43 @@ extension AppDelegate {
         let fileItem = NSMenuItem()
         let fileMenu = NSMenu(title: "Fichier")
         fileMenu.addItem(withTitle: "Nouvel onglet", action: #selector(newTab(_:)), keyEquivalent: "t")
-        // ⇧⌘N est le raccourci de la navigation privée partout ailleurs : le dossier lui
-        // cède la place et passe sur ⌥⌘N.
+        // **⌥ agit sur l'espace, ⌘ sur ce qu'il contient.** C'est la règle de toute cette
+        // barre — ⌥T ouvre un espace quand ⌘T ouvre un onglet, ⌥W ferme l'un quand ⌘W ferme
+        // l'autre. Un espace privé est un espace : son raccourci appartient donc à la même
+        // famille, ⇧⌥N, et non à ⇧⌘N.
+        //
+        // ⇧⌘N était emprunté à la navigation privée des autres navigateurs. L'emprunt
+        // coûtait une exception au milieu d'une règle simple, pour un geste qui ne se
+        // trompe de toute façon pas de sens : sur macOS, ⇧⌘N crée un dossier — et c'est
+        // à lui qu'il revient ici.
         let privateItem = NSMenuItem(title: "Nouvel espace privé",
                                      action: #selector(newPrivateSpace(_:)), keyEquivalent: "N")
-        privateItem.keyEquivalentModifierMask = [.command, .shift]
+        privateItem.keyEquivalentModifierMask = [.option, .shift]
         fileMenu.addItem(privateItem)
         let folderItem = NSMenuItem(title: "Nouveau dossier",
-                                    action: #selector(newFolder(_:)), keyEquivalent: "n")
-        folderItem.keyEquivalentModifierMask = [.command, .option]
+                                    action: #selector(newFolder(_:)), keyEquivalent: "N")
+        folderItem.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(folderItem)
+        fileMenu.addItem(withTitle: "Enregistrer la page…", action: #selector(savePage(_:)),
+                         keyEquivalent: "s")
+        // **Le raccourci doit exister quelque part pour exister.** L'impression était
+        // offerte par la feuille du bouton « … », qui annonçait ⌘P — mais aucune entrée de
+        // la barre de menus ne portait ce raccourci, et macOS n'attribue les frappes qu'à
+        // partir d'elle. La touche ne faisait donc rien, et le libellé mentait sur ce qu'il
+        // fallait taper : le pire des deux, parce qu'il apprend à ne plus faire confiance
+        // aux autres.
+        fileMenu.addItem(withTitle: "Imprimer…", action: #selector(printPage(_:)),
+                         keyEquivalent: "p")
         fileMenu.addItem(withTitle: "Fermer l'onglet", action: #selector(closeTab(_:)), keyEquivalent: "w")
+        // ⌘ agit sur l'onglet, ⌥ sur l'espace : la même règle que ⌘] et ⌥].
+        let newSpaceItem = NSMenuItem(title: "Nouvel espace",
+                                      action: #selector(newSpace(_:)), keyEquivalent: "t")
+        newSpaceItem.keyEquivalentModifierMask = [.option]
+        fileMenu.addItem(newSpaceItem)
+        let closeSpaceItem = NSMenuItem(title: "Fermer l'espace",
+                                        action: #selector(closeSpace(_:)), keyEquivalent: "w")
+        closeSpaceItem.keyEquivalentModifierMask = [.option]
+        fileMenu.addItem(closeSpaceItem)
         let reopenItem = NSMenuItem(title: "Rouvrir l'onglet fermé",
                                     action: #selector(reopenClosedTab(_:)), keyEquivalent: "T")
         reopenItem.keyEquivalentModifierMask = [.command, .shift]
@@ -61,6 +87,12 @@ extension AppDelegate {
         let viewMenu = NSMenu(title: "Présentation")
         viewMenu.addItem(withTitle: "Omnibox", action: #selector(focusOmnibox(_:)), keyEquivalent: "l")
         viewMenu.addItem(withTitle: "Recharger", action: #selector(reload(_:)), keyEquivalent: "r")
+        let readerItem = NSMenuItem(title: "Mode lecture", action: #selector(toggleReader(_:)),
+                                    keyEquivalent: "R")
+        readerItem.keyEquivalentModifierMask = [.command, .shift]
+        viewMenu.addItem(readerItem)
+        viewMenu.addItem(withTitle: "Traduire la page", action: #selector(translatePage(_:)),
+                         keyEquivalent: "")
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Agrandir", action: #selector(zoomIn(_:)), keyEquivalent: "+")
         viewMenu.addItem(withTitle: "Réduire", action: #selector(zoomOut(_:)), keyEquivalent: "-")
@@ -72,7 +104,7 @@ extension AppDelegate {
                                        keyEquivalent: "B")
         favoritesItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(favoritesItem)
-        viewMenu.addItem(withTitle: "Blocage", action: #selector(showAdBlock(_:)), keyEquivalent: "")
+        viewMenu.addItem(withTitle: "Extensions", action: #selector(showExtensions(_:)), keyEquivalent: "")
         viewMenu.addItem(withTitle: "Scripts", action: #selector(showScripts(_:)), keyEquivalent: "")
         viewMenu.addItem(withTitle: "Historique", action: #selector(showHistory(_:)), keyEquivalent: "y")
         viewMenu.addItem(withTitle: "Téléchargements", action: #selector(showDownloads(_:)), keyEquivalent: "j")
@@ -85,6 +117,18 @@ extension AppDelegate {
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Onglet suivant", action: #selector(nextTab(_:)), keyEquivalent: "]")
         viewMenu.addItem(withTitle: "Onglet précédent", action: #selector(previousTab(_:)), keyEquivalent: "[")
+        // **Les mêmes touches, l'autre modificateur.** ⌘ change d'onglet, ⌥ change
+        // d'espace : le geste est le même, ce sur quoi il porte est d'un cran au-dessus.
+        // Ce sont les deux touches à droite du P — « ^ » et « $ » sur un clavier français,
+        // les crochets ailleurs ; macOS fait lui-même la correspondance.
+        let nextSpaceItem = NSMenuItem(title: "Espace suivant",
+                                       action: #selector(nextSpace(_:)), keyEquivalent: "]")
+        nextSpaceItem.keyEquivalentModifierMask = [.option]
+        viewMenu.addItem(nextSpaceItem)
+        let previousSpaceItem = NSMenuItem(title: "Espace précédent",
+                                           action: #selector(previousSpace(_:)), keyEquivalent: "[")
+        previousSpaceItem.keyEquivalentModifierMask = [.option]
+        viewMenu.addItem(previousSpaceItem)
 
         viewItem.submenu = viewMenu
         main.addItem(viewItem)
@@ -92,9 +136,7 @@ extension AppDelegate {
         // **Le menu Fenêtre, pour que ⌘M existe.**
         //
         // macOS ne fournit rien de lui-même : sans l'entrée de menu, la touche est morte —
-        // et tout Mac s'attend à minimiser avec ⌘M. Wuji n'a qu'une fenêtre de navigation,
-        // ce qui rendait ce menu inutile en apparence ; mais le journal de blocage en est
-        // une seconde, et il n'y avait aucun moyen de revenir à l'une depuis l'autre.
+        // et tout Mac s'attend à minimiser avec ⌘M.
         //
         // `windowsMenu` confie la liste des fenêtres au système : elle se tient à jour
         // toute seule, et on n'écrit pas un inventaire qu'on devrait maintenir.

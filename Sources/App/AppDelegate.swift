@@ -15,13 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     let downloads = DownloadStore()
     let favorites = FavoritesStore()
     let settings = Settings()
-    let userScriptRules = UserRules()
     let userScripts = UserScriptStore()
     let permissions = Permissions()
     let location = LocationAccess()
-    lazy var blocker = ContentBlocker(settings: settings, userRules: userScriptRules)
-    let blockLog = BlockingLog()
-    lazy var blockLogWindow = BlockLogWindow(log: blockLog)
+    /// Les extensions web : ce qui est installé sur la machine, et ce qui tourne ici.
+    lazy var extensions = ExtensionHost(settings: settings, delegate: self)
 
     /// Les onglets appartiennent à un espace, jamais à l'application. Tout ce qui suit
     /// passe donc par `currentSpace` — c'est ce qui évite d'avoir deux notions
@@ -54,6 +52,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // ne faisait rien. C'est une propriété distincte du plein écran de la fenêtre —
         // les deux portent le même nom et n'ont rien à voir.
         config.preferences.isElementFullscreenEnabled = true
+        // **L'incrustation vidéo n'a pas d'interrupteur public**, et elle est éteinte pour
+        // tout ce qui n'est pas Safari : mesuré, `requestPictureInPicture()` répond
+        // `NotSupportedError` et le lecteur d'une page ne montre pas de bouton. L'allumer
+        // ici rend ce bouton aux lecteurs — celui de YouTube, celui des contrôles natifs de
+        // WebKit —, là où on le cherche déjà. Wuji n'en pose pas dans sa barre : la commande
+        // appartient au lecteur, pas au chrome.
+        WebKitFeatures.enablePictureInPicture(on: config.preferences)
+        // **Le préchargement que les pages demandent, éteint par défaut hors de Safari.**
+        // `<link rel="prefetch">` et les règles de spéculation : un site qui a fait le
+        // travail de dire ce qu'on ouvrira ensuite ne gagnait rien ici. Voir
+        // `WebKitFeatures` pour ce que ça coûte — et pourquoi le *prerender*, lui, reste
+        // éteint.
+        WebKitFeatures.enableWebPerformance(on: config.preferences)
+
+        // **La mise en veille des onglets, faite par WebKit.**
+        //
+        // Wuji en avait une à lui : passé un délai, l'onglet était vidé et son état gardé
+        // pour le reconstruire. Elle a été retirée — elle obligeait l'onglet à traverser un
+        // état où sa vue web n'a plus rien à dire, et chaque nouvel état de transition a
+        // fini par ouvrir un trou par lequel une ligne disparaissait de la colonne.
+        //
+        // WebKit sait le faire sans rien détruire. Une vue détachée de la hiérarchie —
+        // c'est le cas de tout onglet qu'on ne regarde pas, `BrowserContent` ne garde que
+        // celui du moment — voit son JavaScript et sa mise en page suspendus. Rien n'est
+        // vidé, rien n'est à reconstruire, et le retour est instantané.
+        //
+        // **Et le moteur sait ce qu'il ne faut pas suspendre** : une page qui joue du son
+        // ou qui charge n'est pas considérée comme inactive. C'est précisément la
+        // distinction que notre veille devait deviner en interrogeant l'état de lecture, et
+        // qu'elle ratait quand un lecteur changeait de piste.
+        config.preferences.inactiveSchedulingPolicy = .suspend
 
         // **Se présenter comme Safari, mot pour mot.**
         //
@@ -69,20 +98,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // configuration déjà utilisée ne l'accepte plus.
         let pages = InternalPageHandler(history: history, downloads: downloads,
                                         favorites: favorites, icons: favicons)
-        pages.adBlock = { [unowned self] path in
-            AdBlockPage.html(section: AdBlockPage.Section.from(path: path),
-                             // Le catalogue vient du bloqueur et non des réglages : il ne
-                             // montre que les listes réellement présentes dans le paquet.
-                             lists: blocker.catalog.map {
-                                 AdBlockPage.List(id: $0.list.id, name: $0.list.name,
-                                                  summary: $0.list.summary,
-                                                  count: $0.count, isOn: $0.isEnabled)
-                             },
-                             isBlockingOn: settings.blockingEnabled,
-                             userRules: blocker.userRules.rules,
-                             exceptions: settings.blockingExceptions)
+        pages.extensions = { [unowned self] in ExtensionsPage.html(entries: extensions.listing) }
+        pages.scripts = { [unowned self] in
+            ScriptsPage.html(scripts: userScripts.scripts,
+                             isEnabled: settings.userScriptsEnabled)
         }
-        pages.scripts = { [unowned self] in ScriptsPage.html(scripts: userScripts.scripts) }
         pages.settings = { [unowned self] path in
             // Le compte des sites vient de WebKit et se fait attendre : on le demande à
             // chaque ouverture, et la page se remet à jour quand la réponse arrive. Un
@@ -95,28 +115,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         config.userContentController.add(self, name: "wujiHistory")
         config.userContentController.add(self, name: "wujiDownloads")
         config.userContentController.add(self, name: "wujiFavorites")
-        config.userContentController.add(self, name: "wujiAdBlock")
-        config.userContentController.add(self, name: ElementPicker.handler)
+        config.userContentController.add(self, name: "wujiExtensions")
         config.userContentController.add(self, name: "wujiScripts")
         config.userContentController.add(self, name: "wujiSettings")
         config.userContentController.add(self, name: MediaWatcher.handler)
-        config.userContentController.add(self, name: BlockLogWatcher.handler)
         config.userContentController.add(self, name: "wujiError")
         config.userContentController.add(self, name: PageContextMenu.handler)
+        config.userContentController.add(self, name: RouteWatcher.handler)
+        config.userContentController.add(self, name: PasswordForm.handler)
         config.userContentController.addUserScript(PageContextMenu.script)
-        blocker.attach(to: config.userContentController)
+        // Les extensions vivent au niveau du contrôleur, pas de la page : une vue web qui
+        // ne le porte pas est invisible pour elles — leurs scripts de contenu ne s'y
+        // posent pas et l'onglet n'existe pas dans `browser.tabs`.
+        config.webExtensionController = extensions.controller
         return config
     }
 
     var currentSpace: Space { spaces[currentSpaceIndex] }
+
+    /// L'onglet qui porte cette vue web, **sans aplatir la liste des onglets**.
+    ///
+    /// Le motif `spaces.flatMap(\.allTabs).first { $0.webView === webView }` allouait deux
+    /// tableaux par espace, sur le chemin critique de chaque navigation et de chaque message
+    /// venu d'une page. C'est le seul de nos symboles qu'un profil pris pendant le
+    /// chargement d'une page lourde ait fait ressortir.
+    func tab(for webView: WKWebView) -> Tab? {
+        for space in spaces {
+            if let found = space.firstTab(where: { $0.webView === webView }) { return found }
+        }
+        return nil
+    }
     /// L'espace courant est-il privé ? Consulté à la création d'un onglet.
     var isPrivateSpace: Bool { spaces.indices.contains(currentSpaceIndex) && currentSpace.isPrivate }
     /// L'onglet courant, **sans passer par `currentSpace`**.
     ///
-    /// Ce détour indexait `spaces` sans le borner, et la compilation des règles se termine
-    /// parfois avant que les espaces soient restaurés : le rappel touchait alors un tableau
-    /// vide et l'application mourait au lancement. C'est la deuxième fois que ce chemin
-    /// tue le démarrage — il ne doit plus jamais pouvoir sortir des bornes.
+    /// Ce détour indexait `spaces` sans le borner, et un rappel asynchrone peut arriver
+    /// avant que les espaces soient restaurés : il touchait alors un tableau vide et
+    /// l'application mourait au lancement. C'est la deuxième fois que ce chemin tue le
+    /// démarrage — il ne doit plus jamais pouvoir sortir des bornes.
     var currentTab: Tab? {
         spaces.indices.contains(currentSpaceIndex) ? spaces[currentSpaceIndex].current : nil
     }
@@ -185,13 +221,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         layout.sidebar.onTabMenu = { [weak self] id, event in self?.showTabMenu(id, event) }
         layout.sidebar.onFolderMenu = { [weak self] id, event in self?.showFolderMenu(id, event) }
         layout.sidebar.onDropTab = { [weak self] id, drop in self?.drop(tabID: id, on: drop) }
-        // **Le survol réveille.** Un onglet endormi doit recharger sa page ; fait au clic,
-        // on regarde une page blanche le temps du réseau. Fait au survol, le trajet de la
-        // souris jusqu'à la ligne suffit le plus souvent à couvrir le chargement.
-        //
-        // Un délai court avant d'agir : traverser la liste pour atteindre le bas ne doit
-        // pas réveiller tout ce qu'on frôle au passage.
-        layout.sidebar.onHoverTab = { [weak self] id in self?.prewake(id) }
         layout.sidebar.onNew = { [weak self] in self?.newTab(nil) }
         layout.sidebar.onDownloads = { [weak self] in self?.showDownloads(nil) }
         layout.sidebar.onSpaceClick = { [weak self] anchor in self?.showSpacesPanel(from: anchor) }
@@ -206,38 +235,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         settings.onChange = { [weak self] in self?.applySettings() }
         applySettings()
 
-        // Le bloqueur compile ses règles au démarrage : la première page ouverte doit
-        // déjà être protégée, pas la deuxième.
-        // Recharger seulement quand la nouvelle liste est réellement en place : la
-        // compilation de cent quarante mille règles prend quelques secondes.
-        blocker.onApplied = { [weak self] in
-            guard let self else { return }
-            if self.reloadAfterBlocking {
-                self.reloadAfterBlocking = false
-                self.currentTab?.webView.reload()
-                return
-            }
-            // Les règles viennent d'arriver, et une page les a devancées. On propose,
-            // on n'impose pas : recharger d'office ce que quelqu'un est en train de lire
-            // serait exactement l'automatisme dont on ne veut plus.
-            if self.loadedBeforeRules {
-                self.loadedBeforeRules = false
-                self.layout.toast.show("Protection prête — recharger cette page") { [weak self] in
-                    self?.currentTab?.webView.reload()
-                }
-            }
+        // Les extensions sont chargées avant la première vue web : une extension arrivée
+        // après coup ne voit pas les onglets déjà ouverts.
+        extensions.onChange = { [weak self] in
+            self?.syncToolbarButtons()
+            self?.refreshExtensionPages()
         }
-        blocker.onChange = { [weak self] in
-            self?.refreshSettingsPages()
-            self?.syncBlockingButton()
-            self?.refreshAdBlockPages()
-        }
-        blocker.isPrivate = { [weak self] in self?.isPrivateSpace ?? false }
-        blocker.start()
+        extensions.start()
+        // La fenêtre existe avant tout onglet : les extensions doivent la connaître avant
+        // qu'un onglet vienne s'y déclarer, sinon il s'annonce dans une fenêtre qui n'est
+        // pas encore là.
+        extensions.controller.didOpenWindow(window)
+        extensions.controller.didFocusWindow(window)
 
         // Après le reste : une vérification de version n'a aucune raison de retarder
         // l'affichage de la fenêtre.
         if settings.checkUpdatesAtLaunch { checkForUpdate(announcingWhenCurrent: false) }
+
+        // Ce qui était en cours au dernier arrêt revient marqué « interrompu », avec son
+        // bouton — rien n'est repris tout seul.
+        downloads.restore()
+        downloads.onChange = { [weak self] in self?.downloads.persist() }
 
         history.purge(olderThan: settings.historyRetention)
         restoreSession()
@@ -248,6 +266,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     func applicationWillTerminate(_ notification: Notification) {
         // La sauvegarde différée peut être en attente au moment où l'on quitte.
         session.save(snapshot())
+        // Un téléchargement en cours ne se perd pas avec sa liste : le morceau reçu est sur
+        // le disque, et sans cette ligne plus rien ne saurait à quoi il correspond.
+        downloads.persist()
     }
 
     /// La session est aussi écrite quand on passe à une autre application.
@@ -297,9 +318,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     // Ces propriétés vivent ici parce qu'une extension Swift ne peut pas en porter.
     // Elles appartiennent aux sujets des fichiers voisins ; leur nom dit lequel.
 
-    /// Une page à recharger dès que la liste compilée sera en place.
-    var reloadAfterBlocking = false
-
     /// Les hôtes dont on a accepté le certificat refusé, **pour cette session seulement**.
     ///
     /// En mémoire et nulle part ailleurs : quitter Wuji les oublie. Une exception TLS
@@ -308,21 +326,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// changer de main.
     var trustedHosts: Set<String> = []
 
+    /// Les hôtes dont le certificat a déjà passé notre lecture, **pour cette session**.
+    ///
+    /// Une mémoire de travail, pas une décision : c'est WebKit qui tranche à chaque
+    /// connexion. Voir `trust(for:)`.
+    var verifiedHosts: Set<String> = []
+
     /// Le nombre de sites ayant laissé des données, relu à l'ouverture des réglages.
     var siteDataCount: Int?
+    /// Ce que chaque site a laissé, site par site.
+    ///
+    /// **On garde les enregistrements et pas seulement leur nombre**, parce qu'effacer les
+    /// données d'un site précis se fait avec l'enregistrement lui-même : WebKit ne prend pas
+    /// un nom de domaine, il prend l'objet qu'il a rendu.
+    var siteDataRecords: [WKWebsiteDataRecord] = []
 
     /// Le dernier certificat refusé par hôte, gardé pour que la page d'erreur puisse
     /// montrer ce qu'elle propose d'accepter.
     var rejectedCertificates: [String: SecTrust] = [:]
-    /// Une page est arrivée avant que les règles soient posées.
-    var loadedBeforeRules = false
     var lastProgressPush = Date.distantPast
     /// Ce qu'il faut faire si la feuille d'autorisation se ferme sans reponse.
     var pendingPermission: (() -> Void)?
+    /// L'onglet que les extensions croient actif.
+    ///
+    /// `browser.tabs.onActivated` porte celui qu'on quitte autant que celui qu'on prend :
+    /// `currentSpace.current` a déjà changé quand on veut le dire, d'où cette copie.
+    weak var activeTab: Tab?
+    /// L'état visible des extensions épinglées lors du dernier passage — voir `pinSignature`.
+    var lastPinSignature = ""
+    /// Les onglets affichés en mode lecture. Par identité d'onglet et non par adresse :
+    /// deux onglets sur le même article peuvent être lus différemment.
+    var readingTabs: Set<UUID> = []
     var appliedTheme: Settings.Theme?
     /// Le plus récent en dernier : fermer puis rouvrir doit rendre ce qu'on vient de
     /// fermer, pas ce qu'on avait fermé ce matin.
     var closedTabs: [ClosedTab] = []
-    var sleepTimer: Timer?
-    var prewakeItem: DispatchWorkItem?
 }

@@ -17,7 +17,8 @@ final class BrowserLayout: ThemedView {
     let toast = Toast()
     let spacesPanel = SpacesPanel()
     let omnibox = Omnibox()
-    let actionSheet = ActionSheet()
+    /// La complétion des identifiants, ancrée au champ de la page.
+    let suggestions = PasswordSuggestions()
 
     /// Prévient l'application d'un basculement de thème — celui des réglages comme celui
     /// du système quand le thème est sur « Auto ».
@@ -28,7 +29,7 @@ final class BrowserLayout: ThemedView {
         wantsLayer = true
         // La palette passe au-dessus de tout le reste, y compris de la barre de recherche.
         [content, topBar, sidebar, findBar, toast,
-         spacesPanel, omnibox, actionSheet].forEach { addSubview($0) }
+         spacesPanel, suggestions, omnibox].forEach { addSubview($0) }
     }
 
     @available(*, unavailable)
@@ -55,11 +56,13 @@ final class BrowserLayout: ThemedView {
         // recouvrir la sidebar ni la barre du haut.
         omnibox.frame = content.frame
         findBar.frame = content.frame
+        // La complétion s'ancre sur un champ de la page : elle vit donc dans le même
+        // cadre que la vue web, et ne peut pas déborder sur le chrome.
+        suggestions.frame = content.frame
         toast.frame = content.frame
         // Le panneau des espaces déborde sur la sidebar : il s'ancre sur elle.
         spacesPanel.frame = bounds
         // La feuille d'action couvre toute la fenêtre : elle s'ouvre aussi bien sous un
         // bouton de la barre que sous le curseur, au fond de la sidebar.
-        actionSheet.frame = bounds
     }
 }

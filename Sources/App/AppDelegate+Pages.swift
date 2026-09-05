@@ -57,8 +57,8 @@ extension AppDelegate {
             // remonterait le défilement pour rien.
         case "rename":
             guard let item = favorites.item(id: id), let id else { return }
-            layout.actionSheet.presentPrompt(title: "Renommer le favori", value: item.title,
-                                             confirm: "Renommer") { [weak self] name in
+            NativeMenu.prompt(title: "Renommer le favori", value: item.title,
+                              confirm: "Renommer", in: window) { [weak self] name in
                 self?.favorites.rename(id: id, to: name)
                 self?.refreshFavorites()
             }
@@ -69,11 +69,11 @@ extension AppDelegate {
 
     /// La demande de caméra ou de micro.
     ///
-    /// **Elle passe par la feuille de l'application**, comme tout le reste : le panneau
-    /// système de WebKit arrive avec son matériau translucide et son vocabulaire, au moment
-    /// précis où l'on veut que la personne lise ce qu'elle accorde.
+    /// **Elle passe par la bulle de l'application** : les menus sont revenus au système,
+    /// pas les questions. Une demande d'autorisation attend une réponse, elle arrive donc
+    /// là où Wuji parle déjà — en bas à droite — plutôt qu'au centre de l'écran.
     ///
-    /// Le refus est le défaut : fermer la feuille sans choisir, c'est refuser.
+    /// Le refus est le défaut : fermer la bulle sans choisir, c'est refuser.
     ///
     /// **Écrite en `async`, cette méthode n'existait pas pour WebKit.** Elle compilait sans
     /// une erreur, sans un avertissement, et n'était jamais appelée : le moteur posait sa
@@ -224,9 +224,15 @@ extension AppDelegate {
         return tab.webView
     }
 
-    func openInNewTab(_ url: URL, activate: Bool) {
+    /// L'onglet créé est rendu : les extensions en ont besoin — `browser.tabs.create`
+    /// répond avec l'onglet, pas avec un accusé de réception.
+    @discardableResult
+    func openInNewTab(_ url: URL, activate: Bool) -> Tab {
         let staying = currentSpace.current
-        let tab = makeTab()
+        // Une page d'extension naît avec la configuration de son contexte ; tout le reste
+        // avec la nôtre. Le choix se fait ici parce qu'il se fait à la création de la vue
+        // et jamais après.
+        let tab = makeTab(configuration: extensionConfiguration(for: url))
         currentSpace.append(tab)
         tab.webView.load(URLRequest(url: url))
         // L'onglet naît juste après celui d'où l'on vient : au bout de la liste, il
@@ -234,6 +240,7 @@ extension AppDelegate {
         if let staying { currentSpace.place(tab, at: .after(staying)) }
         if !activate, let staying { currentSpace.current = staying }
         activateCurrentTab()
+        return tab
     }
 
     func select(tabID: UUID) {
@@ -248,10 +255,18 @@ extension AppDelegate {
         currentSpace.remove(tab)
         // Ce que l'onglet faisait s'arrête avec lui : sans ce démontage, le son d'une
         // vidéo continuait après la fermeture.
+        extensionsDidClose(tab)
+        // Il n'est plus l'onglet actif de personne : le garder ferait annoncer un
+        // « on quitte celui-ci » qui désigne un onglet que WebKit vient d'oublier.
+        if activeTab === tab { activeTab = nil }
         tab.tearDown()
+        // **La palette ne s'ouvre plus d'elle-même.** Fermer le dernier onglet en ouvrait
+        // une : on venait de fermer quelque chose, et l'application répondait par un champ
+        // de saisie qu'on n'avait pas demandé. Trois portes, et pas une de plus — ⌘T, ⌘L,
+        // et le clic sur l'adresse. Ce qui s'ouvre sans qu'on l'ait demandé se ferme d'un
+        // geste de trop.
         if currentSpace.isEmpty {
             newTab(url: nil)
-            openOmnibox()
         } else {
             activateCurrentTab()
         }

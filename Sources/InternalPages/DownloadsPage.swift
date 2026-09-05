@@ -47,12 +47,20 @@ enum DownloadsPage {
             } ?? item.received
             detail = "\(size(onDisk)) · terminé"
             action = button("reveal", "Afficher dans le Finder")
+        case .failed where item.isInterrupted:
+            // Interrompu par une fermeture, pas par un échec : la ligne dit où l'on en était
+            // et propose de continuer. « Réessayer » suggérerait que quelque chose a raté.
+            detail = "\(size(item.received))"
+                + (item.expected > 0 ? " sur \(size(item.expected))" : "")
+                + " · interrompu"
+                + (item.resumeData == nil ? ", reprise depuis le début" : "")
+            action = button("resume", "Reprendre") + button("cancel", "Retirer")
         case .failed(let reason):
             detail = "Échec · \(escape(reason))"
             action = button("retry", "Réessayer")
         }
 
-        let bar = item.isActive ? """
+        let bar = (item.isActive || item.isInterrupted) ? """
             <div class="bar"><i style="width: \(Int(item.fraction * 100))%"></i></div>
             """ : ""
 

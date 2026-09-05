@@ -11,8 +11,9 @@ import Foundation
 @MainActor
 enum ErrorPage {
 
-    /// Une adresse arrêtée par le bloqueur. WebKit la signale par ce couple précis, et le
-    /// message qu'il fournit est en anglais et technique — on écrit le nôtre.
+    /// Une adresse arrêtée par une règle de contenu. Wuji n'en pose aucune : ce cas ne
+    /// peut venir que d'une extension installée. WebKit le signale par ce couple précis, et
+    /// le message qu'il fournit est en anglais et technique — on écrit le nôtre.
     static func isBlocked(_ error: NSError) -> Bool {
         error.domain == "WebKitErrorDomain" && error.code == 104
     }
@@ -39,10 +40,11 @@ enum ErrorPage {
         let blocked = isBlocked(error)
         let untrusted = isUntrusted(error)
         // « Réessayer » sur une adresse bloquée échouerait à tous les coups : ce serait un
-        // bouton mort. À sa place, la seule action qui change quelque chose.
-        let button = blocked ? "Ne pas bloquer ce site"
+        // bouton mort. Il ne reste qu'à ouvrir la page des extensions, puisque c'est de
+        // là que la règle vient.
+        let button = blocked ? "Voir les extensions"
                    : untrusted ? "Continuer quand même" : "Réessayer"
-        let action = blocked ? #", action: "allow""#
+        let action = blocked ? #", action: "extensions""#
                    : untrusted ? #", action: "trust""# : ""
 
         // Le détail du certificat, entre le message et le bouton : on lit ce qu'on accepte
@@ -92,9 +94,9 @@ enum ErrorPage {
         let host = url.host() ?? "ce site"
 
         if isBlocked(error) {
-            return ("Bloqué par Wuji",
-                    "« \(host) » est dans la liste des régies et des traceurs.",
-                    "La requête a été arrêtée avant de partir. Si une page en dépend pour fonctionner, la protection peut être levée pour ce site seulement.")
+            return ("Bloqué par une extension",
+                    "Une règle de contenu a arrêté « \(host) ».",
+                    "Wuji ne pose aucune règle de lui-même : celle-ci vient d'une extension installée. C'est là qu'elle se lève.")
         }
 
         switch error.code {

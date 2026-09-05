@@ -77,7 +77,7 @@ final class Space {
     /// l'autre sens, c'était pire : ce qu'un espace privé avait promis de ne pas garder se
     /// serait retrouvé dans une session enregistrée.
     ///
-    /// Un espace privé naît privé — `⇧⌘N`, et rien d'autre — et le reste jusqu'à sa
+    /// Un espace privé naît privé — `⇧⌥N`, et rien d'autre — et le reste jusqu'à sa
     /// fermeture, qui l'efface.
     let isPrivate: Bool
 
@@ -106,10 +106,26 @@ final class Space {
 
     /// L'ordre d'affichage : dossiers, puis onglets de passage.
     var allTabs: [Tab] { folders.flatMap(\.tabs) + loose }
-    var tabCount: Int { allTabs.count }
-    var isEmpty: Bool { allTabs.isEmpty }
 
-    func tab(with id: UUID) -> Tab? { allTabs.first { $0.id == id } }
+    /// Parcourt les onglets **sans construire la liste**.
+    ///
+    /// `allTabs` alloue deux tableaux à chaque appel — un pour les dossiers aplatis, un
+    /// pour la concaténation. C'est invisible quand on l'affiche, et c'est le seul de nos
+    /// symboles qui soit ressorti d'un profil pris pendant le chargement d'une page lourde :
+    /// il est appelé sur le chemin critique de chaque navigation, pour retrouver l'onglet
+    /// qui porte une vue web. Chercher sans allouer coûte une boucle et rien d'autre.
+    func firstTab(where matches: (Tab) -> Bool) -> Tab? {
+        for folder in folders {
+            for tab in folder.tabs where matches(tab) { return tab }
+        }
+        for tab in loose where matches(tab) { return tab }
+        return nil
+    }
+
+    var tabCount: Int { folders.reduce(loose.count) { $0 + $1.tabs.count } }
+    var isEmpty: Bool { tabCount == 0 }
+
+    func tab(with id: UUID) -> Tab? { firstTab { $0.id == id } }
     func folder(with id: UUID) -> TabFolder? { folders.first { $0.id == id } }
 
     // MARK: - Écriture

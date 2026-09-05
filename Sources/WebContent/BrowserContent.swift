@@ -6,7 +6,6 @@ import WebKit
 final class BrowserContent: ThemedView {
 
     private(set) var webView: WKWebView?
-
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true

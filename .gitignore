@@ -1,4 +1,5 @@
-# Produits de compilation — tout est reconstructible par ./Wuji/build.sh
+# Produits de compilation — tout est reconstructible par ./build.sh, et vérifiable par
+# ./check.sh.
 .build/
 .swiftpm/
 DerivedData/
@@ -14,6 +15,13 @@ DerivedData/
 .claude/settings.local.json
 *.xcuserstate
 xcuserdata/
+
+# Ce que les essais et les exports laissent tomber. Un CSV d'identifiants est **en clair** :
+# le mettre dans un dépôt serait la pire façon possible de perdre un mot de passe.
+identifiants-wuji.csv
+*.entitlements
+/tmp-*
+coffre.json
 
 # Métadonnées que macOS sème
 .DS_Store

@@ -84,16 +84,6 @@ final class Settings {
     var siteZoom: [String: Double] {
         didSet { store.set(siteZoom, forKey: Key.siteZoom); changed() }
     }
-    /// Au bout de combien de temps un onglet qu'on ne regarde plus rend sa mémoire.
-    ///
-    /// **Réglable, parce qu'aucune valeur ne convient à tout le monde.** Sur une machine
-    /// à seize gigaoctets avec quarante onglets, cinq minutes sont généreuses ; sur une
-    /// machine large avec cinq onglets, elles sont une gêne pure. Zéro veut dire jamais —
-    /// et jamais veut vraiment dire jamais, le minuteur ne tourne même pas.
-    var sleepDelay: Int {
-        didSet { store.set(sleepDelay, forKey: Key.sleepDelay); changed() }
-    }
-
     /// Rétention de l'historique, en jours. La spec §4.1 la veut configurable : c'est ce
     /// qui rend « vos données restent chez vous » vérifiable plutôt que déclaratif.
     var historyRetention: Int {
@@ -133,8 +123,7 @@ final class Settings {
     /// Les scripts de l'utilisateur, en bloc.
     ///
     /// Éteint, **l'icône quitte la barre** : une fonction qu'on n'utilise pas ne doit pas
-    /// occuper de place. C'est la même règle que le bouclier, qui disparaît quand le
-    /// blocage est éteint partout.
+    /// occuper de place.
     var userScriptsEnabled: Bool {
         didSet { store.set(userScriptsEnabled, forKey: Key.userScripts); changed() }
     }
@@ -149,44 +138,46 @@ final class Settings {
         didSet { store.set(checkUpdatesAtLaunch, forKey: Key.checkUpdates); changed() }
     }
 
-    // MARK: - Protection
-
-    var blockingEnabled: Bool {
-        didSet { store.set(blockingEnabled, forKey: Key.blocking); changed() }
-    }
-    /// Les sites où la protection est éteinte, par hôte. Une page cassée par le filtrage
-    /// ne doit pas obliger à choisir entre cette page et la protection partout ailleurs.
-    var blockingExceptions: [String] {
-        didSet { store.set(blockingExceptions, forKey: Key.blockingExceptions); changed() }
-    }
-
-    /// Les listes de règles **éteintes**, par identifiant.
+    /// Proposer d'enregistrer les mots de passe, et les remplir.
     ///
-    /// On enregistre ce qui est éteint et non ce qui est allumé : une liste ajoutée par
-    /// une mise à jour arrive donc active, sans que personne ait à aller la cocher. Le
-    /// contraire aurait figé la protection à ce qu'elle était le jour de l'installation.
-    var disabledRuleLists: [String] {
-        didSet { store.set(disabledRuleLists, forKey: Key.disabledRuleLists); changed() }
+    /// **Allumé par défaut, et c'est un changement de position assumé.** Le projet refusait
+    /// d'en garder tant qu'il n'avait pas de trousseau ; il n'en a toujours pas, et n'en
+    /// aura jamais — il range dans celui de macOS. Éteint, plus rien n'est proposé ni
+    /// rempli ; ce qui est déjà dans le trousseau y reste, parce que ce n'est pas à un
+    /// réglage de navigateur d'effacer ce que le système garde.
+    var passwordsEnabled: Bool {
+        didSet { store.set(passwordsEnabled, forKey: Key.passwords); changed() }
     }
 
-    func isEnabled(_ list: RuleList) -> Bool { !disabledRuleLists.contains(list.id) }
+    // MARK: - Extensions
 
-    func setRuleList(_ id: String, enabled: Bool) {
-        guard RuleList.named(id) != nil else { return }
-        if enabled {
-            disabledRuleLists.removeAll { $0 == id }
-        } else if !disabledRuleLists.contains(id) {
-            disabledRuleLists.append(id)
-        }
-    }
-
-    /// Les exceptions posées depuis un espace privé.
+    /// Les extensions activées, par identifiant de paquet.
     ///
-    /// **Elles ne sont pas écrites sur le disque et meurent avec la session.** Lever la
-    /// protection sur un site en privé la levait aussi en normal : la décision d'un moment
-    /// où l'on demande explicitement à ne rien laisser survivait à ce moment-là, ce qui est
-    /// le contraire de ce que « privé » promet.
-    var privateBlockingExceptions: [String] = [] { didSet { changed() } }
+    /// **On enregistre ce qui est allumé, à l'inverse des listes de blocage d'autrefois.**
+    /// Une extension trouvée sur la machine n'a rien demandé à personne : elle arrive donc
+    /// éteinte, et son activation est une décision qu'on a prise en lisant ce qu'elle
+    /// réclame. Le contraire aurait fait tourner du code tiers sur simple installation
+    /// d'une application dans `/Applications`.
+    var enabledExtensions: [String] {
+        didSet { store.set(enabledExtensions, forKey: Key.enabledExtensions); changed() }
+    }
+
+    /// Les extensions posées dans la barre du haut, **dans l'ordre où on les y a mises**.
+    ///
+    /// Un tableau et non un ensemble : la barre a un ordre, on le voit, et le rendre
+    /// arbitraire ferait danser les icônes d'un lancement à l'autre.
+    var pinnedExtensions: [String] {
+        didSet { store.set(pinnedExtensions, forKey: Key.pinnedExtensions); changed() }
+    }
+
+    /// Ce que l'on a **désigné** : une application, un `.appex`, un dossier décompressé.
+    ///
+    /// Wuji ne parcourt plus `/Applications`. Il y proposait tout ce qu'il trouvait, ce qui
+    /// était commode et dressait, sans qu'on l'ait demandé, la liste de ce qui est installé
+    /// sur l'ordinateur. On désigne, il regarde ; il ne regarde rien d'autre.
+    var extensionSources: [String] {
+        didSet { store.set(extensionSources, forKey: Key.extensionSources); changed() }
+    }
 
     var onChange: (() -> Void)?
 
@@ -198,15 +189,17 @@ final class Settings {
         static let theme = "theme"
         static let searchEngine = "searchEngine"
         static let pageZoom = "pageZoom"
-        static let sleepDelay = "sleepDelay"
         static let siteZoom = "siteZoom"
         static let retention = "historyRetention"
-        static let blocking = "blockingEnabled"
-        static let blockingExceptions = "blockingExceptions"
-        static let disabledRuleLists = "disabledRuleLists"
         static let agent = "agent"
         static let userScripts = "userScriptsEnabled"
         static let checkUpdates = "checkUpdatesAtLaunch"
+        static let passwords = "passwordsEnabled"
+        static let enabledExtensions = "enabledExtensions"
+        static let pinnedExtensions = "pinnedExtensions"
+        static let extensionSources = "extensionSources"
+        /// L'ancienne clé, relue une fois pour ne rien perdre — voir l'initialisation.
+        static let extensionFolders = "extensionFolders"
     }
 
     init() {
@@ -215,15 +208,20 @@ final class Settings {
         theme = Theme(rawValue: store.string(forKey: Key.theme) ?? "") ?? .auto
         searchEngine = SearchEngine(rawValue: store.string(forKey: Key.searchEngine) ?? "") ?? .duckduckgo
         pageZoom = store.object(forKey: Key.pageZoom).map { CGFloat($0 as? Double ?? 1) } ?? 1
-        sleepDelay = store.object(forKey: Key.sleepDelay) as? Int ?? 300
         siteZoom = store.dictionary(forKey: Key.siteZoom) as? [String: Double] ?? [:]
         historyRetention = store.object(forKey: Key.retention) as? Int ?? 90
-        blockingEnabled = store.object(forKey: Key.blocking) as? Bool ?? true
-        blockingExceptions = store.stringArray(forKey: Key.blockingExceptions) ?? []
-        disabledRuleLists = store.stringArray(forKey: Key.disabledRuleLists) ?? []
         agent = Agent(rawValue: store.string(forKey: Key.agent) ?? "") ?? .safari
         userScriptsEnabled = store.object(forKey: Key.userScripts) as? Bool ?? true
         checkUpdatesAtLaunch = store.bool(forKey: Key.checkUpdates)
+        passwordsEnabled = store.object(forKey: Key.passwords) as? Bool ?? true
+        enabledExtensions = store.stringArray(forKey: Key.enabledExtensions) ?? []
+        pinnedExtensions = store.stringArray(forKey: Key.pinnedExtensions) ?? []
+        // Les dossiers ouverts à la main du temps où la liste venait d'un balayage : ils
+        // sont des sources comme les autres, et les oublier ferait disparaître ce que
+        // quelqu'un avait déjà ajouté.
+        extensionSources = store.stringArray(forKey: Key.extensionSources)
+            ?? store.stringArray(forKey: Key.extensionFolders)
+            ?? []
     }
 
     private func changed() { onChange?() }

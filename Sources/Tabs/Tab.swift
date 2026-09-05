@@ -6,16 +6,20 @@ import WebKit
 /// Il porte une identité stable. C'est ce qui permet à tout le reste de le désigner sans
 /// jamais parler de position : un index change dès qu'on déplace ou ferme
 /// quelque chose ailleurs, et on croit alors désigner un onglet alors qu'on désigne un rang.
+///
+/// `NSObject` pour une seule raison : `WKWebExtensionTab` est un protocole Objective-C, et
+/// c'est par lui qu'une extension voit cet onglet. Rien d'autre ici n'en dépend — l'égalité
+/// reste l'identité, comparée par `===` partout dans l'application.
 @MainActor
-final class Tab {
+final class Tab: NSObject {
     let id = UUID()
     let webView: WKWebView
 
     /// La dernière adresse dont on soit sûr, et le titre qui allait avec.
     ///
     /// **C'est l'identité de l'onglet, et elle ne s'efface jamais de son vivant.** La vue
-    /// web, elle, passe par des états où elle ne sait rien dire : vidée pendant la veille,
-    /// entre deux navigations, restaurée mais pas encore chargée. Chaque fois qu'on a fait
+    /// web, elle, passe par des états où elle ne sait rien dire : entre deux navigations,
+    /// restaurée mais pas encore chargée. Chaque fois qu'on a fait
     /// dépendre l'identité de l'onglet de ce que la vue racontait sur l'instant, un onglet
     /// a disparu de la colonne — trois fois, par trois chemins différents.
     ///
@@ -31,20 +35,19 @@ final class Tab {
     /// vidéo. `requestMediaPlaybackState` existe, mais il faut l'interroger — donc scruter
     /// tous les onglets en boucle pour savoir lequel chante.
     var isPlayingMedia = false
+    /// Le type du document affiché, retenu à la réponse. `WKWebView` ne l'expose pas, et
+    /// c'est lui qui dit qu'une page est du texte — donc, peut-être, un script à installer.
+    var documentMIME: String?
     /// Ouvert par un site, pas par l'utilisateur — `window.open`. Sert à savoir quoi faire
     /// quand sa toute première adresse est refusée.
     var isPopup = false
 
-    /// Depuis quand cet onglet n'a-t-il pas été regardé.
-    var lastSeen = Date()
-
-    /// L'état de navigation d'un onglet mis en veille : son historique et sa position.
+    /// L'adresse pour laquelle les scripts de l'utilisateur ont déjà été joués.
     ///
-    /// **Mettre en veille, c'est détruire la vue web.** Un `WKWebView` invisible garde son
-    /// processus de rendu et sa mémoire ; il n'existe aucune API pour l'endormir. La seule
-    /// façon de rendre les ressources est de le supprimer, en gardant de quoi le
-    /// reconstruire à l'identique.
-    private var sleepingState: Data?
+    /// Elle empêche de les rejouer deux fois sur la même page : un site qui appelle
+    /// `replaceState` à chaque frappe — une recherche qui écrit ses filtres dans l'adresse —
+    /// enverrait sinon autant d'exécutions que de caractères tapés.
+    var scriptedURL: URL?
 
     /// Les observations vivent avec l'onglet, pas avec la vue active.
     ///
@@ -55,59 +58,12 @@ final class Tab {
 
     init(configuration: WKWebViewConfiguration) {
         webView = WKWebView(frame: .zero, configuration: configuration)
+        super.init()
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
     }
 
-    var isSleeping: Bool { sleepingState != nil }
-
-    /// Endort l'onglet : la page s'en va, son adresse et son historique restent.
-    ///
-    /// Rien n'est endormi qui joue du son — couper la musique d'un onglet qu'on a laissé
-    /// exprès en fond serait pire que la mémoire économisée.
-    func sleep() {
-        // **On note d'abord où revenir, on vide ensuite.**
-        //
-        // L'ordre inverse a coûté cher : `interactionState` peut être nul — une page qui
-        // n'a pas fini de s'engager n'en a pas — et l'onglet était alors vidé sans être
-        // marqué endormi. Il annonçait `about:blank`, la colonne le prenait pour un onglet
-        // vierge et le retirait, et `wake()` refusait de le rouvrir faute d'état. Un
-        // onglet perdu, sans rien pour le dire.
-        guard !isSleeping, !isPlayingMedia, let live = webView.url else { return }
-        remember(url: live)
-
-        // Le marqueur est posé quoi qu'il arrive : sans état d'interaction on rechargera
-        // l'adresse, ce qui coûte le défilement mais rend l'onglet. Perdre sa position est
-        // ennuyeux ; perdre l'onglet ne l'est pas, c'est inacceptable.
-        sleepingState = (webView.interactionState as? Data) ?? Data()
-        webView.stopLoading()
-        // La vue reste, mais vide : son processus de rendu est libéré avec son contenu.
-        webView.loadHTMLString("", baseURL: nil)
-    }
-
-    /// Réveille l'onglet à l'endroit exact où on l'avait laissé.
-    ///
-    /// **L'adresse de repli n'est pas effacée ici.** Elle l'était, et c'était le défaut :
-    /// entre l'instant où l'on efface et celui où la page s'engage, la vue annonce encore
-    /// un document vide. L'onglet n'avait alors plus aucune adresse à donner, la colonne le
-    /// prenait pour vierge, et il disparaissait sous le curseur de qui venait le survoler
-    /// pour le réveiller. Le repli reste ; il s'efface tout seul dès que la vue a mieux à
-    /// dire.
-    func wake() {
-        guard let state = sleepingState else { return }
-        sleepingState = nil
-
-        // Un état vide veut dire « endormi sans savoir où l'on en était » : on repart de
-        // l'adresse. C'est le repli, pas le cas courant.
-        if state.isEmpty {
-            if let address = lastKnownURL { webView.load(URLRequest(url: address)) }
-            return
-        }
-        webView.interactionState = state
-    }
-
-    /// Note où en est l'onglet. Appelé quand une page s'engage pour de bon, et avant de
-    /// l'endormir.
+    /// Note où en est l'onglet. Appelé quand une page s'engage pour de bon.
     func remember(url: URL) {
         guard url.absoluteString != "about:blank" else { return }
         lastKnownURL = url
@@ -142,8 +98,8 @@ final class Tab {
     ///
     /// **Une seule règle, sans état intermédiaire à connaître.** Les versions précédentes
     /// demandaient « l'onglet dort-il ? » pour choisir, et chaque nouvel état de transition
-    /// — en veille, en réveil, restauré, entre deux navigations — ouvrait un trou par
-    /// lequel un onglet disparaissait. Ici la question ne se pose plus : `about:blank` et
+    /// — restauré, entre deux navigations — ouvrait un trou par lequel un onglet
+    /// disparaissait. Ici la question ne se pose plus : `about:blank` et
     /// l'absence d'adresse veulent dire la même chose, « la vue n'a rien à dire », et c'est
     /// la mémoire de l'onglet qui répond.
     ///
@@ -176,12 +132,27 @@ final class Tab {
     /// remplacera d'elle-même quand elle aura mieux à dire.
     ///
     /// La condition porte sur la vue, pas sur la mémoire : une vue qui n'a **rien** n'a
-    /// jamais chargé. Une vue vidée par la veille annonce `about:blank`, et c'est `wake()`
-    /// qui s'en occupe, pas cette fonction.
+    /// jamais chargé.
     func loadIfPending() {
         guard webView.url == nil, let address = lastKnownURL else { return }
         webView.load(URLRequest(url: address))
     }
+
+    /// Cette page ressemble-t-elle à un article ?
+    ///
+    /// Relevé **une fois par navigation** et retenu ici, pas mesuré à chaque battement du
+    /// chrome : la réponse demande de parcourir les paragraphes de la page, et la barre du
+    /// haut se resynchronise des dizaines de fois pendant qu'une page arrive.
+    var hasArticle = false
+
+    /// Cet onglet a-t-il déjà chargé quelque chose ?
+    ///
+    /// **Toucher une propriété de page réveille le processus de rendu.** `pageZoom`,
+    /// `customUserAgent`, `underPageBackgroundColor` : chacune oblige WebKit à instancier
+    /// la page, donc à lancer un processus, pour un onglet restauré que personne n'a encore
+    /// regardé. Vingt-deux onglets rouverts en lançaient vingt — c'est ce que montrait
+    /// `ps`. Ce qui n'a pas chargé attendra d'être regardé.
+    var hasLoaded: Bool { webView.url != nil }
 
     /// **Cette page voyage-t-elle en clair ?**
     ///

@@ -8,7 +8,7 @@ final class DownloadItem {
         case running, paused, finished, failed(String)
     }
 
-    let id = UUID()
+    let id: UUID
     let source: URL
     var filename: String
     var destination: URL?
@@ -31,15 +31,61 @@ final class DownloadItem {
     private(set) var expected: Int64 = 0
 
     init(download: WKDownload, source: URL, filename: String) {
+        id = UUID()
         self.download = download
         self.source = source
         self.filename = filename
     }
 
+    /// Un fichier **déjà reçu**, écrit d'un coup.
+    ///
+    /// C'est le cas du lecteur PDF de WebKit : le document est en mémoire depuis qu'on le
+    /// regarde, et son bouton d'enregistrement rend les octets, pas une adresse. Il n'y a
+    /// donc rien à télécharger — mais il y a tout à ranger : la ligne, le nom, la taille,
+    /// et la place dans la liste, comme n'importe quel autre fichier.
+    init(saved data: Data, to destination: URL, source: URL) {
+        id = UUID()
+        self.source = source
+        filename = destination.lastPathComponent
+        self.destination = destination
+        received = Int64(data.count)
+        expected = Int64(data.count)
+        state = .finished
+    }
+
+    /// Un téléchargement retrouvé au lancement — voir `DownloadStore.unfinished`.
+    init(interrupted stored: StoredDownload) {
+        id = stored.id
+        source = stored.source
+        filename = stored.filename
+        destination = stored.destination
+        resumeData = stored.resumeData
+        received = stored.received
+        expected = stored.expected
+        state = .failed("Interrompu")
+    }
+
+    /// Relève les compteurs — **tant que le téléchargement vit**.
+    ///
+    /// Une ligne terminée était réinterrogée à chaque rafraîchissement, et affichait alors
+    /// ce que l'objet d'avancement de WebKit voulait bien rendre après coup : on a vu un
+    /// fichier de 41,9 Mo annoncer 17,1 Mo une fois fini. Des chiffres définitifs sont
+    /// définitifs ; les relire, c'est leur donner une chance de mentir.
     func sample() {
-        guard let progress = download?.progress else { return }
+        guard isActive, let progress = download?.progress else { return }
         received = progress.completedUnitCount
         if progress.totalUnitCount > 0 { expected = progress.totalUnitCount }
+    }
+
+    /// Fige les compteurs sur leur dernière valeur vraie.
+    func seal() {
+        if let progress = download?.progress {
+            received = progress.completedUnitCount
+            if progress.totalUnitCount > 0 { expected = progress.totalUnitCount }
+        }
+        // Un téléchargement fini n'a plus rien à dire : le lâcher rend son objet à WebKit
+        // au lieu de le retenir jusqu'à la fermeture de la fenêtre.
+        if expected < received { expected = received }
     }
 
     var fraction: Double {
@@ -60,19 +106,85 @@ final class DownloadItem {
     /// Une pause n'est pas une fin : la ligne reste active, et l'anneau de la sidebar
     /// continue de la compter.
     var isActive: Bool { isRunning || isPaused }
+
+    /// Interrompu par une fermeture, pas par un échec du réseau : la ligne attend un geste.
+    var isInterrupted: Bool {
+        if case .failed(let reason) = state { return reason == "Interrompu" }
+        return false
+    }
 }
 
 /// La liste des téléchargements de la session.
 ///
-/// **En mémoire, pas sur le disque.** Un téléchargement terminé, ce qui en reste est le
-/// fichier — il est dans le Finder, sous le nom qu'on lui a donné. Conserver une liste de
-/// ce qu'on a téléchargé un mois plus tôt reviendrait à tenir un journal de plus, que
-/// personne n'a demandé et que la promesse « aucune trace » rend gênant.
+/// Ce qu'un téléchargement inachevé laisse derrière lui.
+struct StoredDownload: Codable {
+    var id: UUID
+    var source: URL
+    var filename: String
+    var destination: URL?
+    var received: Int64
+    var expected: Int64
+    /// Ce que WebKit rend à l'annulation. Absent quand la fermeture n'a pas laissé le temps
+    /// de le demander : la reprise repartira alors de zéro, et le dira.
+    var resumeData: Data?
+}
+
+/// La liste des téléchargements de la session.
+///
+/// **Ce qui est fini ne s'enregistre pas ; ce qui ne l'est pas, si.**
+///
+/// Un téléchargement terminé, ce qui en reste est le fichier — il est dans le Finder, sous
+/// le nom qu'on lui a donné. Conserver une liste de ce qu'on a téléchargé un mois plus tôt
+/// reviendrait à tenir un journal de plus, que personne n'a demandé et que la promesse
+/// « aucune trace » rend gênant. Cette moitié-là de la règle n'a pas changé.
+///
+/// L'autre moitié manquait. Un fichier de deux gigaoctets interrompu par une fermeture
+/// était perdu avec sa liste : le morceau reçu restait sur le disque sans que rien ne sache
+/// à quoi il correspondait. Ce qui est **inachevé** survit donc — l'adresse, le fichier
+/// visé, ce qui a été reçu, et de quoi reprendre quand WebKit a bien voulu le rendre. Il
+/// disparaît à la seconde où il se termine.
 @MainActor
 final class DownloadStore {
 
     private(set) var items: [DownloadItem] = []
     var onChange: (() -> Void)?
+
+    private let index: URL
+
+    init(root: URL = Storage.directory) {
+        index = root.appendingPathComponent("downloads.json")
+    }
+
+    /// Relit ce qui était en cours au dernier arrêt.
+    ///
+    /// Rien n'est repris tout seul : les lignes reviennent marquées « interrompu », avec
+    /// leur bouton. Reprendre un téléchargement de deux gigaoctets sur un partage de
+    /// connexion parce que le navigateur a redémarré serait une décision qu'on n'a pas prise.
+    func restore() {
+        guard let data = try? Data(contentsOf: index),
+              let stored = try? JSONDecoder().decode([StoredDownload].self, from: data) else {
+            return
+        }
+        items = stored.map(DownloadItem.init(interrupted:))
+        onChange?()
+    }
+
+    /// Écrit ce qui reste à finir. Appelé quand la composition change et à la fermeture.
+    func persist() {
+        let unfinished = items.filter { $0.isActive || $0.isInterrupted }.map {
+            StoredDownload(id: $0.id, source: $0.source, filename: $0.filename,
+                           destination: $0.destination, received: $0.received,
+                           expected: $0.expected, resumeData: $0.resumeData)
+        }
+        guard !unfinished.isEmpty else {
+            try? FileManager.default.removeItem(at: index)
+            return
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(unfinished) else { return }
+        try? data.write(to: index, options: .atomic)
+    }
 
     var runningCount: Int { items.filter(\.isRunning).count }
 
@@ -104,11 +216,39 @@ final class DownloadStore {
     /// Un nom libre dans le dossier Téléchargements : « fichier.zip », puis
     /// « fichier 2.zip ». Écraser un fichier existant sans le dire serait une perte de
     /// données silencieuse.
-    static func destination(for suggested: String) -> URL {
-        let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        let name = suggested.isEmpty ? "fichier" : suggested
+    ///
+    /// **Et un nom qu'aucun téléchargement en cours n'a déjà pris.** Le disque ne suffit
+    /// pas : WebKit demande la destination bien avant de créer le fichier, donc deux
+    /// téléchargements lancés dans la même seconde sur le même nom trouvaient tous deux la
+    /// place libre et repartaient avec la même. Mesuré : deux liens vers le même fichier
+    /// cliqués coup sur coup n'en livraient qu'un. La réservation vit dans la liste — c'est
+    /// elle qui sait ce qui est en vol.
+    func destination(for suggested: String) -> URL {
+        // **Seuls les téléchargements encore en vol retiennent un nom.** Un terminé a
+        // laissé son fichier : c'est le disque qui parle pour lui. Le compter ici
+        // interdirait de reprendre le nom d'un fichier qu'on vient d'effacer — mesuré, on
+        // obtenait « doublon 2.txt » là où « doublon.txt » était redevenu libre.
+        Self.destination(for: suggested, in: Self.downloadsFolder,
+                         taken: Set(items.filter(\.isActive).compactMap(\.destination)))
+    }
+
+    static var downloadsFolder: URL {
+        FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+    }
+
+    /// La règle seule, sans disque ni WebKit, pour qu'elle se vérifie.
+    static func destination(for suggested: String, in folder: URL, taken: Set<URL>) -> URL {
+        // Un nom vide, ou qui ne serait qu'un chemin : le suggéré vient du serveur, et un
+        // serveur peut proposer « ../../ailleurs ». On ne garde que le dernier segment.
+        let proposed = (suggested as NSString).lastPathComponent
+        let name = proposed.isEmpty || proposed == "." || proposed == ".." ? "fichier" : proposed
+
+        func free(_ url: URL) -> Bool {
+            !taken.contains(url) && !FileManager.default.fileExists(atPath: url.path)
+        }
+
         var candidate = folder.appendingPathComponent(name)
-        guard FileManager.default.fileExists(atPath: candidate.path) else { return candidate }
+        guard !free(candidate) else { return candidate }
 
         let base = (name as NSString).deletingPathExtension
         let ext = (name as NSString).pathExtension
@@ -117,7 +257,7 @@ final class DownloadStore {
             let numbered = ext.isEmpty ? "\(base) \(index)" : "\(base) \(index).\(ext)"
             candidate = folder.appendingPathComponent(numbered)
             index += 1
-        } while FileManager.default.fileExists(atPath: candidate.path)
+        } while !free(candidate)
         return candidate
     }
 }
