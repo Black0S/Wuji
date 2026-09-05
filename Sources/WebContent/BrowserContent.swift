@@ -6,6 +6,20 @@ import WebKit
 final class BrowserContent: ThemedView {
 
     private(set) var webView: WKWebView?
+
+    /// La vue qu'on a quittée alors qu'elle était encore en plein écran.
+    ///
+    /// **Un filet, pas une fonctionnalité.** Quitter un onglet demande à sa page de sortir
+    /// du plein écran — voir `park(_:)` —, mais la sortie est asynchrone : WebKit referme sa
+    /// fenêtre au tour de boucle suivant. Retirer la vue avant qu'il ait fini couperait la
+    /// source de son image, et le bureau du plein écran deviendrait noir le temps qu'il
+    /// disparaisse. Elle reste donc dans la hiérarchie jusqu'à ce que la sortie soit
+    /// effective, laissée **dessous** : la nouvelle vue est opaque et couvre tout le cadre.
+    ///
+    /// Elle n'est pas cachée non plus. Masquer une vue dont WebKit tire son image revient à
+    /// la retirer.
+    private var parked: WKWebView?
+    private var parkedObservation: NSKeyValueObservation?
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
@@ -52,11 +66,60 @@ final class BrowserContent: ThemedView {
 
     func attach(_ newWebView: WKWebView) {
         guard newWebView !== webView else { return }
-        webView?.removeFromSuperview()
+        // **La vue qui revient était peut-être celle qu'on gardait.** On cesse alors de la
+        // garder *sans la retirer* : elle redevient simplement la vue courante. La retirer
+        // pour la remettre dans la foulée serait précisément le détachement qu'on évite.
+        if newWebView === parked { forgetParked(removing: false) }
+        park(webView)
         webView = newWebView
         newWebView.frame = bounds
         newWebView.autoresizingMask = [.width, .height]
-        addSubview(newWebView)
+        // Au-dessus de tout : si une vue en plein écran attend dessous, elle doit y rester
+        // sans jamais se voir.
+        addSubview(newWebView, positioned: .above, relativeTo: nil)
         needsLayout = true
+    }
+
+    /// Range la vue qu'on quitte.
+    ///
+    /// **Un plein écran appartient à l'onglet qu'on regarde.** Le garder ouvert pendant
+    /// qu'on lit ailleurs faisait montrer la même vidéo à deux endroits — en grand sur son
+    /// bureau, et dans la fenêtre au retour sur l'onglet. Deux images du même objet qui ne
+    /// disent pas la même chose : on ne sait plus laquelle commande. Quitter l'onglet
+    /// demande donc à la page de sortir du plein écran, et le bureau se referme avec.
+    ///
+    /// **`document.exitFullscreen()` et non `closeAllMediaPresentations()`.** La seconde
+    /// ferme aussi l'incrustation — or l'incrustation existe précisément pour continuer à
+    /// regarder pendant qu'on fait autre chose. Fermer les deux d'un même geste tuerait la
+    /// fonction en croyant ranger.
+    ///
+    /// La sortie est asynchrone : si la vue est encore en plein écran à cet instant, on la
+    /// garde plutôt que de la retirer, et on la relâche quand la sortie a eu lieu.
+    private func park(_ view: WKWebView?) {
+        // Une vue déjà gardée le reste : on ne la range pas deux fois.
+        guard let view, view !== parked else { return }
+        // Une autre l'était : elle n'a plus de raison de l'être.
+        forgetParked(removing: true)
+
+        let state = view.fullscreenState
+        guard state == .inFullscreen || state == .enteringFullscreen else {
+            return view.removeFromSuperview()
+        }
+        view.evaluateJavaScript("document.exitFullscreen && document.exitFullscreen()")
+        parked = view
+        parkedObservation = view.observe(\.fullscreenState, options: [.new]) { [weak self] view, _ in
+            MainActor.assumeIsolated {
+                guard view.fullscreenState == .notInFullscreen else { return }
+                self?.forgetParked(removing: true)
+            }
+        }
+    }
+
+    private func forgetParked(removing: Bool) {
+        parkedObservation?.invalidate()
+        parkedObservation = nil
+        // La vue redevenue courante ne se retire pas : elle est à l'écran.
+        if removing, let parked, parked !== webView { parked.removeFromSuperview() }
+        parked = nil
     }
 }
