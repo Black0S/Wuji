@@ -40,6 +40,10 @@ extension AppDelegate {
         if navigationAction.targetFrame?.isMainFrame ?? false,
            let tab = tab(for: webView) {
             tab.documentMIME = nil
+            // Les règles suivent l'adresse où l'on va : une pause vaut pour un site, et un
+            // onglet qui le quitte doit retrouver son blocage. Posé avant le chargement,
+            // sinon la page arriverait sans filtre.
+            applyBlocking(to: tab, for: navigationAction.request.url)
         }
 
         if let url = navigationAction.request.url, Self.looksLikeUserScript(url),

@@ -204,6 +204,35 @@ s'arrête « ce site ».
 Une règle dit ce qu'on ne veut pas voir sur un site qu'on visite — c'est une information sur
 soi, pas une contribution.
 
+### Le catalogue par familles
+
+Cent soixante et une lignes à plat ne se parcourent pas : on y cherche une liste dont on
+connaît déjà le nom, ou l'on renonce. Le catalogue est donc groupé — **Publicité**,
+**Généralistes**, **Pistage et vie privée**, **Sécurité**, **Gêneurs**, **Boutons sociaux**,
+**Régionales**, **Par langue**, **Divers** — dans cet ordre : ce qu'on vient chercher
+d'abord, et les cinquante-sept listes par langue dans une section qu'on saute d'un regard.
+
+Les familles viennent du dépôt, avec la description de chaque liste : Wuji joint les deux
+index — celui de `dist` qui porte les règles converties, celui de `main` qui porte la
+métadonnée — **en parallèle**, puisqu'ils ne dépendent pas l'un de l'autre. La métadonnée
+est facultative : sans elle, tout atterrit dans « Divers » et le catalogue reste utilisable.
+
+Le filtre traverse les sections, et une famille dont plus rien ne ressort disparaît avec son
+titre — « Par langue · 57 » au-dessus du vide se lirait comme un défaut d'affichage.
+
+### Vos règles, et la pause
+
+**Les règles posées à la main sont visibles.** Le sélecteur les créait, le menu du bouclier
+permettait de tout retirer d'un site, mais rien ne montrait ce qu'on avait masqué ni où. Une
+règle qu'on ne peut pas relire est une règle qu'on n'ose plus poser : elles ont leur section
+sur `wuji://blocking`, avec le site, le sélecteur, et de quoi en oublier une.
+
+**Le blocage se suspend par site.** Un site qui se casse à cause d'une règle se répare en
+levant le blocage sur lui seul ; couper partout pour un site est le geste qu'on ne défait
+jamais, parce qu'on oublie l'avoir fait. La pause se fait **en ne posant rien** — WebKit n'a
+pas de « désactiver », une liste posée s'applique —, et les règles reviennent dès qu'on
+quitte le site : elles sont reposées à chaque navigation, pour l'adresse où l'on va.
+
 ### Le journal, et ce qu'il ne dit pas
 
 Le bouclier annonce ce qui est en service — combien de listes, combien de règles — et
@@ -214,7 +243,12 @@ une application tierce — vérifié sur `WKNavigationDelegate`, où les sélect
 correspondants n'existent pas. Un « 247 éléments bloqués sur cette page » serait un nombre
 inventé, c'est-à-dire le genre de chiffre qui rassure et qu'on ne peut pas vérifier.
 
-`wuji://blocking/journal` dit donc ce que Wuji a **fait**, ce qui se recoupe : quelle liste
+**Le journal a sa propre fenêtre**, une seule, sans colonne de navigation. Un onglet
+n'était pas le bon endroit : on consulte le journal *pendant* qu'on regarde la page qui se
+comporte mal, et il aurait fallu quitter cette page pour le lire. Il occupait aussi une
+place dans la session, où il n'a rien à faire — on ne rouvre pas un journal au démarrage.
+
+Il dit ce que Wuji a **fait**, ce qui se recoupe : quelle liste
 est entrée quand, en combien de millisecondes, avec combien de règles ; quel échec et pour
 quelle raison ; quel élément masqué, sur quel site, avec quel sélecteur ; quand le magasin a
 été balayé et de combien de listes périmées. C'est ce qu'on vient lire quand une page se

@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     lazy var userRules = UserRules(settings: settings)
     /// Le journal du blocage : ce que Wuji a fait, et rien qu'il n'ait fait.
     let blockingLog = BlockingLog()
+    /// Le journal a sa fenêtre, et une seule.
+    let logWindow = LogWindow()
     /// Le catalogue lu au dernier passage sur la page. Il n'est pas gardé sur le disque :
     /// deux cents kilo-octets relus à l'ouverture valent mieux qu'un catalogue d'hier
     /// qu'on ne saurait pas distinguer d'un catalogue d'aujourd'hui.
@@ -108,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // configuration déjà utilisée ne l'accepte plus.
         let pages = InternalPageHandler(history: history, downloads: downloads,
                                         favorites: favorites, icons: favicons)
-        pages.blocking = { [unowned self] path in blockingHTML(path: path) }
+        pages.blocking = { [unowned self] _ in BlockingPage.html(state: blockingState) }
         pages.scripts = { [unowned self] in
             ScriptsPage.html(scripts: userScripts.scripts,
                              isEnabled: settings.userScriptsEnabled)

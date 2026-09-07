@@ -30,11 +30,20 @@ struct RuleList: Identifiable, Sendable, Equatable {
     /// change pas quand la liste est mise à jour, à la différence de la version.
     let source: String
     let version: String
+    /// La famille à laquelle la liste appartient — « Publicité », « Sécurité », « Par
+    /// langue »… Cent soixante et une lignes à plat ne se parcourent pas : c'est le groupe
+    /// qui rend le catalogue lisible, et il vient du dépôt, pas d'un classement inventé ici.
+    var group: String = RuleList.otherGroup
+    var summary: String = ""
     /// La part des règles d'origine que la conversion a su rendre. Une liste à 100 % dit
     /// tout ce qu'elle disait ; en dessous, une partie de sa syntaxe n'a pas d'équivalent
     /// dans le format de WebKit — le cosmétique, surtout.
     let coverage: Double
     let parts: [Part]
+
+    /// Le groupe des listes qu'on n'a pas su ranger. Nommé plutôt que vide : une section
+    /// sans titre se lit comme un défaut d'affichage.
+    static let otherGroup = "Divers"
 
     var id: String { source }
     var rules: Int { parts.reduce(0) { $0 + $1.rules } }
@@ -70,22 +79,87 @@ enum RuleCatalog {
         let lists: [Entry]
     }
 
-    /// Lit le catalogue. **Rien n'est mis en cache sur le disque** : c'est un fichier de
-    /// deux cents kilo-octets qu'on relit quand on ouvre la page, et le garder ferait
-    /// afficher un catalogue d'hier sans qu'on sache lequel on regarde.
+    /// Ce que la branche `main` sait de chaque liste : sa famille, ce qu'elle fait, sa
+    /// langue. Le produit de la conversion ne le porte pas — c'est de la métadonnée de
+    /// catalogue, pas des règles.
+    static let metadata = URL(
+        string: "https://raw.githubusercontent.com/Black0S/Wuji-Rules-List/main/filters/index.json")!
+
+    private struct Metadata: Decodable {
+        struct Entry: Decodable {
+            let description: String?
+            let group: String?
+            let languages: [String]?
+            let file: String?
+        }
+        let lists: [String: Entry]
+    }
+
+    /// Les familles du dépôt, en français. Traduites parce qu'elles s'affichent, et rangées
+    /// dans l'ordre où l'on décide : ce qu'on vient chercher d'abord — la publicité, le
+    /// pistage —, puis le reste, puis les cinquante-sept listes par langue qui n'intéressent
+    /// que celui qui parle la langue.
+    static let groups: [String: (label: String, rank: Int)] = [
+        "Ad blocking":       ("Publicité", 0),
+        "General":           ("Généralistes", 1),
+        "Privacy":           ("Pistage et vie privée", 2),
+        "Security":          ("Sécurité", 3),
+        "Annoyances":        ("Gêneurs", 4),
+        "Social widgets":    ("Boutons sociaux", 5),
+        "Regional":          ("Régionales", 6),
+        "Language-specific": ("Par langue", 7),
+        "Other":             ("Divers", 8)
+    ]
+
+    static func rank(of group: String) -> Int {
+        groups.values.first { $0.label == group }?.rank ?? 9
+    }
+
+    /// Lit le catalogue. **Rien n'est mis en cache sur le disque** : deux fichiers de deux
+    /// cents kilo-octets relus quand on ouvre la page, et les garder ferait afficher un
+    /// catalogue d'hier sans qu'on sache lequel on regarde.
+    ///
+    /// Les deux index sont lus **en parallèle** : ils viennent de deux branches, ne
+    /// dépendent pas l'un de l'autre, et les enchaîner doublerait l'attente pour rien. La
+    /// métadonnée est facultative — sans elle, tout atterrit dans « Divers » et le
+    /// catalogue reste utilisable.
     static func fetch() async throws -> [RuleList] {
-        let (data, response) = try await URLSession.shared.data(from: index)
+        async let rules = data(from: index)
+        async let meta = try? data(from: metadata)
+
+        let decoded = try JSONDecoder().decode(Index.self, from: try await rules)
+        let info = (try? await meta).flatMap {
+            try? JSONDecoder().decode(Metadata.self, from: $0)
+        }
+        // Rangé par nom de fichier : c'est la seule clé que les deux index partagent.
+        var byFile: [String: Metadata.Entry] = [:]
+        for entry in info?.lists.values ?? [:].values {
+            if let file = entry.file { byFile[file] = entry }
+        }
+
+        return decoded.lists
+            .map { entry in
+                let extra = byFile[entry.source]
+                let group = extra?.group.flatMap { groups[$0]?.label } ?? RuleList.otherGroup
+                return RuleList(
+                    name: entry.name, source: entry.source, version: entry.version,
+                    group: group, summary: extra?.description ?? "",
+                    coverage: entry.coverage_pct,
+                    parts: entry.files.map { .init(file: $0.file, rules: $0.rules,
+                                                   bytes: $0.bytes) })
+            }
+            .sorted {
+                let (a, b) = (rank(of: $0.group), rank(of: $1.group))
+                if a != b { return a < b }
+                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+    }
+
+    private static func data(from url: URL) async throws -> Data {
+        let (data, response) = try await URLSession.shared.data(from: url)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw URLError(.badServerResponse)
         }
-        let decoded = try JSONDecoder().decode(Index.self, from: data)
-        return decoded.lists
-            .map { entry in
-                RuleList(name: entry.name, source: entry.source, version: entry.version,
-                         coverage: entry.coverage_pct,
-                         parts: entry.files.map { .init(file: $0.file, rules: $0.rules,
-                                                        bytes: $0.bytes) })
-            }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return data
     }
 }

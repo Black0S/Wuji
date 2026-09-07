@@ -170,10 +170,31 @@ final class ContentBlocker {
         reapply(to: configuration.userContentController)
     }
 
+    /// Le blocage est-il suspendu pour ce site ?
+    func isPaused(_ host: String?) -> Bool {
+        guard let host else { return false }
+        return settings.pausedHosts.contains(UserRules.registrable(host))
+    }
+
+    func setPaused(_ paused: Bool, host: String) {
+        let site = UserRules.registrable(host)
+        if paused {
+            if !settings.pausedHosts.contains(site) { settings.pausedHosts.append(site) }
+        } else {
+            settings.pausedHosts.removeAll { $0 == site }
+        }
+        onChange?()
+    }
+
     /// Repose les règles sur une vue déjà ouverte : activer une liste doit valoir tout de
     /// suite, sans avoir à recharger l'onglet à la main.
-    func reapply(to controller: WKUserContentController) {
+    func reapply(to controller: WKUserContentController, host: String? = nil) {
         controller.removeAllContentRuleLists()
+        // **La pause se fait en ne posant rien.** WebKit n'a pas de « désactiver » : une
+        // liste posée s'applique. On la retire donc de la vue, et on la repose quand on
+        // quitte le site — c'est aussi ce qui garantit qu'une pause ne déborde jamais sur
+        // l'onglet d'à côté.
+        guard !isPaused(host) else { return }
         for lists in installed.values {
             for list in lists { controller.add(list) }
         }

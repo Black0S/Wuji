@@ -23,14 +23,13 @@ extension AppDelegate {
     /// Le repli sur le rechargement reste pour le premier affichage — une page qui n'a pas
     /// encore posé son crochet ne saurait pas quoi faire du correctif.
     func refreshBlockingPages() {
+        // La fenêtre du journal suit les mêmes changements : elle est ouverte pendant
+        // qu'on coche des listes, et un journal qui ne montre pas ce qui vient d'arriver
+        // n'est pas un journal.
+        if logWindow.isOpen { logWindow.refresh() }
+
         let patch = BlockingPage.patch(blockingState)
         for tab in spaces.flatMap(\.allTabs) where tab.url?.host() == "blocking" {
-            // Le journal n'a pas de correctif sur place : il se relit en entier, et on ne
-            // le regarde pas pendant qu'on coche des listes.
-            guard tab.url?.path.hasPrefix("/journal") != true else {
-                tab.webView.reload()
-                continue
-            }
             tab.webView.evaluateJavaScript(patch) { value, _ in
                 MainActor.assumeIsolated {
                     guard value == nil else { return }
@@ -41,13 +40,6 @@ extension AppDelegate {
     }
 
     /// Ce que la page affiche, à l'instant où on la dessine.
-    /// La page à rendre pour `wuji://blocking` — la liste, ou le journal.
-    func blockingHTML(path: String) -> String {
-        path.hasPrefix("/journal")
-            ? BlockingLogPage.html(entries: blockingLog.entries)
-            : BlockingPage.html(state: blockingState)
-    }
-
     var blockingState: BlockingPage.State {
         BlockingPage.State(
             catalog: ruleCatalog,
@@ -67,7 +59,9 @@ extension AppDelegate {
                 }
                 return nil
             }(),
-            unreachable: catalogUnreachable)
+            unreachable: catalogUnreachable,
+            mine: userRules.rules,
+            paused: settings.pausedHosts)
     }
 
     /// Va chercher le catalogue. **Rien d'autre n'est téléchargé** : les règles ne partent
@@ -124,6 +118,21 @@ extension AppDelegate {
         items.append(.separator)
 
         if let host, currentTab?.url?.scheme?.hasPrefix("http") == true {
+            let paused = blocking.isPaused(host)
+            items.append(ActionItem(
+                title: paused ? "Reprendre le blocage sur \(host)"
+                              : "Suspendre le blocage sur \(host)",
+                symbol: paused ? "play" : "pause",
+                action: { [weak self] in
+                    guard let self else { return }
+                    blocking.setPaused(!paused, host: host)
+                    blockingLog.record(paused ? .resumed : .paused, host)
+                    applyBlockingToOpenTabs()
+                    layout.toast.show(paused ? "Blocage repris sur « \(host) »"
+                                             : "Blocage suspendu sur « \(host) »") {
+                        [weak self] in self?.currentTab?.webView.reload()
+                    }
+                }))
             items.append(ActionItem(title: "Masquer un élément…", symbol: "square.dashed",
                                     action: { [weak self] in self?.startElementPicker() }))
             let mine = userRules.rules.filter { $0.host == host }
@@ -155,10 +164,15 @@ extension AppDelegate {
         return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
-    static let blockingLogPage = URL(string: "wuji://blocking/journal")!
-
+    /// Ouvre le journal dans sa fenêtre.
+    ///
+    /// **Pas un onglet.** On consulte le journal pendant qu'on regarde la page qui se
+    /// comporte mal ; dans un onglet il aurait fallu quitter cette page pour le lire.
     @objc func showBlockingLog(_ sender: Any?) {
-        openInternal(Self.blockingLogPage)
+        logWindow.html = { [unowned self] in
+            BlockingLogPage.html(entries: blockingLog.entries)
+        }
+        logWindow.show(configuration: makeConfiguration())
     }
 
     /// Ouvre le sélecteur sur la page courante.
@@ -198,9 +212,20 @@ extension AppDelegate {
         switch action {
         case "reload":
             loadRuleCatalog()
+        case "forget-rule":
+            guard let id else { return }
+            userRules.remove(id: id)
+            refreshBlockingPages()
+            syncChrome()
+        case "resume":
+            guard let id else { return }
+            blocking.setPaused(false, host: id)
+            blockingLog.record(.resumed, id)
+            applyBlockingToOpenTabs()
+            refreshBlockingPages()
         case "clear-log":
             blockingLog.clear()
-            refreshBlockingPages()
+            logWindow.refresh()
         case "install", "update":
             guard let id, let list = ruleCatalog.first(where: { $0.id == id }) else { return }
             Task { @MainActor in
@@ -245,7 +270,18 @@ extension AppDelegate {
     /// blocage ne rapporte sur la page qu'on regarde déjà.
     func applyBlockingToOpenTabs() {
         for tab in spaces.flatMap(\.allTabs) {
-            blocking.reapply(to: tab.webView.configuration.userContentController)
+            blocking.reapply(to: tab.webView.configuration.userContentController,
+                             host: tab.url?.host())
         }
+    }
+
+    /// Repose les règles sur **un** onglet, pour l'adresse où il va.
+    ///
+    /// Appelé à chaque navigation : la pause vaut pour un site, et une vue qui passe d'un
+    /// site en pause à un autre doit retrouver ses règles — sans quoi la pause deviendrait
+    /// permanente pour cet onglet, ce que personne n'a demandé.
+    func applyBlocking(to tab: Tab, for url: URL?) {
+        blocking.reapply(to: tab.webView.configuration.userContentController,
+                         host: url?.host())
     }
 }

@@ -20,7 +20,7 @@ import Foundation
 final class BlockingLog {
 
     enum Kind: String, Codable {
-        case installed, removed, updated, failed, hidden, unhidden, catalog, swept
+        case installed, removed, updated, failed, hidden, unhidden, catalog, swept, paused, resumed
     }
 
     struct Entry: Codable, Identifiable {
@@ -50,6 +50,8 @@ final class BlockingLog {
             case .unhidden:  return "Règles retirées"
             case .catalog:   return "Catalogue"
             case .swept:     return "Magasin nettoyé"
+            case .paused:    return "Blocage suspendu"
+            case .resumed:   return "Blocage repris"
             }
         }
 

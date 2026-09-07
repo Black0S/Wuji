@@ -23,6 +23,9 @@ enum BlockingPage {
         /// Le catalogue n'a pas pu être lu : la page le dit et propose de réessayer, au
         /// lieu d'afficher une liste vide qu'on prendrait pour « il n'y a rien ».
         var unreachable: Bool
+        /// Ce que vous avez masqué vous-même, et où le blocage est suspendu.
+        var mine: [UserRules.Rule]
+        var paused: [String]
     }
 
     /// Ce que l'en-tête annonce. Extrait parce que la mise à jour sur place le renvoie
@@ -87,8 +90,9 @@ enum BlockingPage {
               </header>
               <main>
                 <div id="notice">\(notice)</div>
+                \(personal(state))\(paused(state))
                 \(state.catalog.isEmpty ? "" : search)
-                <ul>\(state.catalog.map { row($0, state) }.joined())</ul>
+                \(groups(state))
                 <p class="note">
                   Wuji n'embarque aucune liste. Celles-ci viennent de
                   <code>Black0S/Wuji-Rules-List</code>, qui récupère les listes d'origine —
@@ -114,6 +118,81 @@ enum BlockingPage {
               </main>
               """,
             script: script, style: style)
+    }
+
+    /// **Le catalogue par familles.** Cent soixante et une lignes à plat ne se parcourent
+    /// pas : on y cherche une liste dont on connaît le nom, ou l'on renonce. Groupées, on
+    /// lit d'abord ce qu'on vient chercher — la publicité, le pistage —, et les cinquante-
+    /// sept listes par langue tiennent dans une section qu'on saute d'un regard.
+    ///
+    /// Les groupes viennent du dépôt, pas d'un classement inventé ici ; leur ordre, si.
+    private static func groups(_ state: State) -> String {
+        var order: [String] = []
+        var byGroup: [String: [RuleList]] = [:]
+        for list in state.catalog {
+            if byGroup[list.group] == nil { order.append(list.group) }
+            byGroup[list.group, default: []].append(list)
+        }
+        return order.map { group in
+            let lists = byGroup[group] ?? []
+            let active = lists.filter { state.installed.contains($0.id) }.count
+            return """
+            <div class="group" data-group="\(escape(group))">
+              <h2>\(escape(group))<span class="tally">\(lists.count)\
+            \(active > 0 ? " · \(active) en service" : "")</span></h2>
+              <ul>\(lists.map { row($0, state) }.joined())</ul>
+            </div>
+            """
+        }.joined()
+    }
+
+    /// Les règles posées à la main, là où on les retrouve.
+    ///
+    /// **Elles étaient invisibles.** Le sélecteur d'éléments les créait, le menu du bouclier
+    /// permettait de tout retirer d'un site — mais rien ne montrait ce qu'on avait masqué,
+    /// ni où. Une règle qu'on ne peut pas relire est une règle qu'on n'ose plus poser.
+    private static func personal(_ state: State) -> String {
+        guard !state.mine.isEmpty else { return "" }
+        let rows = state.mine
+            .sorted { ($0.host, $0.selector) < ($1.host, $1.selector) }
+            .map { rule in
+                """
+                <div class="rule" data-rule="\(escape(rule.id))">
+                  <span class="mono host">\(escape(rule.host))</span>
+                  <span class="mono selector">\(escape(rule.selector))</span>
+                  <button class="button danger" data-action="forget-rule">Oublier</button>
+                </div>
+                """
+            }.joined()
+        return """
+        <div class="block">
+          <h2>Règles personnalisées<span class="tally">\(state.mine.count)</span></h2>
+          <p class="hint">Posées avec « Masquer un élément… », depuis le bouclier de la barre.
+            Elles ne vont nulle part : ce sont des informations sur vous.</p>
+        </div>
+        <div class="rules">\(rows)</div>
+        """
+    }
+
+    /// Les sites où le blocage est suspendu.
+    private static func paused(_ state: State) -> String {
+        guard !state.paused.isEmpty else { return "" }
+        let rows = state.paused.sorted().map { host in
+            """
+            <div class="rule" data-host="\(escape(host))">
+              <span class="mono host">\(escape(host))</span>
+              <span class="selector">blocage suspendu</span>
+              <button class="button" data-action="resume">Reprendre</button>
+            </div>
+            """
+        }.joined()
+        return """
+        <div class="block">
+          <h2>En pause<span class="tally">\(state.paused.count)</span></h2>
+          <p class="hint">Aucune règle n'est posée sur ces sites, y compris les vôtres.</p>
+        </div>
+        <div class="rules">\(rows)</div>
+        """
     }
 
     private static let search = """
@@ -145,6 +224,7 @@ enum BlockingPage {
             <span class="name">\(escape(list.name))<span class="stale"\(stale ? "" : " hidden") \
         > · à jour disponible</span></span>
             <span class="detail">\(escape(detail))</span>
+            \(list.summary.isEmpty ? "" : #"<span class="detail">"# + escape(list.summary) + "</span>")
           </div>
           <button class="button update" data-action="update"\(stale ? "" : " hidden")>Mettre à jour</button>
         </li>
@@ -196,6 +276,27 @@ enum BlockingPage {
     .failure { color: var(--danger); }
     .link { background: none; border: 0; padding: 0; font: inherit;
             color: var(--text); text-decoration: underline; cursor: pointer; }
+    /* Les familles : un titre discret, un compte à droite. Une section se saute d'un
+       regard — c'est tout l'intérêt d'en avoir. */
+    .group h2, .block h2 {
+      display: flex; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 600;
+      margin: 22px 0 6px; padding: 0 2px; color: var(--text);
+    }
+    .group h2 .tally, .block h2 .tally { color: var(--muted); font-weight: 400; font-size: 12px; }
+    .block .hint { margin: 0 2px 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    /* Le filtre traverse les sections : celles qui n'ont plus rien à montrer disparaissent
+       avec leur titre, sinon on lirait « Par langue · 57 » au-dessus du vide. */
+    .group[hidden], .rule[hidden] { display: none; }
+    .rules { display: flex; flex-direction: column; }
+    .rule {
+      display: flex; align-items: center; gap: 12px; padding: 7px 12px;
+      border-radius: var(--radius, 8px);
+    }
+    .rule:hover { background: var(--hover); }
+    .rule .host { flex: none; min-width: 140px; }
+    .rule .selector { flex: 1; min-width: 0; color: var(--muted); font-size: 12px;
+                      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
     .note { margin-top: 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
     .note code { font-size: 11px; background: var(--hover); padding: 1px 5px; border-radius: 4px; }
     """
@@ -212,8 +313,12 @@ enum BlockingPage {
     document.addEventListener('click', (event) => {
       const button = event.target.closest('[data-action]');
       if (!button) return;
-      const row = button.closest('li');
-      send({ action: button.dataset.action, id: row ? row.dataset.id : null });
+      // Trois porteurs d'identité : une ligne de liste, une règle, un site en pause. On
+      // envoie celui qu'on trouve — le nom du champ compte peu, l'action dit ce que c'est.
+      const ligne = button.closest('li');
+      const règle = button.closest('.rule');
+      send({ action: button.dataset.action,
+             id: (ligne && ligne.dataset.id) || (règle && (règle.dataset.rule || règle.dataset.host)) || null });
     });
 
     // **La page se met à jour sur place, elle ne se recharge pas.** Recharger remettait la
@@ -253,6 +358,11 @@ enum BlockingPage {
         const montrer = !aiguille || plier(ligne.textContent || '').includes(aiguille);
         ligne.hidden = !montrer;
         if (montrer) visibles++;
+      }
+      // Une famille dont plus rien ne ressort disparaît avec son titre : « Par langue · 57 »
+      // au-dessus du vide se lit comme un défaut d'affichage.
+      for (const groupe of document.querySelectorAll('.group')) {
+        groupe.hidden = ![...groupe.querySelectorAll('li')].some((l) => !l.hidden);
       }
       const compteur = document.querySelector('.search .count');
       if (compteur) compteur.textContent = aiguille ? `${visibles} sur ${lignes.length}` : '';

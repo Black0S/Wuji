@@ -14,7 +14,7 @@ import Foundation
 @MainActor
 enum BlockingLogPage {
 
-    static func html(entries: [BlockingLog.Entry]) -> String {
+    static func html(entries: [BlockingLog.Entry], standalone: Bool = true) -> String {
         let failures = entries.filter(\.isFailure).count
         let tally = entries.isEmpty
             ? "rien à signaler"
@@ -58,7 +58,7 @@ enum BlockingLogPage {
                 </p>
               </main>
               """,
-            script: script, style: style)
+            script: script, style: style, standalone: standalone)
     }
 
     private static let search = """

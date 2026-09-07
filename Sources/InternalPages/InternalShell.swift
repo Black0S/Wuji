@@ -48,8 +48,14 @@ enum InternalShell {
 
     /// Enveloppe un contenu dans la coquille. `current` est l'adresse de la page affichée,
     /// pour que le sommaire sache quelle ligne marquer.
+    /// `standalone` : la page sans son sommaire.
+    ///
+    /// **Une fenêtre à part n'a pas de colonne de navigation.** Le journal du blocage a la
+    /// sienne ; y afficher les entrées « Favoris », « Historique », « Réglages » inviterait
+    /// à une navigation qui n'a pas de sens dans une fenêtre d'une seule page — et qui
+    /// remplacerait le journal par autre chose sans moyen d'y revenir.
     static func page(title: String, current: String, body: String, script: String = "",
-                     style: String = "") -> String {
+                     style: String = "", standalone: Bool = false) -> String {
         let nav = groups.map { group, items in
             let rows = items.map { item in
                 let isCurrent = item.address == current
@@ -74,7 +80,7 @@ enum InternalShell {
         </head>
         <body>
           <div class="frame">
-            <nav>\(nav)</nav>
+            \(standalone ? "" : "<nav>" + nav + "</nav>")
             <div class="pane">\(body)</div>
           </div>
           <script>\(script)</script>
@@ -91,6 +97,8 @@ enum InternalShell {
 
     private static let shellStyle = """
     body { height: 100vh; overflow: hidden; }
+    /* Sans sommaire, le contenu reprend la marge que la colonne portait pour lui. */
+    .frame:not(:has(nav)) .pane { padding-left: 32px; }
     .frame { display: flex; height: 100vh; }
     /* Pas de filet entre le sommaire et le contenu : les deux sont sur le même fond, et
        une ligne verticale y dessinerait une frontière qui n'existe pas. C'est l'écart qui
