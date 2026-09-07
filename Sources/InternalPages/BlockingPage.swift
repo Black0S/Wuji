@@ -304,7 +304,12 @@ enum BlockingPage {
        de vingt-trois points tout ce qui se trouvait dessous : c'est-à-dire au moment précis
        où l'on venait de mettre cette liste à jour, là où l'on regardait. La hauteur
        réservée est celle du bouton plus les marges, pas un nombre choisi à l'œil. */
-    li { min-height: 54px; padding: 10px 12px; align-items: flex-start; gap: 12px; }
+    li {
+      height: auto; min-height: 54px; padding: 10px 12px; align-items: flex-start; gap: 12px;
+    }
+    /* Le bouton d'une ligne est plus court que la ligne la plus courte : c'est ce qui fait
+       qu'apparaître ou disparaître ne change jamais la hauteur du rang. */
+    li .update { height: 26px; padding: 0 10px; font-size: 12px; }
     li input[type=checkbox] { margin-top: 3px; }
     li[hidden] { display: none; }
     .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
