@@ -81,17 +81,25 @@ struct InternalPageTests {
         #expect(html.contains("<main>"))
     }
 
-    @Test func laListeDesExtensionsSeDessineVideEtPleine() {
-        #expect(ExtensionsPage.html(entries: []).contains("Aucune extension"))
+    @Test func lePageDeBlocageSeDessineVideEtPleine() {
+        // Vide **et injoignable** : c'est le cas qui compte, parce qu'une liste vide sans
+        // explication se lit « il n'y a rien à bloquer » au lieu de « je n'ai pas pu lire ».
+        let muet = BlockingPage.State(catalog: [], installed: [], outdated: [],
+                                      activeRules: 0, busy: nil, failure: nil,
+                                      unreachable: true)
+        #expect(BlockingPage.html(state: muet).contains("catalogue injoignable"))
 
-        var entry = ExtensionHost.Entry(id: "a.b.c", name: "Essai",
-                                        origin: "Extension de « Essai »")
-        entry.version = "1.0"
-        entry.hosts = ["*://exemple.fr/*"]
-        entry.permissions = ["storage"]
-        let html = ExtensionsPage.html(entries: [entry])
-        #expect(html.contains("Essai"))
-        #expect(html.contains("exemple.fr"))
+        let liste = RuleList(name: "AdGuard Base filter", source: "AdGuard-Base-filter.txt",
+                             version: "2.4", coverage: 96.5,
+                             parts: [.init(file: "Webkit-AdGuard-Base-filter.json",
+                                           rules: 123902, bytes: 12566360)])
+        let plein = BlockingPage.State(catalog: [liste], installed: [liste.id],
+                                       outdated: [liste.id], activeRules: 123902,
+                                       busy: nil, failure: nil, unreachable: false)
+        let html = BlockingPage.html(state: plein)
+        #expect(html.contains("AdGuard Base filter"))
+        #expect(html.contains("Mettre à jour"))
+        #expect(html.contains("96 % converti"))
         #expect(!html.contains("Optional("))
     }
 

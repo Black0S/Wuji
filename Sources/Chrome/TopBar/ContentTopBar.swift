@@ -4,10 +4,6 @@ import AppKit
 protocol ContentTopBarDelegate: AnyObject {
     func topBarDidRequestOmnibox(_ bar: ContentTopBar)
     func topBar(_ bar: ContentTopBar, didTrigger action: ContentTopBar.Action)
-    /// Un clic sur l'icône d'une extension épinglée.
-    func topBar(_ bar: ContentTopBar, didTriggerExtension id: String)
-    /// Ce que le clic droit sur cette même icône doit proposer.
-    func topBar(_ bar: ContentTopBar, menuForExtension id: String) -> [ActionItem]
 }
 
 /// La barre du haut, au-dessus du **contenu seulement** — elle commence après la sidebar.
@@ -17,31 +13,15 @@ protocol ContentTopBarDelegate: AnyObject {
 @MainActor
 final class ContentTopBar: ThemedView {
 
-    enum Action { case back, forward, menu, extensions, scripts, security, zoomReset, reader }
-
-    /// Une extension posée dans la barre : son icône, son étiquette, sa pastille.
-    ///
-    /// Les trois viennent de l'extension et changent avec la page ouverte — c'est ce
-    /// qu'une extension a de plus à dire qu'un bouton fixe, et le perdre reviendrait à
-    /// épingler une image morte.
-    struct Pin {
-        let id: String
-        let label: String
-        let icon: NSImage?
-        var badge: String = ""
-    }
+    enum Action { case back, forward, menu, blocking, scripts, security, zoomReset, reader }
 
     weak var delegate: ContentTopBarDelegate?
 
     private let back = NSButton()
     private let forward = NSButton()
     private let more = NSButton()
-    private let puzzle = NSButton()
+    private let shield = NSButton()
     private let braces = NSButton()
-    /// Les extensions épinglées, dans l'ordre où on les a épinglées. Reconstruites à
-    /// chaque changement : leur nombre, leur icône et leur pastille varient, et un
-    /// recyclage fin coûterait plus que la reconstruction d'une poignée de boutons.
-    private var pins: [PinButton] = []
     /// Le niveau de zoom, quand il n'est pas à cent pour cent.
     ///
     /// **Une bulle passait, et c'était tout.** Elle disait ce qui venait de changer, pas
@@ -54,7 +34,7 @@ final class ContentTopBar: ThemedView {
     /// Sa place était déjà réservée : pour que l'adresse reste centrée quel que soit
     /// l'affichage du cadenas, le champ garde de part et d'autre la largeur d'un glyphe. Le
     /// côté droit attendait un occupant, et celui-ci parle de la même chose que le champ —
-    /// la page qu'on regarde. Le mettre avec les extensions et les scripts l'aurait rangé
+    /// la page qu'on regarde. Le mettre avec le blocage et les scripts l'aurait rangé
     /// avec les outils, qui eux ne dépendent pas de la page.
     private let reader = NSButton()
     private let lock = NSImageView()
@@ -77,10 +57,13 @@ final class ContentTopBar: ThemedView {
         // Le seul bouton à droite, et il n'est pas un doublon : les actions qu'il expose
         // n'ont aucune autre porte d'entrée que la barre de menus du système.
         configure(more, symbol: "ellipsis", label: "Menu")
-        // Les extensions n'apparaissent que s'il y en a de chargées : un bouton qui
+        // Le bouclier n'apparaît que si une liste est en service : un bouton qui
         // n'ouvrirait qu'une liste vide n'a pas à occuper la barre.
-        configure(puzzle, symbol: "puzzlepiece.extension", label: "Extensions")
-        puzzle.isHidden = true
+        // **Le bouclier n'apparaît que quand une liste est en service.** Un bouton qui
+        // n'ouvrirait qu'une page vide apprend à ne plus être regardé — c'est la règle de
+        // toute cette barre.
+        configure(shield, symbol: "shield.lefthalf.filled", label: "Blocage")
+        shield.isHidden = true
         // Les scripts ont leur propre bouton, et pas une ligne dans le menu des
         // extensions : ce sont deux pouvoirs différents. Une extension arrive avec ses
         // permissions déclarées et son bac à sable ; un script utilisateur est du code à
@@ -162,7 +145,7 @@ final class ContentTopBar: ThemedView {
         // Même fond que la sidebar : les deux forment un seul cadre, pas deux surfaces
         // empilées. C'est la courbe du contenu qui fait la jonction, pas un filet.
         layer?.backgroundColor = Tokens.sidebarBackground.cgColor
-        [back, forward, more, puzzle, braces].forEach { $0.contentTintColor = Tokens.textPrimary }
+        [back, forward, more, shield, braces].forEach { $0.contentTintColor = Tokens.textPrimary }
 
         let size: CGFloat = 24
         let y = (bounds.height - size) / 2
@@ -173,19 +156,18 @@ final class ContentTopBar: ThemedView {
         //
         // Chaque bouton se plaçait par rapport au précédent, avec une condition pour le
         // cas où celui-ci manquait. Deux boutons facultatifs, puis un nombre variable
-        // d'extensions épinglées : la chaîne de conditions ne tenait plus. Un trou là où
+        // facultatifs : la chaîne de conditions ne tenait plus. Un trou là où
         // une icône a disparu fait chercher un bouton absent, et cette boucle est ce qui
         // garantit qu'il n'y en a jamais.
-        // L'ordre, de droite à gauche : le menu, les scripts, le bouton des extensions,
-        // puis les extensions épinglées. Les scripts se tiennent contre le menu parce qu'ils
-        // sont à vous ; les extensions occupent le reste, et leur nombre varie.
+        // L'ordre, de droite à gauche : le menu, les scripts, le bouclier. Les scripts se
+        // tiennent contre le menu parce qu'ils sont à vous.
         var cursor = bounds.width - Tokens.Space.l
-        for button in ([more, braces, puzzle] + pins as [NSView]) where !button.isHidden {
+        for button in [more, braces, shield] as [NSView] where !button.isHidden {
             button.frame = NSRect(x: cursor - size, y: y, width: size, height: size)
             cursor -= size + Tokens.Space.s
         }
 
-        // **Le badge du zoom vient après les extensions épinglées**, du côté où l'on
+        // **Le badge du zoom vient après les boutons d'outils**, du côté où l'on
         // regarde déjà quand on cherche l'état de la page.
         //
         // Il a fait un détour par l'intérieur du champ, contre le cadenas, au motif que le
@@ -419,52 +401,8 @@ final class ContentTopBar: ThemedView {
         needsLayout = true
     }
 
-    /// Le bouton des extensions n'existe que s'il y a quelque chose derrière.
-    ///
-    /// Une extension épinglée a déjà sa porte dans la barre : quand elles le sont toutes,
-    /// ce bouton n'ouvrirait plus qu'un menu à une entrée, et il s'efface. « Extensions »
-    /// reste dans le menu Présentation et dans le sommaire des pages internes.
-    func setExtensions(installed: Bool) {
-        puzzle.isHidden = !installed
-        needsLayout = true
-    }
-
-    /// Les extensions posées dans la barre.
-    ///
-    /// **L'icône vient de l'extension, pas de nous.** Elle est dessinée à sa taille et non
-    /// teintée : un logo repeint en gris ne se reconnaît plus, et c'est exactement ce qu'on
-    /// épingle une icône pour retrouver.
-    func setPinned(_ items: [Pin]) {
-        // **On refait les boutons quand la liste change, pas quand une icône change.**
-        //
-        // Elle était reconstruite à chaque événement de WebKit : autant de vues détruites
-        // et recréées pendant qu'une page charge, pour les mêmes deux icônes. Ici le
-        // contenu se met à jour et la hiérarchie ne bouge pas.
-        if pins.map(\.id) == items.map(\.id) {
-            for (button, item) in zip(pins, items) { button.apply(item) }
-            return
-        }
-
-        pins.forEach { $0.removeFromSuperview() }
-        pins = items.map { item in
-            let button = PinButton(pin: item)
-            button.onClick = { [weak self] in
-                guard let self else { return }
-                delegate?.topBar(self, didTriggerExtension: item.id)
-            }
-            button.onContextMenu = { [weak self] view in
-                guard let self else { return }
-                NativeMenu.popUp(delegate?.topBar(self, menuForExtension: item.id) ?? [],
-                                 below: view)
-            }
-            addSubview(button)
-            return button
-        }
-        needsLayout = true
-    }
-
-    /// Le bouton des scripts n'existe que s'il y a des scripts : sans aucun installé, il
-    /// n'ouvrirait qu'une liste vide.
+    /// Le bouton des scripts n'existe que s'il y en a d'installés, et se pâlit quand
+    /// aucun ne vise la page qu'on regarde.
     func setScripts(installed: Bool, activeHere: Bool) {
         braces.isHidden = !installed
         braces.alphaValue = activeHere ? 1 : 0.5
@@ -473,17 +411,17 @@ final class ContentTopBar: ThemedView {
         needsLayout = true
     }
 
-    /// Pour ancrer le menu sous le bouton.
+    /// Le bouclier se montre dès qu'une liste bloque quelque chose.
+    func setBlocking(active: Bool) {
+        guard shield.isHidden == active else { return }
+        shield.isHidden = !active
+        needsLayout = true
+    }
+
     var menuButton: NSView { more }
-    var extensionsButton: NSView { puzzle }
+    var blockingButton: NSView { shield }
     var scriptsButton: NSView { braces }
 
-    /// Où ancrer la bulle d'une extension : sur son icône si elle est épinglée, sur le
-    /// bouton des extensions sinon. Une bulle qui s'ouvre ailleurs que sous le bouton
-    /// cliqué fait douter d'avoir cliqué au bon endroit.
-    func anchor(forExtension id: String) -> NSView {
-        pins.first { $0.id == id && !$0.isHidden } ?? (puzzle.isHidden ? more : puzzle)
-    }
 
     // Le survol n'est suivi que sur la zone de l'adresse, et elle bouge avec le texte :
     // la zone se refait donc à chaque mise en page plutôt qu'une fois pour toutes.
@@ -517,7 +455,7 @@ final class ContentTopBar: ThemedView {
         case back:    delegate?.topBar(self, didTrigger: .back)
         case forward: delegate?.topBar(self, didTrigger: .forward)
         case more:    delegate?.topBar(self, didTrigger: .menu)
-        case puzzle:  delegate?.topBar(self, didTrigger: .extensions)
+        case shield:  delegate?.topBar(self, didTrigger: .blocking)
         case braces:  delegate?.topBar(self, didTrigger: .scripts)
         case zoomBadge: delegate?.topBar(self, didTrigger: .zoomReset)
         case reader:  delegate?.topBar(self, didTrigger: .reader)

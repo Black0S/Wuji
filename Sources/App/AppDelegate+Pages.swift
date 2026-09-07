@@ -224,15 +224,10 @@ extension AppDelegate {
         return tab.webView
     }
 
-    /// L'onglet créé est rendu : les extensions en ont besoin — `browser.tabs.create`
-    /// répond avec l'onglet, pas avec un accusé de réception.
     @discardableResult
     func openInNewTab(_ url: URL, activate: Bool) -> Tab {
         let staying = currentSpace.current
-        // Une page d'extension naît avec la configuration de son contexte ; tout le reste
-        // avec la nôtre. Le choix se fait ici parce qu'il se fait à la création de la vue
-        // et jamais après.
-        let tab = makeTab(configuration: extensionConfiguration(for: url))
+        let tab = makeTab()
         currentSpace.append(tab)
         tab.webView.load(URLRequest(url: url))
         // L'onglet naît juste après celui d'où l'on vient : au bout de la liste, il
@@ -253,9 +248,6 @@ extension AppDelegate {
         guard let tab = currentSpace.tab(with: tabID) else { return }
         remember(tab, in: currentSpace)
         currentSpace.remove(tab)
-        // Ce que l'onglet faisait s'arrête avec lui : sans ce démontage, le son d'une
-        // vidéo continuait après la fermeture.
-        extensionsDidClose(tab)
         // Il n'est plus l'onglet actif de personne : le garder ferait annoncer un
         // « on quitte celui-ci » qui désigne un onglet que WebKit vient d'oublier.
         if activeTab === tab { activeTab = nil }

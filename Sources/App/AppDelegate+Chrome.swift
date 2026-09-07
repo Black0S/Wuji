@@ -20,7 +20,8 @@ extension AppDelegate {
         case .back:    currentTab?.webView.goBack()
         case .forward: currentTab?.webView.goForward()
         case .menu:       NativeMenu.popUp(mainMenu(), below: bar.menuButton)
-        case .extensions: NativeMenu.popUp(extensionsMenu(), below: bar.extensionsButton)
+        case .blocking:
+            showBlocking(nil)
         case .scripts:    NativeMenu.popUp(scriptsMenu(), below: bar.scriptsButton)
         case .security:   NativeMenu.popUp(securityMenu(), below: bar.securityButton)
         case .zoomReset:  zoomReset(nil)
@@ -28,15 +29,7 @@ extension AppDelegate {
         }
     }
 
-    /// Un clic sur une icône épinglée : exactement ce que ferait la ligne du menu.
-    func topBar(_ bar: ContentTopBar, didTriggerExtension id: String) {
-        guard let context = extensions.contexts[id] else { return }
-        perform(context)
-    }
 
-    func topBar(_ bar: ContentTopBar, menuForExtension id: String) -> [ActionItem] {
-        pinnedMenu(for: id)
-    }
 
     /// Ce que le cadenas promet, en clair.
     ///

@@ -15,11 +15,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     let downloads = DownloadStore()
     let favorites = FavoritesStore()
     let settings = Settings()
+
+    /// Le blocage de contenu : ce qui est compilé, et ce qui l'applique.
+    lazy var blocking = ContentBlocker(settings: settings)
+    /// Le catalogue lu au dernier passage sur la page. Il n'est pas gardé sur le disque :
+    /// deux cents kilo-octets relus à l'ouverture valent mieux qu'un catalogue d'hier
+    /// qu'on ne saurait pas distinguer d'un catalogue d'aujourd'hui.
+    var ruleCatalog: [RuleList] = []
+    var catalogUnreachable = false
     let userScripts = UserScriptStore()
     let permissions = Permissions()
     let location = LocationAccess()
-    /// Les extensions web : ce qui est installé sur la machine, et ce qui tourne ici.
-    lazy var extensions = ExtensionHost(settings: settings, delegate: self)
 
     /// Les onglets appartiennent à un espace, jamais à l'application. Tout ce qui suit
     /// passe donc par `currentSpace` — c'est ce qui évite d'avoir deux notions
@@ -98,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // configuration déjà utilisée ne l'accepte plus.
         let pages = InternalPageHandler(history: history, downloads: downloads,
                                         favorites: favorites, icons: favicons)
-        pages.extensions = { [unowned self] in ExtensionsPage.html(entries: extensions.listing) }
+        pages.blocking = { [unowned self] in BlockingPage.html(state: blockingState) }
         pages.scripts = { [unowned self] in
             ScriptsPage.html(scripts: userScripts.scripts,
                              isEnabled: settings.userScriptsEnabled)
@@ -112,22 +118,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
                                      state: settingsState)
         }
         config.setURLSchemeHandler(pages, forURLScheme: InternalPageHandler.scheme)
+        // Les règles de blocage se posent à la création de la vue : chaque onglet a son
+        // propre contrôleur de contenu, donc chacun doit les recevoir.
+        blocking.apply(to: config)
         config.userContentController.add(self, name: "wujiHistory")
         config.userContentController.add(self, name: "wujiDownloads")
         config.userContentController.add(self, name: "wujiFavorites")
-        config.userContentController.add(self, name: "wujiExtensions")
         config.userContentController.add(self, name: "wujiScripts")
         config.userContentController.add(self, name: "wujiSettings")
         config.userContentController.add(self, name: MediaWatcher.handler)
         config.userContentController.add(self, name: "wujiError")
         config.userContentController.add(self, name: PageContextMenu.handler)
+        config.userContentController.add(self, name: "wujiBlocking")
         config.userContentController.add(self, name: RouteWatcher.handler)
         config.userContentController.add(self, name: PasswordForm.handler)
         config.userContentController.addUserScript(PageContextMenu.script)
-        // Les extensions vivent au niveau du contrôleur, pas de la page : une vue web qui
-        // ne le porte pas est invisible pour elles — leurs scripts de contenu ne s'y
-        // posent pas et l'onglet n'existe pas dans `browser.tabs`.
-        config.webExtensionController = extensions.controller
         return config
     }
 
@@ -235,18 +240,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         settings.onChange = { [weak self] in self?.applySettings() }
         applySettings()
 
-        // Les extensions sont chargées avant la première vue web : une extension arrivée
-        // après coup ne voit pas les onglets déjà ouverts.
-        extensions.onChange = { [weak self] in
-            self?.syncToolbarButtons()
-            self?.refreshExtensionPages()
-        }
-        extensions.start()
-        // La fenêtre existe avant tout onglet : les extensions doivent la connaître avant
-        // qu'un onglet vienne s'y déclarer, sinon il s'annonce dans une fenêtre qui n'est
-        // pas encore là.
-        extensions.controller.didOpenWindow(window)
-        extensions.controller.didFocusWindow(window)
 
         // Après le reste : une vérification de version n'a aucune raison de retarder
         // l'affichage de la fenêtre.
@@ -258,6 +251,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         downloads.onChange = { [weak self] in self?.downloads.persist() }
 
         history.purge(olderThan: settings.historyRetention)
+        // Ce qui était en service le reste, **sans rien retélécharger** : les règles
+        // compilées vivent dans le magasin de WebKit et lui survivent au redémarrage.
+        blocking.onChange = { [weak self] in
+            self?.syncChrome()
+            self?.refreshBlockingPages()
+        }
+        blocking.restore()
         restoreSession()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
@@ -347,13 +347,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     var lastProgressPush = Date.distantPast
     /// Ce qu'il faut faire si la feuille d'autorisation se ferme sans reponse.
     var pendingPermission: (() -> Void)?
-    /// L'onglet que les extensions croient actif.
+    /// L'onglet actif, tel qu'on l'a annoncé pour la dernière fois.
     ///
     /// `browser.tabs.onActivated` porte celui qu'on quitte autant que celui qu'on prend :
     /// `currentSpace.current` a déjà changé quand on veut le dire, d'où cette copie.
     weak var activeTab: Tab?
-    /// L'état visible des extensions épinglées lors du dernier passage — voir `pinSignature`.
-    var lastPinSignature = ""
     /// Les onglets affichés en mode lecture. Par identité d'onglet et non par adresse :
     /// deux onglets sur le même article peuvent être lus différemment.
     var readingTabs: Set<UUID> = []

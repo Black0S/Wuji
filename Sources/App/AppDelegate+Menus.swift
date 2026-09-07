@@ -104,7 +104,7 @@ extension AppDelegate {
                                        keyEquivalent: "B")
         favoritesItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(favoritesItem)
-        viewMenu.addItem(withTitle: "Extensions", action: #selector(showExtensions(_:)), keyEquivalent: "")
+        viewMenu.addItem(withTitle: "Blocage", action: #selector(showBlocking(_:)), keyEquivalent: "")
         viewMenu.addItem(withTitle: "Scripts", action: #selector(showScripts(_:)), keyEquivalent: "")
         viewMenu.addItem(withTitle: "Historique", action: #selector(showHistory(_:)), keyEquivalent: "y")
         viewMenu.addItem(withTitle: "Téléchargements", action: #selector(showDownloads(_:)), keyEquivalent: "j")

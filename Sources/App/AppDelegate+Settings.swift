@@ -17,11 +17,6 @@ extension AppDelegate {
     /// toucher aux autres. Rien n'est injecté ici qui ne serve à l'application ou à
     /// l'utilisateur.
     func installPageScripts(for url: URL?, in webView: WKWebView) {
-        // **Une page d'extension n'est pas une page du web, et rien de nous n'y entre.**
-        // Son contrôleur de contenu est celui que le contexte a fabriqué ; y poser nos
-        // scripts, et surtout commencer par tout y effacer, reviendrait à démonter
-        // l'extension dans sa propre page.
-        guard extensionConfiguration(for: url) == nil else { return }
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
         controller.addUserScript(PageContextMenu.script)
@@ -382,22 +377,10 @@ extension AppDelegate {
         }
     }
 
-    /// Ce que la barre du haut doit montrer à droite : les extensions et les scripts.
+    /// Ce que la barre du haut doit montrer à droite : le blocage et les scripts.
     func syncToolbarButtons() {
         guard layout != nil else { return }
-        // **Lire une icône d'extension coûte un décodage d'image.** Cette méthode est
-        // appelée à chaque événement de WebKit ; recalculer les icônes à chacun revenait à
-        // redécoder deux images plusieurs fois par seconde pendant qu'une page charge. La
-        // signature — identifiants, étiquettes, pastilles, adresse — dit quand il faut
-        // vraiment y retourner.
-        let signature = pinSignature
-        if signature != lastPinSignature {
-            lastPinSignature = signature
-            layout.topBar.setPinned(pins)
-        }
-        // Le bouton s'efface quand tout est épinglé : il n'ouvrirait plus qu'un menu à une
-        // seule entrée, et « Extensions » reste dans le menu Présentation.
-        layout.topBar.setExtensions(installed: !extensions.unpinned.isEmpty)
+        layout.topBar.setBlocking(active: blocking.isActive)
         layout.topBar.setScripts(
             installed: settings.userScriptsEnabled && !userScripts.scripts.isEmpty,
             activeHere: settings.userScriptsEnabled && !userScripts.matching(currentTab?.url).isEmpty)

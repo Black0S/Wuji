@@ -50,7 +50,7 @@ enum NativeMenu {
     /// À un point d'une vue — pour tout ce qui s'ouvre au clic droit.
     ///
     /// `appending` reçoit des `NSMenuItem` déjà faits. Une seule chose en produit : les
-    /// extensions, dont WebKit fabrique lui-même les entrées de menu contextuel. Elles ne
+    /// entrées que WebKit fabrique lui-même pour le menu contextuel. Elles ne
     /// passent pas par `ActionItem` parce qu'elles n'ont ni symbole ni fermeture à nous
     /// donner — elles portent leur propre cible, et c'est très bien ainsi.
     static func popUp(_ items: [ActionItem], appending extra: [NSMenuItem] = [],

@@ -7,7 +7,7 @@ import WebKit
 /// jamais parler de position : un index change dès qu'on déplace ou ferme
 /// quelque chose ailleurs, et on croit alors désigner un onglet alors qu'on désigne un rang.
 ///
-/// `NSObject` pour une seule raison : `WKWebExtensionTab` est un protocole Objective-C, et
+/// `NSObject` parce qu'AppKit et WebKit attendent des objets Objective-C, et
 /// c'est par lui qu'une extension voit cet onglet. Rien d'autre ici n'en dépend — l'égalité
 /// reste l'identité, comparée par `===` partout dans l'application.
 @MainActor

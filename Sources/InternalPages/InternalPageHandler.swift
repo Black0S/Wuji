@@ -20,10 +20,10 @@ final class InternalPageHandler: NSObject, WKURLSchemeHandler {
     private unowned let downloads: DownloadStore
     private unowned let favorites: FavoritesStore
     private unowned let icons: FaviconStore
-    /// Fourni par l'application. La liste des extensions mêle ce qu'on a trouvé sur la
+    /// Fourni par l'application. Le catalogue de blocage mêle ce que le dépôt publie sur
     /// machine et ce qui tourne réellement : c'est l'application qui sait les assembler,
     /// pas ce gestionnaire.
-    var extensions: (() -> String)?
+    var blocking: (() -> String)?
     var scripts: (() -> String)?
     var settings: ((String) -> String)?
 
@@ -59,7 +59,7 @@ final class InternalPageHandler: NSObject, WKURLSchemeHandler {
         case "history":   return HistoryPage.html(entries: history.recent(), icons: icons)
         case "downloads": return DownloadsPage.html(items: downloads.items)
         case "favorites": return FavoritesPage.html(items: favorites.items, icons: icons)
-        case "extensions": return extensions?() ?? NewTabPage.html
+        case "blocking": return blocking?() ?? NewTabPage.html
         case "scripts":   return scripts?() ?? NewTabPage.html
         case "settings":  return settings?(url.path) ?? NewTabPage.html
         default:          return NewTabPage.html

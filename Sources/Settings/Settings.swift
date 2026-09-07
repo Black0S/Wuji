@@ -149,34 +149,48 @@ final class Settings {
         didSet { store.set(passwordsEnabled, forKey: Key.passwords); changed() }
     }
 
-    // MARK: - Extensions
+    // MARK: - Blocage
 
-    /// Les extensions activées, par identifiant de paquet.
+    /// Les listes de blocage en service, par nom de fichier d'origine.
     ///
-    /// **On enregistre ce qui est allumé, à l'inverse des listes de blocage d'autrefois.**
-    /// Une extension trouvée sur la machine n'a rien demandé à personne : elle arrive donc
-    /// éteinte, et son activation est une décision qu'on a prise en lisant ce qu'elle
-    /// réclame. Le contraire aurait fait tourner du code tiers sur simple installation
-    /// d'une application dans `/Applications`.
-    var enabledExtensions: [String] {
-        didSet { store.set(enabledExtensions, forKey: Key.enabledExtensions); changed() }
+    /// **Wuji n'en livre aucune.** Ce tableau est vide tant qu'on n'a rien choisi, et c'est
+    /// l'état par défaut : un navigateur qui arriverait avec ses listes aurait choisi pour
+    /// vous ce qu'il faut bloquer, et personne ne saurait dire quoi.
+    var enabledRuleLists: [String] {
+        didSet { store.set(enabledRuleLists, forKey: Key.enabledRuleLists); changed() }
     }
 
-    /// Les extensions posées dans la barre du haut, **dans l'ordre où on les y a mises**.
-    ///
-    /// Un tableau et non un ensemble : la barre a un ordre, on le voit, et le rendre
-    /// arbitraire ferait danser les icônes d'un lancement à l'autre.
-    var pinnedExtensions: [String] {
-        didSet { store.set(pinnedExtensions, forKey: Key.pinnedExtensions); changed() }
+    /// La version installée de chaque liste. C'est elle qui dit s'il faut refaire le
+    /// travail de compilation, et non la présence du fichier — les règles compilées vivent
+    /// dans le magasin de WebKit, pas chez nous.
+    var ruleListVersions: [String: String] {
+        didSet { store.set(ruleListVersions, forKey: Key.ruleListVersions); changed() }
     }
 
-    /// Ce que l'on a **désigné** : une application, un `.appex`, un dossier décompressé.
-    ///
-    /// Wuji ne parcourt plus `/Applications`. Il y proposait tout ce qu'il trouvait, ce qui
-    /// était commode et dressait, sans qu'on l'ait demandé, la liste de ce qui est installé
-    /// sur l'ordinateur. On désigne, il regarde ; il ne regarde rien d'autre.
-    var extensionSources: [String] {
-        didSet { store.set(extensionSources, forKey: Key.extensionSources); changed() }
+    /// Les fichiers compilés de chaque liste. Une grande liste en compte plusieurs : WebKit
+    /// refuse au-delà de cent cinquante mille règles, et la conversion découpe.
+    var ruleListFiles: [String: [String]] {
+        didSet { store.set(ruleListFiles, forKey: Key.ruleListFiles); changed() }
+    }
+
+    /// Combien de règles chaque liste apporte — pour le dire, rien d'autre.
+    var ruleListRules: [String: Int] {
+        didSet { store.set(ruleListRules, forKey: Key.ruleListRules); changed() }
+    }
+
+    /// Retient tout ce qu'il faut pour remettre une liste en service au lancement suivant.
+    func rememberRuleList(_ id: String, version: String, files: [String], rules: Int) {
+        if !enabledRuleLists.contains(id) { enabledRuleLists.append(id) }
+        ruleListVersions[id] = version
+        ruleListFiles[id] = files
+        ruleListRules[id] = rules
+    }
+
+    func forgetRuleList(_ id: String) {
+        enabledRuleLists.removeAll { $0 == id }
+        ruleListVersions[id] = nil
+        ruleListFiles[id] = nil
+        ruleListRules[id] = nil
     }
 
     var onChange: (() -> Void)?
@@ -195,9 +209,10 @@ final class Settings {
         static let userScripts = "userScriptsEnabled"
         static let checkUpdates = "checkUpdatesAtLaunch"
         static let passwords = "passwordsEnabled"
-        static let enabledExtensions = "enabledExtensions"
-        static let pinnedExtensions = "pinnedExtensions"
-        static let extensionSources = "extensionSources"
+        static let enabledRuleLists = "enabledRuleLists"
+        static let ruleListVersions = "ruleListVersions"
+        static let ruleListFiles = "ruleListFiles"
+        static let ruleListRules = "ruleListRules"
         /// L'ancienne clé, relue une fois pour ne rien perdre — voir l'initialisation.
         static let extensionFolders = "extensionFolders"
     }
@@ -214,14 +229,10 @@ final class Settings {
         userScriptsEnabled = store.object(forKey: Key.userScripts) as? Bool ?? true
         checkUpdatesAtLaunch = store.bool(forKey: Key.checkUpdates)
         passwordsEnabled = store.object(forKey: Key.passwords) as? Bool ?? true
-        enabledExtensions = store.stringArray(forKey: Key.enabledExtensions) ?? []
-        pinnedExtensions = store.stringArray(forKey: Key.pinnedExtensions) ?? []
-        // Les dossiers ouverts à la main du temps où la liste venait d'un balayage : ils
-        // sont des sources comme les autres, et les oublier ferait disparaître ce que
-        // quelqu'un avait déjà ajouté.
-        extensionSources = store.stringArray(forKey: Key.extensionSources)
-            ?? store.stringArray(forKey: Key.extensionFolders)
-            ?? []
+        enabledRuleLists = store.stringArray(forKey: Key.enabledRuleLists) ?? []
+        ruleListVersions = store.dictionary(forKey: Key.ruleListVersions) as? [String: String] ?? [:]
+        ruleListFiles = store.dictionary(forKey: Key.ruleListFiles) as? [String: [String]] ?? [:]
+        ruleListRules = store.dictionary(forKey: Key.ruleListRules) as? [String: Int] ?? [:]
     }
 
     private func changed() { onChange?() }

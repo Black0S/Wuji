@@ -16,16 +16,9 @@ extension AppDelegate {
     /// imbriqués, où les coordonnées de la page ne sont plus celles de la fenêtre.
     func showPageMenu(_ target: PageContextMenu.Target) {
         let items = contextItems(for: target)
-        // Ce que les extensions ajoutent au clic droit, sous un séparateur : c'est leur
-        // place dans tous les navigateurs, et elle dit d'où vient l'entrée sans qu'on ait
-        // à l'étiqueter.
-        let fromExtensions = currentTab.map { tab in
-            extensions.loaded.flatMap { $0.menuItems(for: tab) }
-        } ?? []
-        guard !items.isEmpty || !fromExtensions.isEmpty, let window, let layout else { return }
+        guard !items.isEmpty, let window, let layout else { return }
         let inWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
-        NativeMenu.popUp(items, appending: fromExtensions,
-                         at: layout.convert(inWindow, from: nil), in: layout)
+        NativeMenu.popUp(items, at: layout.convert(inWindow, from: nil), in: layout)
     }
 
     /// Le menu parle de ce qui est sous le curseur, et de rien d'autre. Sur un lien il
@@ -146,7 +139,7 @@ extension AppDelegate {
 
     /// Ouvre une page de l'application — et **il n'y en a qu'une par espace**.
     ///
-    /// Pas une par page : **une, pour toutes.** Les favoris, l'historique, les extensions,
+    /// Pas une par page : **une, pour toutes.** Les favoris, l'historique, le blocage,
     /// les réglages ne sont pas quatre destinations, ce sont les sections d'un même endroit
     /// — elles partagent le sommaire, et y cliquer « Historique » depuis les favoris navigue
     /// sur place. Le raccourci fait ce que fait le lien, sans quoi les deux chemins d'une
@@ -239,10 +232,10 @@ extension AppDelegate {
                 // cet hôte et cette session, et rien n'en est écrit sur le disque.
                 case "trust":
                     trustHost(of: url)
-                // Une règle de contenu vient forcément d'une extension : on mène là où
-                // elle se lève, plutôt que de recharger une adresse qui échouera encore.
-                case "extensions":
-                    showExtensions(nil)
+                // Une règle de contenu vient d'une liste de blocage : on mène là où elle
+                // se lève, plutôt que de recharger une adresse qui échouera encore.
+                case "blocking":
+                    showBlocking(nil)
                     return
                 default:
                     break
@@ -264,12 +257,12 @@ extension AppDelegate {
                 handleSettingsAction(action, payload: payload)
                 return
             }
-            if message.name == "wujiScripts" {
-                handleScriptAction(action, payload: payload)
+            if message.name == "wujiBlocking" {
+                handleBlockingAction(action, id: payload["id"] as? String)
                 return
             }
-            if message.name == "wujiExtensions" {
-                handleExtensionAction(action, payload: payload)
+            if message.name == "wujiScripts" {
+                handleScriptAction(action, payload: payload)
                 return
             }
             switch action {

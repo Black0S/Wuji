@@ -38,7 +38,7 @@ extension AppDelegate {
     }
 
     func newTab(url: URL?) {
-        let tab = makeTab(configuration: extensionConfiguration(for: url))
+        let tab = makeTab(configuration: nil)
         currentSpace.append(tab)
         activateCurrentTab()
         tab.webView.load(URLRequest(url: url ?? Self.blankPage))
@@ -85,8 +85,6 @@ extension AppDelegate {
             tab.webView.observe(\.canGoForward, options: [.new], changeHandler: sync)
         ]
 
-        // Ce qui bouge dans la page, dit aux extensions telle que chacune l'attend :
-        // `onUpdated` porte ce qui a changé, et pas « quelque chose a changé ».
         tab.observations += [
             // L'adresse seulement : rejouer ici les scripts de l'utilisateur ferait deux
             // mécanismes pour un seul propos. C'est `RouteWatcher` qui s'en charge, et lui
@@ -94,24 +92,20 @@ extension AppDelegate {
             tab.webView.observe(\.url, options: [.new]) { [weak self, weak tab] _, _ in
                 MainActor.assumeIsolated {
                     guard let tab else { return }
-                    self?.extensionsDidChange(.URL, in: tab)
                 }
             },
             tab.webView.observe(\.title, options: [.new]) { [weak self, weak tab] _, _ in
                 MainActor.assumeIsolated {
                     guard let tab else { return }
-                    self?.extensionsDidChange(.title, in: tab)
                 }
             },
             tab.webView.observe(\.isLoading, options: [.new]) { [weak self, weak tab] _, _ in
                 MainActor.assumeIsolated {
                     guard let tab else { return }
-                    self?.extensionsDidChange(.loading, in: tab)
                 }
             }
         ]
 
-        extensionsDidOpen(tab)
         return tab
     }
 
@@ -183,7 +177,6 @@ extension AppDelegate {
         let previous = activeTab
         activeTab = tab
         currentSpace.current = tab
-        extensionsDidActivate(tab, previous: previous)
         // C'est ici que le chargement différé se dénoue : un onglet restauré ne va
         // chercher sa page qu'au moment où on le regarde — et c'est ici, pas avant, qu'il
         // reçoit ce qui touche à sa page.
@@ -205,7 +198,7 @@ extension AppDelegate {
                            insecure: tab.isInsecure,
                            canGoBack: tab.webView.canGoBack,
                            canGoForward: tab.webView.canGoForward,
-                           extensionName: extensionName(for: tab.url))
+                           extensionName: nil)
         // **L'écart se mesure au réglage par défaut, pas à cent pour cent.**
         //
         // Le badge disparaissait à 100 %. Quelqu'un dont le zoom général vaut 80 % voyait

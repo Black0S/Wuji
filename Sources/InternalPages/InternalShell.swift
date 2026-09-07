@@ -29,7 +29,7 @@ enum InternalShell {
             Item(title: "Téléchargements", address: "wuji://downloads", symbol: "arrow.down")
         ]),
         ("Modules", [
-            Item(title: "Extensions", address: "wuji://extensions", symbol: "puzzlepiece"),
+            Item(title: "Blocage", address: "wuji://blocking", symbol: "shield.lefthalf.filled"),
             Item(title: "Scripts", address: "wuji://scripts", symbol: "curlybraces")
         ]),
         ("Réglages", [

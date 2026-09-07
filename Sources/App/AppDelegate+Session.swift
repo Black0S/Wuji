@@ -71,17 +71,8 @@ extension AppDelegate {
             currentSpace: currentSpaceIndex)
     }
 
-    /// Cet onglet mérite-t-il d'être réécrit demain ?
-    ///
-    /// Un onglet vierge ne désigne rien. **Et une page d'extension ne se retrouve pas :**
-    /// son adresse porte l'identifiant que WebKit a tiré au sort pour cette installation,
-    /// il change quand l'extension est rechargée, et il ne veut plus rien dire du jour où
-    /// l'extension est retirée. Enregistrer cette adresse, c'est promettre un onglet qui
-    /// rouvrira sur une page blanche sous un nom illisible — mesuré, et c'est exactement
-    /// ce qu'on voyait. Le tableau de bord d'une extension se rouvre depuis l'extension.
-    func isStorable(_ tab: Tab) -> Bool {
-        !isBlank(tab) && !isExtensionPage(tab.url)
-    }
+    /// Un onglet vierge ne s'enregistre pas : il rouvrirait sur rien.
+    func isStorable(_ tab: Tab) -> Bool { !isBlank(tab) }
 
     func store(_ tab: Tab) -> StoredTab {
         StoredTab(url: tab.url?.absoluteString, title: tab.title)

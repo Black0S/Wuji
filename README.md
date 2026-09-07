@@ -19,9 +19,9 @@ Sources/
 ├── Window/            la fenêtre et sa géométrie
 ├── Chrome/            palette, menus, bulles, panneau des espaces
 │   ├── Sidebar/       la colonne : son modèle, sa disposition, ses rangées
-│   └── TopBar/        la barre du haut, et l'icône d'une extension épinglée
+│   └── TopBar/        la barre du haut : adresse, cadenas, boutons d'outils
 ├── WebContent/        hôte du WKWebView, certificat, favicons, menu de page
-├── Extensions/        ce qui est installé sur la machine, et ce qui tourne ici
+├── Blocking/          le catalogue de listes, et ce que WebKit en compile
 ├── InternalPages/     tout ce qui s'ouvre en wuji://
 │   └── Settings/      le socle, les sections, les contrôles communs
 ├── PublicSuffix/      la liste des suffixes, recopiée : où s'arrête « ce site »
@@ -130,148 +130,56 @@ chez soi et évidents chez les autres. `--dry-run` liste sans rien toucher.
 
 ---
 
-## Les extensions
+## Le blocage
 
-**Wuji ne bloque plus rien de lui-même.** Il portait 260 règles écrites à la main dans le
-format de `WKContentRuleList` ; elles sont sorties du dépôt. Une liste tenue à la main ne
-suit pas le rythme des domaines jetables, et un navigateur qui promet une protection dont
-il ne peut pas tenir le rythme promet mal. Ce travail-là est fait par des gens dont c'est
-le métier, et leur travail s'installe : `Sources/Extensions` va le chercher.
+**Wuji n'embarque aucune liste.** Ni dans son paquet, ni au premier lancement, ni en tâche
+de fond : tant qu'on n'a rien demandé, il ne bloque rien et n'a contacté personne. C'est la
+différence entre un navigateur qui vous laisse choisir et un navigateur qui a choisi pour
+vous — et la seule qui rende le choix vérifiable, puisqu'une liste absente ne peut pas se
+tromper en votre nom.
 
-### Ce qui est déjà sur la machine
+`wuji://blocking` affiche ce qui **existe**, pas ce qui est en place : cent soixante et une
+listes, avec pour chacune son nombre de règles, sa taille, sa version et la part de sa
+syntaxe que la conversion a su rendre. Cocher en installe une ; décocher la retire du
+service **et du disque**.
 
-Une extension pour Safari achetée sur l'App Store n'est **pas** un fichier qu'on installe :
-c'est une application ordinaire, posée dans `/Applications`, qui porte l'extension dans son
-paquet — un `.appex` sous `Contents/PlugIns`, avec le `manifest.json` de l'extension web
-dans ses ressources. C'est ce fichier qu'on cherche, et rien d'autre : sa présence est ce
-qui distingue une extension web d'une extension Safari **native**, du code compilé que
-WebKit ne sait pas charger hors de Safari.
+### C'est WebKit qui filtre
 
-Le balayage est volontairement peu profond — `Contents/PlugIns` de chaque application, et
-on s'arrête là. macOS n'enregistre une extension d'application qu'à cet endroit précis :
-chercher plus loin ne trouverait que des copies inertes, au prix d'un parcours récursif de
-tout `/Applications` à chaque ouverture de la page.
+Les règles sont compilées par `WKContentRuleListStore` et appliquées **dans le processus
+réseau** : une requête bloquée ne part pas, et la page n'apprend jamais qu'elle a été
+empêchée. Un bloqueur écrit en JavaScript — ce que font les extensions — arrive après coup,
+coûte un script sur chaque document, et se laisse détecter. Celui-ci ne coûte rien à la page.
 
-### Une application qui se découpe en plusieurs extensions
+**Aucun moteur de blocage n'est écrit ici, et aucun analyseur de syntaxe de filtres.** Le
+dépôt [Wuji-Rules-List](https://github.com/Black0S/Wuji-Rules-List) récupère les listes
+d'origine — AdGuard, EasyList, uBlock, les listes par langue — et les convertit au format
+de bloqueur de contenu de WebKit. Wuji lit un catalogue et compile ce qu'on lui désigne.
 
-**C'est le cas ordinaire, pas l'exception.** Noir porte cinq `.appex` : l'extension web,
-une extension Safari **native**, un gestionnaire d'intentions, un widget, des App Intents.
-Safari en montre deux dans ses réglages — « Noir » et « Noir for Web Apps » —, avec leurs
-icônes pour seule différence lisible. Rien dans leur nom de fichier ne les sépare : c'est le
-contenu qui tranche, et il faut les deux signes : un `manifest.json` dans les ressources, et
-`NSExtensionPointIdentifier` valant `com.apple.Safari.web-extension`. Le manifeste seul
-laisserait passer un fichier embarqué comme simple ressource ; le point d'extension seul
-manquerait les extensions décompressées, qui n'ont pas d'`Info.plist` du tout.
+**La compilation se paie une fois.** Transformer douze mégaoctets de règles en table de
+décision prend quelques secondes ; WebKit garde le résultat sur le disque et
+`lookUpContentRuleList` le rend au lancement suivant sans rien recompiler. C'est pourquoi
+c'est la **version installée** qu'on retient, et non la présence du fichier : c'est elle qui
+dit s'il faut refaire le travail. C'est aussi ce qui explique la place occupée — décocher
+une liste la rend.
 
-**Le nom vient du manifeste, traductions comprises.** Un manifeste ne se nomme souvent que
-par une clé — `__MSG_extension_name__` —, résolue dans `_locales/<langue>/messages.json`.
-Wuji la résout lui-même : il affiche la ligne **avant** d'avoir rien chargé, et le repli sur
-le nom de l'application donnait ici une réponse fausse. Le paquet de Noir contient
-« Noir for Web Apps », qui s'affichait « Noir » — c'est-à-dire sous le nom de l'*autre*
-morceau de la même application. Le repli censé rendre la ligne lisible la rendait fausse.
+### Ce que la conversion ne sait pas rendre
 
-**Ce qui est refusé est nommé à l'ajout, et n'entre pas dans la liste.** Une extension
-Safari native est du code compilé, que WebKit ne charge que dans Safari ; Wuji ne peut pas la
-prendre, et le taire laisse croire à un ajout raté — on a désigné l'application qu'il fallait,
-et il ne s'est rien passé de lisible. L'ajout dit donc les deux moitiés : « Noir for Web
-Apps » ajoutée, « Noir » non prise, avec la raison. Mais la liste, elle, ne montre que ce qui
-s'active : une ligne qui ne peut ni s'activer, ni s'épingler, ni rien faire mettrait un
-interrupteur qui ne commande rien à côté de ceux qui commandent. Ce qui ne vise pas le
-navigateur — widgets, intentions — sort en silence dans les deux cas : le signaler ferait
-passer chaque application pour un échec partiel.
+Le pourcentage affiché est la part des règles d'origine convertie. En dessous de cent, une
+partie de la syntaxe n'a pas d'équivalent chez WebKit : le **masquage cosmétique** surtout,
+qui demande d'injecter du style dans la page — donc exactement ce qu'un bloqueur natif
+refuse de faire. Une liste à 65 % bloque ce qu'elle sait bloquer, et le dit.
 
-**Chaque ligne porte son icône**, lue dans le manifeste (`icons`, à défaut
-`action.default_icon`) et remise à la page interne en URI de données — une page `wuji://`
-n'a aucun accès au disque, et ne doit pas en recevoir un pour afficher une vignette. C'est
-la seule chose qui distingue deux extensions sorties du même paquet, exactement comme dans
-les réglages de Safari. Quand deux d'entre elles portent en plus le même nom, le nom de leur
-paquet les départage.
+### Les extensions Safari, elles, sont parties
 
-**Rien n'est copié.** L'extension est lue là où elle est, dans le paquet de son application
-hôte. Elle suit donc ses mises à jour de l'App Store, et la retirer se fait en jetant
-l'application — ce à quoi on s'attend. « Ajouter une extension… », sur `wuji://extensions`,
-ouvre le sélecteur de fichiers : on désigne l'application, ou le dossier d'une extension
-décompressée — celle qu'on écrit soi-même ou qu'on a tirée d'ailleurs.
+Wuji savait charger les extensions web installées pour Safari : `WKWebExtension`, les pages
+en `webkit-extension://`, les icônes épinglées dans la barre, la lecture des `.appex` dans
+le paquet d'une application. Environ mille sept cents lignes, retirées.
 
-### Dans la barre
-
-La punaise de `wuji://extensions` pose l'icône d'une extension chargée dans la barre du
-haut, avec l'étiquette et la pastille qu'elle donne **pour la page ouverte** : c'est ce
-qu'une extension a de plus à dire qu'un bouton fixe, et l'épingler sans elles reviendrait à
-poser une image morte. Un clic la déclenche, un clic droit la retire ou ouvre ses réglages.
-
-Le bouton en forme de puzzle ne liste alors plus que les extensions **non** épinglées :
-celles qui le sont ont déjà leur porte dans la barre, et deux chemins vers la même action
-font un élément à l'écran pour rien. Quand tout est épinglé, il disparaît — « Extensions »
-reste dans le menu Présentation et dans le sommaire des pages internes.
-
-### Ce qu'on accorde, et quand
-
-Une extension trouvée arrive **éteinte**. On enregistre ce qui est allumé, jamais ce qui
-est éteint : le contraire aurait fait tourner du code tiers sur simple installation d'une
-application dans `/Applications`.
-
-L'activer affiche d'abord ce que son manifeste demande — les hôtes qu'elle pourra lire et
-récrire, les pouvoirs qu'elle réclame — et c'est cette liste qu'on accorde. L'accord est
-donné une fois, sur ce qui était affiché. Poser la question à chaque appel d'API aurait
-noyé la décision sous des bulles au moment où l'on regarde une page, c'est-à-dire au pire
-moment pour lire une liste d'hôtes. Ce qu'une extension demande **en plus**, après coup,
-passe bien par une question, au même endroit que la caméra et la position.
-
-Un clic sur son bouton vaut accord pour la page ouverte — `activeTab`. Le refuser
-casserait la plupart des extensions sans rien protéger : sans ce geste, une extension qui
-n'a demandé aucun hôte n'obtient toujours rien.
-
-### Ce que l'extension voit de Wuji
-
-`browser.tabs` et `browser.windows` ne sont pas des objets de WebKit : ce sont **nos**
-onglets et **notre** fenêtre, vus à travers `WKWebExtensionTab` et `WKWebExtensionWindow`.
-Tout y est facultatif, et `Sources/Extensions/ExtensionSurfaces.swift` ne répond qu'à ce
-que Wuji sait vraiment — un onglet n'y est ni épinglé ni en mode lecture, et prétendre le
-contraire ferait échouer l'appel suivant.
-
-Le contrôleur doit être posé sur la configuration de **chaque** vue web, avant sa création.
-Une vue qui ne le porte pas est invisible pour les extensions : leurs scripts de contenu ne
-s'y posent pas, et l'onglet n'existe pas dans `browser.tabs`.
-
-Même piège que pour les délégués de WebKit, et même parade : une méthode que le moteur ne
-voit pas ne fait rien et ne le dit pas. `DelegateSelectorTests` demande à la classe ce que
-WebKit lui demandera — c'est vérifié, pas supposé.
-
-**Et il faut lui raconter ce qui se passe.** Les délégués répondent quand WebKit demande ;
-ils ne réveillent personne. `browser.tabs.onCreated`, `onActivated`, `onUpdated`,
-`onRemoved` sont des **événements** : sans les appels correspondants sur le contrôleur, ils
-ne se déclenchent jamais. La conséquence n'est pas théorique — un bloqueur met à jour sa
-pastille sur `onUpdated` et décide du mode de filtrage d'un site à `onActivated`. Sans ces
-signaux il tourne à moitié : il bloque, mais il ne sait pas où il est, et tout ce qui vise
-« la page courante » vise le vide. Chaque changement porte son drapeau plutôt qu'un
-« quelque chose a changé » : une extension qui reçoit tout à chaque frappe refait à chaque
-fois le travail de la page entière.
-
-### Les pages d'une extension
-
-Le tableau de bord d'uBlock Origin Lite, la page de réglages d'une autre : ce sont des
-pages en `webkit-extension://`, et elles s'ouvrent dans un onglet comme les nôtres.
-
-**Une telle page ne se charge pas dans n'importe quelle vue web.** Il lui faut la
-configuration que son contexte fabrique — c'est par là que passent ses API `browser.*` et
-l'origine sous laquelle WebKit accepte de la servir. Mesuré dans une vue ordinaire : la vue
-n'annonce même pas d'adresse, l'onglet se croit vierge, la colonne le retire. On voyait
-« rien ne s'est passé » là où le navigateur avait fait presque tout le chemin. La
-configuration se choisit donc à la création de la vue, jamais après, et l'adresse est ce qui
-la décide.
-
-La barre nomme ces pages par leur extension. Leur hôte est l'identifiant que WebKit leur a
-tiré au sort : trente-six caractères qui ne veulent rien dire et qui ressemblent à l'adresse
-d'un site inconnu, là où la barre n'a qu'une question à trancher — chez qui suis-je ?
-
-### Une conséquence qui reste
-
-Une extension peut poser ses propres règles de contenu, et WebKit signale alors une adresse
-arrêtée par le code `WebKitErrorDomain 104`. La page d'erreur le dit tel quel : la règle ne
-vient pas de Wuji, elle vient d'une extension installée, et c'est là qu'elle se lève.
-
----
+Ce n'était pas du travail perdu — il fonctionnait, et il a servi à découvrir ce que la
+plateforme permet vraiment. Mais un navigateur qui délègue son blocage à une extension
+délègue aussi ce qu'elle voit : une extension de blocage lit et récrit chaque page qu'elle
+vise, et c'est le prix qu'on paie sans le voir. Le blocage natif ne demande aucun pouvoir
+sur les pages, ne s'exécute pas dedans, et ne peut rien apprendre de ce qu'on lit.
 
 ## La performance
 
@@ -294,14 +202,13 @@ Trois autres, du même genre :
 | | |
 |---|---|
 | Barre du haut | Elle recomposait l'adresse enrichie et remesurait le texte à chaque signal. Elle ne le fait plus que si elle a quelque chose de neuf à dire. |
-| Icônes d'extensions | Les lire coûte un décodage d'image ; c'était fait à chaque signal. Une signature — identifiants, étiquettes, pastilles, adresse — dit quand il faut vraiment y retourner. |
 | Scripts utilisateur | Leur corps était relu **sur le disque** à chaque navigation, dans `decidePolicyFor` — c'est-à-dire sur le chemin critique de la requête. Il tient en mémoire. |
 
 **Au lancement.** Les observations posées avec `.initial` se déclenchaient sur une vue qui
 n'avait encore ni adresse ni titre : cinq synchronisations complètes du chrome par onglet
 créé, soixante-cinq pour une session de treize onglets, toutes sur du vide. Chaque chemin qui
 crée un onglet finit par `activateCurrentTab`, qui synchronise une fois. Le balayage de
-`/Applications` à la recherche des extensions — quelques centaines d'accès disque — est passé
+`/Applications` à la recherche d'extensions — quelques centaines d'accès disque — est passé
 hors du fil principal.
 
 Mesuré sur une session de treize onglets, en release : **fenêtre à l'écran en 500 ms**, dont
@@ -311,7 +218,7 @@ d'une page lourde, le rendu se faisant dans un autre processus.
 **Et l'empreinte mémoire, qui est la mesure honnête** — pas le résident, qui compte les
 fichiers mappés : **31 Mo** pour le navigateur, vingt-deux onglets restaurés compris. Avec
 uBlock Origin Lite et Noir activés, 341 Mo, avec un pic à 796 Mo au lancement. Ce n'est pas
-le navigateur qui coûte, ce sont les règles de filtrage que WebKit compile pour l'extension —
+le navigateur qui coûte, ce sont les règles de filtrage que WebKit compile —
 Safari paie la même chose. Le dire évite d'aller chercher la fuite là où elle n'est pas.
 
 Un profil pris pendant le chargement d'une page lourde ne montre plus aucun de nos symboles
@@ -427,8 +334,8 @@ visible, et un article de trois écrans s'enregistrait coupé au milieu d'un par
 
 **Le zoom se voit tant qu'il dure, et à un seul endroit.** Une bulle disait ce qui venait de
 changer, pas dans quel état on est : deux jours plus tard, un site qui se lit trop gros ne
-s'explique plus. Un badge dans la barre du haut porte l'écart — **après les extensions
-épinglées**, du côté où l'on regarde déjà quand on cherche l'état de la page — et disparaît
+s'explique plus. Un badge dans la barre du haut porte l'écart — **après les boutons
+d'outils**, du côté où l'on regarde déjà quand on cherche l'état de la page — et disparaît
 quand il n'y a plus d'écart. Le cliquer rend le zoom par défaut.
 
 **L'écart se mesure au réglage par défaut, pas à cent pour cent.** Le badge s'effaçait à
@@ -452,7 +359,7 @@ site qui se lit mal n'impose pas sa correction à tout le web. `⌘0` lui rend l
 défaut. Seuls les écarts sont conservés, et Réglages › Zoom par site les liste.
 
 **Il y a un onglet d'application par espace, et un seul.** Pas un par page : **un, pour
-toutes.** Les favoris, l'historique, les extensions, les réglages ne sont pas quatre
+toutes.** Les favoris, l'historique, le blocage, les réglages ne sont pas quatre
 destinations, ce sont les sections d'un même endroit — elles partagent le sommaire, et y
 cliquer « Historique » depuis les favoris navigue sur place. Le raccourci fait donc ce que
 fait le lien, sans quoi les deux chemins d'une même intention ne mènent pas au même endroit.
@@ -495,7 +402,7 @@ ailleurs. Les invites de renommage passent par une feuille `NSAlert` sur la fen�
 même raison.
 
 Ce qui n'a **pas** changé : les questions que Wuji pose — caméra, position, installer un
-script, autoriser une extension — restent dans la bulle en bas à droite. Elles attendent une
+script, enregistrer un mot de passe — restent dans la bulle en bas à droite. Elles attendent une
 réponse, elles arrivent là où l'on regarde déjà, et fermer sans répondre vaut « non ». Un
 menu qu'on ouvre et une question qu'on subit ne sont pas la même chose.
 
@@ -871,9 +778,10 @@ préférence : SwiftPM range les ressources d'une dépendance **à la racine** d
 et macOS refuse de signer une application qui porte quoi que ce soit à cet endroit. Le
 choix était donc entre la dépendance et la distribution.
 
-Les extensions ne sont pas non plus une dépendance : Wuji n'en embarque, n'en distribue et
-n'en télécharge aucune. Il lit ce qui est déjà installé sur la machine, sous la licence de
-chacune et là où son propriétaire l'a mise.
+Les listes de blocage n'en sont pas une non plus : **Wuji n'en embarque aucune**. Il lit un
+catalogue publié à part, et ne télécharge que ce qu'on lui désigne — chaque liste sous sa
+propre licence, chez qui la publie. Retirer le dépôt de listes ne casse pas le navigateur :
+il cesse de proposer, et ce qui est déjà compilé continue de bloquer.
 
 ---
 
