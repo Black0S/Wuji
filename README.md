@@ -335,6 +335,71 @@ jamais, parce qu'on oublie l'avoir fait. La pause se fait **en ne posant rien** 
 pas de « désactiver », une liste posée s'applique —, et les règles reviennent dès qu'on
 quitte le site : elles sont reposées à chaque navigation, pour l'adresse où l'on va.
 
+### Règles à injection
+
+**Ce que le format de WebKit ne sait pas porter.** Mesuré sur le compilateur du système :
+`WKContentRuleListStore` n'a que huit actions, une seule est cosmétique — `css-display-none`
+—, et elle ne pose que `display:none`. Pas de style arbitraire, pas de sélecteur qui lit le
+texte d'une page ou un style calculé, pas d'exécution de code ; un type d'action inventé est
+refusé, et le refus emporte la liste entière. `redirect` compile et n'a aucun effet, vérifié.
+
+Le dépôt consigne donc à part, sous forme structurée, ce que la conversion a dû écarter :
+quatre-vingt-quatre listes publient une annexe, **69 907 règles** en tout — 29 868 primitives
+nommées, 24 443 injections de style, 15 477 sélecteurs étendus. C'est les trois quarts de ce
+qui était perdu. Wuji les lit et les applique.
+
+**Et c'est un autre mécanisme, qui porte son interrupteur.** Les listes compilées filtrent
+dans le processus réseau et ne touchent jamais la page. Celles-ci demandent du style injecté,
+du DOM inspecté, du code exécuté : c'est ce qu'on reproche aux extensions, et il n'y a pas de
+raison de l'imposer sans le dire. La page « Blocage » porte le commutateur et le compte, et
+la ligne du bouclier dit combien de règles s'appliquent **ici** — pas combien dorment en
+mémoire.
+
+**Ce qui arrive dans une page est minuscule.** Deux cent trente mille sites sont couverts, à
+**deux règles par site en médiane**, six au neuvième décile, cent soixante et onze au pire.
+Rien n'est envoyé pour un site qu'aucune liste ne mentionne. Trois niveaux, du moins cher au
+plus cher, et c'est le premier qui sert presque toujours :
+
+| Ce que la page reçoit | Quand | Poids |
+|---|---|---|
+| une feuille de style | rien à évaluer — le cas courant | ~300 o, aucun code qui tourne |
+| un retrait compact | un sélecteur natif à sortir du DOM | ~1,4 ko |
+| l'évaluateur | un sélecteur que le CSS ne résout pas | ~13 ko |
+
+Un tiers des sélecteurs dits « procéduraux » n'emploie en fait aucune pseudo-classe étendue —
+la conversion les avait écartés pour le marqueur de la règle, pas pour leur contenu. Wuji les
+renvoie en feuille de style plutôt qu'au moteur : sans cela, une seule règle générique aurait
+imposé l'évaluateur et son observateur de mutations à **toutes** les pages.
+
+**Les primitives sont nommées, et écrites ici.** Une liste ne nous fait pas exécuter son
+code : elle demande un geste que nous avons écrit, qu'on peut relire, et qui ne fait que ce
+que son nom dit — `set-constant`, `set-cookie`, `abort-on-property-read`, `remove-attr`… Une
+trentaine de gestes couvre 87 % des occurrences ; un nom inconnu n'exécute rien. Le
+JavaScript libre des listes — 540 occurrences — n'est pas consigné par le dépôt et ne serait
+pas exécuté s'il l'était. Les listes écrivent le même geste sous cinq noms, entre les
+abréviations d'uBlock, les emprunts préfixés `ubo-` d'AdGuard et les variantes « trusted » :
+une table d'alias les ramène à un nom canonique, sans quoi la moitié tomberait comme
+« inconnue ».
+
+Deux mondes, et ce n'est pas un détail : l'évaluateur cosmétique vit dans le monde de Wuji —
+la page n'a rien à y lire —, tandis qu'une primitive doit s'exécuter **dans** celui de la
+page, puisque son travail est d'y remplacer une propriété avant que les scripts du site ne la
+lisent.
+
+**Ce qui reste dehors, et pourquoi.** Le filtrage HTML (`$$`, 119 règles) demande de réécrire
+la réponse avant que WebKit ne l'analyse : aucune interface publique ne le permet. La pause
+d'un site vaut aussi ici — suspendre le blocage et continuer d'injecter serait une pause qui
+n'en est pas une.
+
+Vérifié sur banc, dans un vrai moteur : douze cas de sélection procédurale — `:contains()`,
+`:upward()`, `:matches-css()`, `:xpath()`, `:has()` étendu, `:not()` étendu,
+`:min-text-length()`, `:matches-attr()`, `:style()`, `:remove()` — et dix-sept primitives,
+tous conformes. Deux défauts trouvés là plutôt qu'en production : `:has(> …)` ne trouvait rien
+faute de `:scope`, et `:not(…)` cherchait dans les descendants au lieu de l'élément lui-même.
+Un troisième valait pour tout le module : les passes suivant le DOM ne se déclenchaient plus
+dans une page masquée — un onglet d'arrière-plan n'a pas d'images — parce qu'elles
+n'attendaient que `requestAnimationFrame`.
+
 ### Ce que le bouclier n'annonce pas
 
 Le bouclier annonce ce qui est en service — combien de listes, combien de règles — et

@@ -20,6 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     lazy var blocking = ContentBlocker(settings: settings)
     /// Les règles posées à la main par le sélecteur d'éléments.
     lazy var userRules = UserRules(settings: settings)
+    /// Ce que le format de WebKit ne sait pas porter, et que la page applique elle-même.
+    let extended = ExtendedStore()
     /// Le catalogue lu au dernier passage sur la page. Il n'est pas gardé sur le disque :
     /// deux cents kilo-octets relus à l'ouverture valent mieux qu'un catalogue d'hier
     /// qu'on ne saurait pas distinguer d'un catalogue d'aujourd'hui.
@@ -276,6 +278,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // Le magasin de WebKit ne se vide pas tout seul : les listes de l'ancien bloqueur
         // intégré y dormaient encore, des mois après sa suppression.
         blocking.sweep()
+        // L'annexe suit les listes en service : activer une liste, la retirer ou la mettre
+        // à jour change ce qu'il y a à injecter, et un magasin qui ne suivrait pas
+        // servirait les règles de la version d'avant.
+        extended.onChange = { [weak self] in
+            self?.syncChrome()
+            self?.refreshBlockingPages()
+        }
+        syncExtendedRules()
         userRules.onChange = { [weak self] in
             self?.applyBlockingToOpenTabs()
             self?.syncChrome()

@@ -124,6 +124,18 @@ final class Settings {
     ///
     /// Éteint, **l'icône quitte la barre** : une fonction qu'on n'utilise pas ne doit pas
     /// occuper de place.
+    /// Les règles à injection sont-elles appliquées ?
+    ///
+    /// **Un interrupteur, parce que c'est un autre mécanisme.** Les listes compilées
+    /// filtrent dans le processus réseau et ne coûtent rien à la page. Celles-ci demandent
+    /// du style injecté, du DOM inspecté, du code exécuté : c'est ce que Wuji reproche aux
+    /// extensions, et il n'y a pas de raison de l'imposer sans le dire. Actif par défaut —
+    /// ce sont les cadres vides et les murs anti-bloqueur qu'il répare —, et coupable d'un
+    /// clic pour qui préfère un navigateur qui n'exécute rien dans ses pages.
+    var injectedRulesEnabled: Bool {
+        didSet { store.set(injectedRulesEnabled, forKey: Key.injectedRules); changed() }
+    }
+
     var userScriptsEnabled: Bool {
         didSet { store.set(userScriptsEnabled, forKey: Key.userScripts); changed() }
     }
@@ -252,6 +264,7 @@ final class Settings {
         static let retention = "historyRetention"
         static let agent = "agent"
         static let userScripts = "userScriptsEnabled"
+        static let injectedRules = "injectedRulesEnabled"
         static let checkUpdates = "checkUpdatesAtLaunch"
         static let passwords = "passwordsEnabled"
         static let enabledRuleLists = "enabledRuleLists"
@@ -274,6 +287,7 @@ final class Settings {
         historyRetention = store.object(forKey: Key.retention) as? Int ?? 90
         agent = Agent(rawValue: store.string(forKey: Key.agent) ?? "") ?? .safari
         userScriptsEnabled = store.object(forKey: Key.userScripts) as? Bool ?? true
+        injectedRulesEnabled = store.object(forKey: Key.injectedRules) as? Bool ?? true
         checkUpdatesAtLaunch = store.bool(forKey: Key.checkUpdates)
         passwordsEnabled = store.object(forKey: Key.passwords) as? Bool ?? true
         enabledRuleLists = store.stringArray(forKey: Key.enabledRuleLists) ?? []

@@ -40,6 +40,9 @@ struct RuleList: Identifiable, Sendable, Equatable {
     /// dans le format de WebKit — le cosmétique, surtout.
     let coverage: Double
     let parts: [Part]
+    /// Le fichier des règles à injection, quand la liste en a un — celles que le format de
+    /// WebKit ne sait pas porter. Quatre-vingt-quatre listes sur cent soixante et une.
+    var extendedFile: String?
 
     /// Le groupe des listes qu'on n'a pas su ranger. Nommé plutôt que vide : une section
     /// sans titre se lit comme un défaut d'affichage.
@@ -61,6 +64,17 @@ enum RuleCatalog {
     static var index: URL { base.appending(path: "index.json") }
     static func file(_ name: String) -> URL { base.appending(path: name) }
 
+    /// Où vivent les règles à injection.
+    ///
+    /// **L'index les nomme sans leur dossier.** Il publie `Extended-EasyList.json` quand le
+    /// fichier est à `extended/Extended-EasyList.json` : suivre l'index à la lettre donne un
+    /// 404, mesuré. On accepte donc les deux écritures plutôt que d'exiger que le dépôt
+    /// change — un consommateur qui casse à la première correction d'un chemin n'est pas
+    /// robuste, et celui-ci n'a rien à y perdre.
+    static func extended(_ name: String) -> URL {
+        base.appending(path: name.contains("/") ? name : "extended/" + name)
+    }
+
     /// Ce que le catalogue publie, décodé.
     private struct Index: Decodable {
         struct Entry: Decodable {
@@ -74,6 +88,7 @@ enum RuleCatalog {
             let version: String
             let coverage_pct: Double
             let files: [File]
+            let extended_file: String?
         }
         let generated_at: String
         let lists: [Entry]
@@ -146,7 +161,8 @@ enum RuleCatalog {
                     group: group, summary: extra?.description ?? "",
                     coverage: entry.coverage_pct,
                     parts: entry.files.map { .init(file: $0.file, rules: $0.rules,
-                                                   bytes: $0.bytes) })
+                                                   bytes: $0.bytes) },
+                    extendedFile: entry.extended_file)
             }
             .sorted {
                 let (a, b) = (rank(of: $0.group), rank(of: $1.group))

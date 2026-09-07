@@ -34,6 +34,19 @@ enum BlockingPage {
         /// règle sur une page qu'on regarde sont deux gestes différents, et le catalogue
         /// enterrait le second.
         var paused: [String]
+        /// Les règles à injection : l'interrupteur, et ce qu'elles pèsent réellement.
+        var injection = Injection()
+    }
+
+    /// Ce que la section « Règles à injection » affiche.
+    struct Injection: Equatable {
+        var enabled = false
+        /// Ce qui est en mémoire, toutes listes confondues.
+        var rules = 0
+        var lists = 0
+        /// Ce que la page courante reçoit — le seul chiffre qui dise le coût réel.
+        var here = 0
+        var host = ""
     }
 
     /// Ce que l'en-tête annonce. Extrait parce que la mise à jour sur place le renvoie
@@ -133,7 +146,7 @@ enum BlockingPage {
               </header>
               <main>
                 <div id="notice">\(notice)</div>
-                \(paused(state))
+                \(injection(state))\(paused(state))
                 <div class="search"\(state.catalog.isEmpty ? " hidden" : "")>
                   <input type="search" class="filter" placeholder="Filtrer les listes"
                          autocomplete="off" spellcheck="false">
@@ -215,6 +228,41 @@ enum BlockingPage {
         <div class="familles">
           <button class="puce active" data-famille="">Toutes<span>\(total)</span></button>
           \(jetons)
+        </div>
+        """
+    }
+
+    /// Les règles que le format de WebKit ne sait pas porter.
+    ///
+    /// **Elle dit ce qu'elle coûte, parce qu'elle coûte quelque chose.** Le reste de cette
+    /// page décrit un filtrage qui ne touche jamais la page ; celui-ci l'ouvre. La section
+    /// le dit en toutes lettres, donne le chiffre qui compte — combien de règles sur *cette*
+    /// page, pas combien en mémoire — et porte l'interrupteur juste à côté.
+    private static func injection(_ state: State) -> String {
+        let i = state.injection
+        let détail: String
+        if !i.enabled {
+            détail = "Coupées. Les cadres vides et les murs anti-bloqueur que les listes "
+                + "seules laissent passer resteront."
+        } else if i.rules == 0 {
+            détail = "Aucune liste en service n'en publie."
+        } else {
+            détail = "\(format(i.rules)) règles issues de \(i.lists) liste"
+                + (i.lists > 1 ? "s" : "")
+                + (i.host.isEmpty ? "."
+                   : " · \(i.here == 0 ? "aucune" : String(i.here)) sur \(escape(i.host))")
+        }
+        return """
+        <div class="block">
+          <h2>Règles à injection<span class="tally">\(i.enabled ? "en service" : "coupées")</span>
+            <button class="link" data-action="\(i.enabled ? "injection-off" : "injection-on")">\
+        \(i.enabled ? "Couper" : "Activer")</button></h2>
+          <p class="hint">Ce que le format de WebKit ne sait pas porter : styles arbitraires,
+            sélecteurs qui lisent le texte d'une page, primitives nommées. <strong>Celles-là
+            s'exécutent dans la page</strong>, à la différence des listes compilées qui
+            filtrent dans le processus réseau sans jamais la toucher. Deux règles par site en
+            médiane — mais c'est un autre mécanisme, et il porte son interrupteur.
+            <br>\(escape(détail))</p>
         </div>
         """
     }

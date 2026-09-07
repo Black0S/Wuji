@@ -1,0 +1,444 @@
+import Foundation
+
+/// Ce qui s'exécute dans la page pour appliquer les règles à injection.
+///
+/// **Trois choses, et dans cet ordre de coût.** Une feuille de style d'abord — c'est le
+/// moteur qui l'applique, elle ne coûte rien après l'insertion et couvre la grande majorité
+/// des règles. Puis les sélecteurs que le CSS ne sait pas résoudre : ceux-là demandent de
+/// lire le DOM, et c'est la seule partie qui tourne vraiment. Les primitives nommées vivent
+/// à part, dans le monde de la page.
+///
+/// **Ce qui est injecté est minuscule.** Mesuré sur les quatre-vingt-quatre annexes du
+/// dépôt : deux cent trente mille sites couverts, **deux règles par site en médiane**, six
+/// au neuvième décile, cent soixante et onze au pire (google.com). Ce n'est pas un bloqueur
+/// qui embarque soixante-dix mille règles dans chaque page : c'est une poignée de lignes,
+/// choisies pour ce site-là, et rien du tout sur un site qu'aucune liste ne mentionne.
+enum CosmeticEngine {
+
+    /// Le script, avec sa charge. Rendu `nil` quand il n'y a rien à faire — c'est le cas de
+    /// l'écrasante majorité des pages, et poser un script qui ne fera rien reste un script.
+    static func script(for payload: ExtendedStore.Payload) -> String? {
+        guard !payload.isEmpty else { return nil }
+        // Trois niveaux, du moins cher au plus cher. Un retrait dont le sélecteur est natif
+        // n'a pas besoin de l'évaluateur : il lui faut `querySelectorAll` et de quoi
+        // recommencer quand le document change, ce qui tient en quinze lignes. C'est le cas
+        // de la seule règle générique du dépôt qui retire un élément — sans cette marche
+        // intermédiaire, elle imposait douze kilo-octets et un évaluateur à **toutes** les
+        // pages, pour un sélecteur que le navigateur résout lui-même.
+        let compliqué = !payload.procedural.isEmpty || !payload.styled.isEmpty
+            || payload.removals.contains { !ExtendedRules.isNativeSelector($0) }
+        let travail = compliqué || !payload.removals.isEmpty
+
+        // **Le moteur ne part que s'il a du travail.** La plupart des pages ne reçoivent
+        // qu'une feuille de style : y joindre l'évaluateur et son observateur de mutations
+        // ferait payer à chacune le prix des quelques-unes qui en ont besoin. Douze
+        // kilo-octets analysés et un observateur posé pour quatre lignes de CSS, c'est
+        // exactement ce qu'on reproche à un bloqueur d'extension.
+        guard travail else {
+            guard !payload.css.isEmpty else { return nil }
+            return "(() => {\n" + feuilleSeule(payload.css) + "\n})();"
+        }
+
+        if !compliqué {
+            let json = (try? JSONSerialization.data(withJSONObject: payload.removals))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+            return """
+            (() => {
+            \(feuilleSeule(payload.css))
+              const sélecteurs = \(json);
+            \(remover)
+            })();
+            """
+        }
+
+        let charge: [String: Any] = [
+            "css": payload.css,
+            "procedural": payload.procedural,
+            "styled": payload.styled,
+            "removals": payload.removals
+        ]
+        guard let json = (try? JSONSerialization.data(withJSONObject: charge))
+            .flatMap({ String(data: $0, encoding: .utf8) }) else { return nil }
+        return "(() => {\nconst charge = \(json);\n" + engine + "\n})();"
+    }
+
+    /// La feuille, et rien d'autre : le cas de la plupart des pages.
+    private static func feuilleSeule(_ css: String) -> String {
+        guard !css.isEmpty else { return "" }
+        let encodé = (try? JSONSerialization.data(withJSONObject: [css]))
+            .flatMap { String(data: $0, encoding: .utf8) }
+            .map { String($0.dropFirst().dropLast()) } ?? "\"\""
+        return """
+          if (window.__wujiCosmetic) return;
+          window.__wujiCosmetic = true;
+          const feuille = document.createElement('style');
+          feuille.id = '__wujiCosmetic';
+          feuille.textContent = \(encodé);
+          (document.head || document.documentElement).appendChild(feuille);
+        """
+    }
+
+    /// Retirer des éléments que le navigateur sait désigner tout seul.
+    private static let remover = #"""
+      if (sélecteurs.length) {
+        const passer = () => {
+          for (const sel of sélecteurs) {
+            try { for (const el of document.querySelectorAll(sel)) el.remove(); } catch (_) {}
+          }
+        };
+        let prévu = false;
+        const démarrer = () => {
+          passer();
+          new MutationObserver(() => {
+            if (prévu) return;
+            prévu = true;
+            requestAnimationFrame(() => { prévu = false; passer(); });
+          }).observe(document.documentElement, { childList: true, subtree: true });
+        };
+        if (document.documentElement) démarrer();
+        else document.addEventListener('DOMContentLoaded', démarrer, { once: true });
+      }
+    """#
+
+    private static let engine = #"""
+      if (window.__wujiCosmetic) return;
+      window.__wujiCosmetic = true;
+
+      // --- La feuille : ce qui n'a pas besoin d'être évalué ---
+      if (charge.css) {
+        const poser = () => {
+          const feuille = document.createElement('style');
+          feuille.id = '__wujiCosmetic';
+          feuille.textContent = charge.css;
+          // Sur `documentElement` : une page peut n'avoir pas encore de `head`, et la
+          // feuille doit survivre à un `head` que la page reconstruit.
+          (document.head || document.documentElement).appendChild(feuille);
+        };
+        if (document.documentElement) poser();
+        else document.addEventListener('readystatechange', poser, { once: true });
+      }
+
+      const règles = [];
+      for (const sel of charge.procedural) règles.push({ sel, action: 'masquer' });
+      for (const [sel, décl] of charge.styled) règles.push({ sel, action: 'style', décl });
+      for (const sel of charge.removals) règles.push({ sel, action: 'retirer' });
+      if (!règles.length) return;
+
+      // --- Découper un sélecteur en étapes ---
+
+      const ÉTENDUES = new Set(['contains', 'has-text', '-abp-contains', 'upward',
+        'nth-ancestor', 'matches-css', 'matches-css-before', 'matches-css-after',
+        'matches-attr', 'matches-property', 'xpath', 'min-text-length', 'matches-path',
+        'remove', 'style', 'watch-attr', 'others']);
+      // Natives quand leur argument l'est, opérateurs sinon : `:has(div)` est du CSS que
+      // WebKit sait faire, `:has(div:contains(x))` ne l'est pas.
+      const CONDITIONNELLES = new Set(['has', 'if', 'if-not', 'not', 'is', '-abp-has']);
+
+      const finDe = (texte, début, ouvrant, fermant) => {
+        let profondeur = 0;
+        for (let i = début; i < texte.length; i++) {
+          const c = texte[i];
+          if (c === '\\') { i++; continue; }
+          if (c === '"' || c === "'") {
+            const guillemet = c;
+            i++;
+            while (i < texte.length && texte[i] !== guillemet) { if (texte[i] === '\\') i++; i++; }
+            continue;
+          }
+          if (c === ouvrant) profondeur++;
+          else if (c === fermant) { profondeur--; if (!profondeur) return i; }
+        }
+        return texte.length - 1;
+      };
+
+      const contientÉtendue = (texte) => {
+        const re = /:(-abp-[a-z-]+|[a-z][a-z0-9-]*)\(/g;
+        let m;
+        while ((m = re.exec(texte))) {
+          if (ÉTENDUES.has(m[1])) return true;
+          if (CONDITIONNELLES.has(m[1])) {
+            const fin = finDe(texte, m.index + m[0].length - 1, '(', ')');
+            if (contientÉtendue(texte.slice(m.index + m[0].length, fin))) return true;
+          }
+        }
+        return false;
+      };
+
+      const découper = (sel) => {
+        const étapes = [];
+        let css = '';
+        let i = 0;
+        while (i < sel.length) {
+          const c = sel[i];
+          if (c === '"' || c === "'") {
+            const guillemet = c;
+            let j = i + 1;
+            while (j < sel.length && sel[j] !== guillemet) { if (sel[j] === '\\') j++; j++; }
+            css += sel.slice(i, j + 1); i = j + 1; continue;
+          }
+          if (c === '[') { const fin = finDe(sel, i, '[', ']'); css += sel.slice(i, fin + 1); i = fin + 1; continue; }
+          if (c === ':') {
+            const m = /^:(-abp-[a-z-]+|[a-z][a-z0-9-]*)\(/.exec(sel.slice(i));
+            if (m) {
+              const nom = m[1];
+              const ouvre = i + m[0].length - 1;
+              const fin = finDe(sel, ouvre, '(', ')');
+              const arg = sel.slice(ouvre + 1, fin);
+              const opérateur = ÉTENDUES.has(nom)
+                || (CONDITIONNELLES.has(nom) && contientÉtendue(arg));
+              if (opérateur) {
+                étapes.push({ css: css.trim(), op: nom, arg });
+                css = ''; i = fin + 1; continue;
+              }
+            }
+          }
+          css += c; i++;
+        }
+        if (css.trim()) étapes.push({ css: css.trim(), op: null });
+        return étapes;
+      };
+
+      // --- Évaluer ---
+
+      const motif = (source) => {
+        if (source === undefined || source === '') return () => true;
+        const s = String(source).trim();
+        if (s.length > 2 && s.startsWith('/') && s.lastIndexOf('/') > 0) {
+          const fin = s.lastIndexOf('/');
+          try {
+            const re = new RegExp(s.slice(1, fin), s.slice(fin + 1));
+            return (t) => re.test(t);
+          } catch (_) { /* motif illisible : on retombe sur la recherche littérale */ }
+        }
+        const nu = s.replace(/\\(.)/g, '$1');
+        return (t) => String(t).includes(nu);
+      };
+
+      const tous = () => [...document.querySelectorAll('*')];
+      const sûr = (f, repli) => { try { return f(); } catch (_) { return repli; } };
+
+      const descendre = (noeuds, css) => {
+        if (!css) return noeuds;
+        const suite = [];
+        const combinateur = /^[>+~]/.test(css);
+        for (const n of noeuds) {
+          if (combinateur) {
+            suite.push(...sûr(() => [...n.querySelectorAll(':scope ' + css)], []));
+          } else if (sûr(() => n.matches(css), false)) {
+            suite.push(n);
+          }
+        }
+        return suite;
+      };
+
+      const ancêtre = (n, arg) => {
+        const nombre = Number(arg);
+        if (Number.isInteger(nombre) && nombre > 0) {
+          let el = n;
+          for (let k = 0; k < nombre && el; k++) el = el.parentElement;
+          return el;
+        }
+        return sûr(() => n.closest(arg), null);
+      };
+
+      const styleDe = (n, arg, pseudo) => {
+        const idx = arg.indexOf(':');
+        if (idx < 0) return false;
+        const propriété = arg.slice(0, idx).trim();
+        const teste = motif(arg.slice(idx + 1));
+        const calculé = sûr(() => getComputedStyle(n, pseudo || null), null);
+        return calculé ? teste(calculé.getPropertyValue(propriété)) : false;
+      };
+
+      const attributCorrespond = (n, arg) => {
+        const idx = arg.indexOf('=');
+        const nom = (idx < 0 ? arg : arg.slice(0, idx)).trim().replace(/^["']|["']$/g, '');
+        if (idx < 0) return n.hasAttribute(nom);
+        const teste = motif(arg.slice(idx + 1).replace(/^["']|["']$/g, ''));
+        return n.hasAttribute(nom) && teste(n.getAttribute(nom));
+      };
+
+      const propriétéCorrespond = (n, arg) => {
+        const idx = arg.indexOf('=');
+        const chemin = (idx < 0 ? arg : arg.slice(0, idx)).trim();
+        const val = chemin.split('.').reduce((o, c) => (o == null ? o : o[c]), n);
+        if (idx < 0) return val !== undefined;
+        return motif(arg.slice(idx + 1))(val);
+      };
+
+      const appliquerOp = (op, arg, noeuds) => {
+        switch (op) {
+          case 'contains': case 'has-text': case '-abp-contains': {
+            const teste = motif(arg);
+            return noeuds.filter((n) => teste(n.textContent || ''));
+          }
+          case 'min-text-length': {
+            const n0 = Number(arg) || 0;
+            return noeuds.filter((n) => (n.textContent || '').length >= n0);
+          }
+          case 'upward': case 'nth-ancestor':
+            return noeuds.map((n) => ancêtre(n, arg)).filter(Boolean);
+          case 'matches-css':
+            return noeuds.filter((n) => styleDe(n, arg, null));
+          case 'matches-css-before':
+            return noeuds.filter((n) => styleDe(n, arg, '::before'));
+          case 'matches-css-after':
+            return noeuds.filter((n) => styleDe(n, arg, '::after'));
+          case 'matches-attr':
+            return noeuds.filter((n) => sûr(() => attributCorrespond(n, arg), false));
+          case 'matches-property':
+            return noeuds.filter((n) => sûr(() => propriétéCorrespond(n, arg), false));
+          case 'matches-path':
+            return motif(arg)(location.pathname + location.search) ? noeuds : [];
+          case 'xpath': {
+            const sortie = [];
+            const contextes = noeuds.length ? noeuds : [document];
+            for (const c of contextes) {
+              sûr(() => {
+                const r = document.evaluate(arg, c, null,
+                  XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+                for (let k = 0; k < r.snapshotLength; k++) {
+                  const n = r.snapshotItem(k);
+                  if (n && n.nodeType === 1) sortie.push(n);
+                }
+              }, null);
+            }
+            return sortie;
+          }
+          case 'has': case 'if': case '-abp-has':
+            return noeuds.filter((n) => évaluerDans(n, arg).length > 0);
+          case 'if-not':
+            return noeuds.filter((n) => évaluerDans(n, arg).length === 0);
+          // **`:not()` porte sur l'élément, pas sur ses descendants.** C'est ce qui le
+          // distingue de `:if-not()`, qui est bien la négation de `:has()`. Les confondre
+          // faisait passer `div:contains(garder):not(:contains(zzz))` sur les deux `div`,
+          // puisqu'aucun n'a de *descendant* contenant « zzz » — ils le contiennent
+          // eux-mêmes.
+          case 'not':
+            return noeuds.filter((n) => !évaluerSur(n, arg));
+          default:
+            return noeuds;
+        }
+      };
+
+      // `:has(...)` étendu : on évalue le sous-sélecteur **dans** le nœud.
+      //
+      // `:scope` quand le sous-sélecteur commence par un combinateur : `> span` n'est pas
+      // un sélecteur valide pour `querySelectorAll`, et `:has(> span:contains(x))` ne
+      // trouvait donc jamais rien — silencieusement, comme toute erreur de sélecteur.
+      const évaluerDans = (racine, sous) => {
+        const étapes = découper(sous);
+        let noeuds = null;
+        for (const étape of étapes) {
+          if (étape.css) {
+            const css = /^[>+~]/.test(étape.css) ? ':scope ' + étape.css : étape.css;
+            noeuds = noeuds === null
+              ? sûr(() => [...racine.querySelectorAll(css)], [])
+              : descendre(noeuds, étape.css);
+          } else if (noeuds === null) {
+            noeuds = sûr(() => [...racine.querySelectorAll('*')], []);
+          }
+          if (étape.op) noeuds = appliquerOp(étape.op, étape.arg, noeuds);
+          if (!noeuds.length) return [];
+        }
+        return noeuds || [];
+      };
+
+      // Le sous-sélecteur porte sur **cet élément-ci** : c'est ce que veut dire `:not()`.
+      const évaluerSur = (racine, sous) => {
+        const étapes = découper(sous);
+        let noeuds = [racine];
+        for (const étape of étapes) {
+          if (étape.css) {
+            noeuds = noeuds.filter((n) => sûr(() => n.matches(étape.css), false));
+          }
+          if (étape.op) noeuds = appliquerOp(étape.op, étape.arg, noeuds);
+          if (!noeuds.length) return false;
+        }
+        return noeuds.length > 0;
+      };
+
+      const évaluer = (sel) => {
+        const étapes = découper(sel);
+        let noeuds = null;
+        let action = null;
+        for (const étape of étapes) {
+          if (étape.css) {
+            noeuds = noeuds === null
+              ? sûr(() => [...document.querySelectorAll(étape.css)], [])
+              : descendre(noeuds, étape.css);
+          } else if (noeuds === null && étape.op !== 'xpath') {
+            noeuds = tous();
+          }
+          if (!étape.op) continue;
+          // `:remove()` et `:style()` ne filtrent pas : ils disent quoi faire du résultat.
+          if (étape.op === 'remove') { action = { type: 'retirer' }; continue; }
+          if (étape.op === 'style') { action = { type: 'style', décl: étape.arg }; continue; }
+          noeuds = appliquerOp(étape.op, étape.arg, noeuds || []);
+          if (!noeuds.length) return { noeuds: [], action };
+        }
+        return { noeuds: noeuds || [], action };
+      };
+
+      // --- Appliquer ---
+
+      const marqués = new WeakSet();
+
+      const appliquerStyle = (n, décl) => {
+        for (const morceau of String(décl).split(';')) {
+          const idx = morceau.indexOf(':');
+          if (idx < 0) continue;
+          const propriété = morceau.slice(0, idx).trim();
+          let val = morceau.slice(idx + 1).trim();
+          const important = /!important$/i.test(val);
+          if (important) val = val.replace(/!important$/i, '').trim();
+          if (propriété) sûr(() => n.style.setProperty(propriété, val, important ? 'important' : ''), null);
+        }
+      };
+
+      const passer = () => {
+        for (const règle of règles) {
+          const { noeuds, action } = sûr(() => évaluer(règle.sel), { noeuds: [], action: null });
+          const quoi = action ? action.type : règle.action;
+          const décl = action && action.décl ? action.décl : règle.décl;
+          for (const n of noeuds) {
+            if (!n || n.nodeType !== 1) continue;
+            if (quoi === 'retirer') { sûr(() => n.remove(), null); continue; }
+            if (quoi === 'style') { appliquerStyle(n, décl); continue; }
+            // Masquer : en ligne et `!important`, parce qu'une feuille de style d'auteur
+            // arrivée après nous gagnerait autrement.
+            if (marqués.has(n) && n.style.display === 'none') continue;
+            marqués.add(n);
+            sûr(() => n.style.setProperty('display', 'none', 'important'), null);
+          }
+        }
+      };
+
+      // **Une seule passe par image, pas une par mutation.** Une page qui écrit son DOM en
+      // boucle — un fil d'actualité, une publicité qui se recharge — produit des centaines
+      // de mutations par seconde ; les suivre une à une ferait du moteur le poste le plus
+      // cher de la page, pour un résultat identique à l'œil.
+      let prévu = false;
+      const relâcher = () => { prévu = false; passer(); };
+      // Une image **ou** un délai : une page masquée — onglet d'arrière-plan, fenêtre
+      // réduite — n'a pas d'images, et le moteur n'y aurait jamais repassé après sa
+      // première lecture. Le drapeau fait que le second arrivé ne travaille pas deux fois.
+      const planifier = () => {
+        if (prévu) return;
+        prévu = true;
+        requestAnimationFrame(relâcher);
+        setTimeout(relâcher, 50);
+      };
+
+      const démarrer = () => {
+        passer();
+        new MutationObserver(planifier).observe(document.documentElement,
+          { childList: true, subtree: true, attributes: true,
+            attributeFilter: ['class', 'id', 'style'] });
+        document.addEventListener('DOMContentLoaded', planifier, { once: true });
+      };
+
+      if (document.documentElement) démarrer();
+      else document.addEventListener('DOMContentLoaded', démarrer, { once: true });
+    """#
+}

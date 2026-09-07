@@ -23,6 +23,10 @@ extension AppDelegate {
         controller.addUserScript(MediaWatcher.script)
         controller.addUserScript(RouteWatcher.script)
         if settings.passwordsEnabled { controller.addUserScript(PasswordForm.script) }
+        // Les règles à injection viennent avec les scripts de l'application : elles doivent
+        // être en place avant le premier octet du document, sinon le site a déjà lu la
+        // propriété qu'on voulait remplacer.
+        installInjectedRules(for: url, in: controller)
 
         // Le document qui arrive recevra ses scripts par WebKit lui-même : on note pour
         // quelle adresse, afin que le guetteur ne les rejoue pas dans la foulée.

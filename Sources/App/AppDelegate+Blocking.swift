@@ -55,7 +55,15 @@ extension AppDelegate {
             working: blocking.working,
             failure: blocking.failure,
             unreachable: catalogUnreachable,
-            paused: settings.pausedHosts)
+            paused: settings.pausedHosts,
+            injection: {
+                let hôte = currentTab?.url.flatMap { $0.host() } ?? ""
+                return BlockingPage.Injection(
+                    enabled: settings.injectedRulesEnabled,
+                    rules: extended.count, lists: extended.listCount,
+                    here: injectionPayload(for: currentTab?.url).count,
+                    host: hôte)
+            }())
     }
 
     /// Ce que la page des règles personnelles affiche.
@@ -101,6 +109,15 @@ extension AppDelegate {
             title: lists == 0 ? "Aucune liste en service"
                               : "\(lists) liste\(lists > 1 ? "s" : "") · \(Self.grouped(rules)) règles",
             symbol: "shield.lefthalf.filled", isEnabled: false, action: {}))
+
+        // Ce que les règles à injection font ici, et rien de plus : le nombre est celui
+        // des règles retenues pour cette page, pas celui du magasin.
+        let injectées = injectionPayload(for: currentTab?.url).count
+        if injectées > 0 {
+            items.append(ActionItem(
+                title: "\(injectées) règle\(injectées > 1 ? "s" : "") à injection ici",
+                symbol: "curlybraces", isEnabled: false, action: {}))
+        }
 
         if let host {
             let mine = userRules.rules.filter { $0.host == host }
@@ -246,6 +263,19 @@ extension AppDelegate {
         case "forget-host":
             guard let id else { return }
             forgetRules(of: id)
+        case "injection-on", "injection-off":
+            settings.injectedRulesEnabled = action == "injection-on"
+            syncExtendedRules()
+            if !settings.injectedRulesEnabled { extended.purge() }
+            refreshBlockingPages()
+            // Les scripts se posent à la navigation : les pages ouvertes gardent ceux
+            // qu'elles ont reçus jusqu'à leur prochain chargement, et le dire vaut mieux
+            // que de laisser croire que rien ne s'est passé.
+            layout.toast.show(settings.injectedRulesEnabled
+                ? "Règles à injection en service — rechargez pour les voir agir"
+                : "Règles à injection coupées — rechargez pour les retirer") {
+                    [weak self] in self?.currentTab?.webView.reload()
+                }
         case "resume":
             guard let id else { return }
             blocking.setPaused(false, host: id)
@@ -266,6 +296,7 @@ extension AppDelegate {
                     layout.toast.show("« \(list.name) » en service — \(list.rules) règles")
                 }
                 applyBlockingToOpenTabs()
+                syncExtendedRules()
                 refreshBlockingPages()
                 syncChrome()
             }
@@ -274,6 +305,7 @@ extension AppDelegate {
             guard !périmées.isEmpty else { return }
             Task { @MainActor in
                 let échecs = await blocking.updateAll(périmées)
+                syncExtendedRules()
                 // **Un seul repositionnement des règles, à la fin.** Reposer dix-neuf fois
                 // les listes sur chaque onglet ouvert coûte plus que la mise à jour
                 // elle-même, et rien de visible ne se produit entre-temps.
@@ -292,6 +324,7 @@ extension AppDelegate {
             // tard si on les laissait là.
             blocking.remove(id)
             applyBlockingToOpenTabs()
+            syncExtendedRules()
             refreshBlockingPages()
             syncChrome()
             layout.toast.show("« \(name) » retirée — règles supprimées du disque")
