@@ -90,7 +90,7 @@ struct InternalPageTests {
         #expect(BlockingPage.html(state: muet).contains("catalogue injoignable"))
 
         let liste = RuleList(name: "AdGuard Base filter", source: "AdGuard-Base-filter.txt",
-                             version: "2.4", coverage: 96.5,
+                             version: "2.4", coverage: 96,
                              parts: [.init(file: "Webkit-AdGuard-Base-filter.json",
                                            rules: 123902, bytes: 12566360)])
         let plein = BlockingPage.State(catalog: [liste], installed: [liste.id],
@@ -100,6 +100,20 @@ struct InternalPageTests {
         #expect(html.contains("AdGuard Base filter"))
         #expect(html.contains("Mettre à jour"))
         #expect(html.contains("96 % converti"))
+        #expect(!html.contains("Optional("))
+    }
+
+    @Test func leJournalDuBlocageSeDessineVideEtPlein() {
+        #expect(BlockingLogPage.html(entries: []).contains("rien à signaler"))
+
+        let entries = [BlockingLog.Entry(.installed, "EasyList", "62 969 règles · 1,2 s"),
+                       BlockingLog.Entry(.hidden, "exemple.fr", "#pub"),
+                       BlockingLog.Entry(.failed, "Catalogue", "injoignable")]
+        let html = BlockingLogPage.html(entries: entries)
+        #expect(html.contains("EasyList"))
+        #expect(html.contains("#pub"))
+        // Un échec doit se distinguer du reste sans qu'on lise la ligne entière.
+        #expect(html.contains("1 échec"))
         #expect(!html.contains("Optional("))
     }
 

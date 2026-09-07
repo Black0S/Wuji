@@ -25,6 +25,12 @@ extension AppDelegate {
     func refreshBlockingPages() {
         let patch = BlockingPage.patch(blockingState)
         for tab in spaces.flatMap(\.allTabs) where tab.url?.host() == "blocking" {
+            // Le journal n'a pas de correctif sur place : il se relit en entier, et on ne
+            // le regarde pas pendant qu'on coche des listes.
+            guard tab.url?.path.hasPrefix("/journal") != true else {
+                tab.webView.reload()
+                continue
+            }
             tab.webView.evaluateJavaScript(patch) { value, _ in
                 MainActor.assumeIsolated {
                     guard value == nil else { return }
@@ -35,6 +41,13 @@ extension AppDelegate {
     }
 
     /// Ce que la page affiche, à l'instant où on la dessine.
+    /// La page à rendre pour `wuji://blocking` — la liste, ou le journal.
+    func blockingHTML(path: String) -> String {
+        path.hasPrefix("/journal")
+            ? BlockingLogPage.html(entries: blockingLog.entries)
+            : BlockingPage.html(state: blockingState)
+    }
+
     var blockingState: BlockingPage.State {
         BlockingPage.State(
             catalog: ruleCatalog,
@@ -68,6 +81,7 @@ extension AppDelegate {
                 // On garde ce qu'on avait : un catalogue affiché puis effacé par une coupure
                 // de réseau ferait croire que les listes ont disparu.
                 catalogUnreachable = ruleCatalog.isEmpty
+                blockingLog.record(.failed, "Catalogue", "injoignable")
             }
             refreshBlockingPages()
         }
@@ -85,6 +99,30 @@ extension AppDelegate {
         var items: [ActionItem] = []
         let host = currentTab?.url.flatMap { UserRules.registrable($0.host ?? "") }
 
+        // **Ce que le menu annonce est vrai, et rien de plus.** WebKit applique les règles
+        // dans son processus réseau et n'en rend aucun compte : mesuré, aucun rappel de
+        // blocage n'existe pour une application tierce. Un « 247 éléments bloqués sur cette
+        // page » serait un nombre inventé — le genre de chiffre qui rassure et qu'on ne peut
+        // pas vérifier. On dit donc ce qu'on sait : combien de règles sont en service, et
+        // combien d'éléments *nos* règles masquent ici, celles-là étant comptables.
+        let lists = blocking.installed.count
+        let rules = blocking.ruleCount
+        items.append(ActionItem(
+            title: lists == 0 ? "Aucune liste en service"
+                              : "\(lists) liste\(lists > 1 ? "s" : "") · \(Self.grouped(rules)) règles",
+            symbol: "shield.lefthalf.filled", isEnabled: false, action: {}))
+
+        if let host {
+            let mine = userRules.rules.filter { $0.host == host }
+            if !mine.isEmpty {
+                items.append(ActionItem(
+                    title: "\(mine.count) élément\(mine.count > 1 ? "s" : "") masqué"
+                        + "\(mine.count > 1 ? "s" : "") sur \(host)",
+                    symbol: "eye.slash", isEnabled: false, action: {}))
+            }
+        }
+        items.append(.separator)
+
         if let host, currentTab?.url?.scheme?.hasPrefix("http") == true {
             items.append(ActionItem(title: "Masquer un élément…", symbol: "square.dashed",
                                     action: { [weak self] in self?.startElementPicker() }))
@@ -95,14 +133,32 @@ extension AppDelegate {
                     symbol: "arrow.uturn.left", isDestructive: true,
                     action: { [weak self] in
                         self?.userRules.removeAll(for: host)
+                        self?.blockingLog.record(.unhidden, host,
+                                                 "\(mine.count) règle\(mine.count > 1 ? "s" : "")")
                         self?.layout.toast.show("Règles de « \(host) » retirées")
                     }))
             }
             items.append(.separator)
         }
-        items.append(ActionItem(title: "Listes de blocage…", symbol: "shield.lefthalf.filled",
+        items.append(ActionItem(title: "Listes de blocage…", symbol: "list.bullet",
                                 action: { [weak self] in self?.showBlocking(nil) }))
+        items.append(ActionItem(title: "Journal du blocage…", symbol: "text.alignleft",
+                                action: { [weak self] in self?.showBlockingLog(nil) }))
         return items
+    }
+
+    /// Les grands nombres se lisent par groupes de trois, ou ne se lisent pas.
+    static func grouped(_ value: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.groupingSeparator = "\u{202F}"
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    static let blockingLogPage = URL(string: "wuji://blocking/journal")!
+
+    @objc func showBlockingLog(_ sender: Any?) {
+        openInternal(Self.blockingLogPage)
     }
 
     /// Ouvre le sélecteur sur la page courante.
@@ -129,6 +185,7 @@ extension AppDelegate {
                 layout.toast.show("Cette règle existait déjà")
                 return
             }
+            blockingLog.record(.hidden, site, selector)
             applyBlockingToOpenTabs()
             syncChrome()
             layout.toast.show("Masqué sur « \(site) » — rechargez pour voir l'effet") {
@@ -141,15 +198,22 @@ extension AppDelegate {
         switch action {
         case "reload":
             loadRuleCatalog()
+        case "clear-log":
+            blockingLog.clear()
+            refreshBlockingPages()
         case "install", "update":
             guard let id, let list = ruleCatalog.first(where: { $0.id == id }) else { return }
             Task { @MainActor in
                 if action == "update" { blocking.remove(id) }
+                let début = Date()
                 if let failure = await blocking.install(list) {
+                    blockingLog.record(.failed, list.name, failure)
                     layout.toast.show("« \(list.name) » : \(failure)")
                 } else {
-                    layout.toast.show("« \(list.name) » en service — "
-                        + "\(list.rules) règles")
+                    let ms = Int(Date().timeIntervalSince(début) * 1000)
+                    blockingLog.record(action == "update" ? .updated : .installed, list.name,
+                                       "\(list.rules) règles · v\(list.version) · \(ms) ms")
+                    layout.toast.show("« \(list.name) » en service — \(list.rules) règles")
                 }
                 applyBlockingToOpenTabs()
                 refreshBlockingPages()
@@ -159,6 +223,7 @@ extension AppDelegate {
             guard let id else { return }
             let name = ruleCatalog.first { $0.id == id }?.name ?? id
             blocking.remove(id)
+            blockingLog.record(.removed, name)
             applyBlockingToOpenTabs()
             refreshBlockingPages()
             syncChrome()

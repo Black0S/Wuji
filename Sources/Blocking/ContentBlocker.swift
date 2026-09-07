@@ -82,17 +82,20 @@ final class ContentBlocker {
     ///
     /// On ne touche qu'à ce qui porte notre préfixe : le magasin est partagé avec WebKit
     /// lui-même, qui y range ses propres listes.
-    func sweep() {
+    func sweep(_ report: ((Int) -> Void)? = nil) {
         let keep = Set(settings.enabledRuleLists.flatMap { settings.ruleListFiles[$0] ?? [] }
             .map { identifier(for: $0) })
             .union([UserRules.identifier])
 
         store?.getAvailableContentRuleListIdentifiers { identifiers in
             MainActor.assumeIsolated {
+                var jetées = 0
                 for id in identifiers ?? []
                 where id.hasPrefix("wuji.") && !keep.contains(id) {
                     self.store?.removeContentRuleList(forIdentifier: id) { _ in }
+                    jetées += 1
                 }
+                if jetées > 0 { report?(jetées) }
             }
         }
     }

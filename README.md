@@ -204,6 +204,27 @@ s'arrête « ce site ».
 Une règle dit ce qu'on ne veut pas voir sur un site qu'on visite — c'est une information sur
 soi, pas une contribution.
 
+### Le journal, et ce qu'il ne dit pas
+
+Le bouclier annonce ce qui est en service — combien de listes, combien de règles — et
+combien d'éléments *vos* règles masquent sur le site où vous êtes. **Il n'annonce pas de
+requêtes bloquées, et c'est une limite mesurée, pas un oubli.** WebKit applique les règles
+dans son processus réseau et n'en rend aucun compte : aucun rappel de blocage n'existe pour
+une application tierce — vérifié sur `WKNavigationDelegate`, où les sélecteurs privés
+correspondants n'existent pas. Un « 247 éléments bloqués sur cette page » serait un nombre
+inventé, c'est-à-dire le genre de chiffre qui rassure et qu'on ne peut pas vérifier.
+
+`wuji://blocking/journal` dit donc ce que Wuji a **fait**, ce qui se recoupe : quelle liste
+est entrée quand, en combien de millisecondes, avec combien de règles ; quel échec et pour
+quelle raison ; quel élément masqué, sur quel site, avec quel sélecteur ; quand le magasin a
+été balayé et de combien de listes périmées. C'est ce qu'on vient lire quand une page se
+comporte autrement qu'hier.
+
+Quatre cents entrées, pas davantage : un journal qui grossit sans fin finit par être le plus
+gros fichier de l'application, et personne n'y remonte au-delà de quelques centaines de
+lignes. Il reste sur la machine et n'est envoyé nulle part — il porte les sites où vous avez
+posé des règles.
+
 ### Ce que la conversion ne sait pas rendre
 
 Le pourcentage affiché est la part des règles d'origine convertie. En dessous de cent, une

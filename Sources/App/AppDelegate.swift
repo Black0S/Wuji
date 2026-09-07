@@ -20,6 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     lazy var blocking = ContentBlocker(settings: settings)
     /// Les règles posées à la main par le sélecteur d'éléments.
     lazy var userRules = UserRules(settings: settings)
+    /// Le journal du blocage : ce que Wuji a fait, et rien qu'il n'ait fait.
+    let blockingLog = BlockingLog()
     /// Le catalogue lu au dernier passage sur la page. Il n'est pas gardé sur le disque :
     /// deux cents kilo-octets relus à l'ouverture valent mieux qu'un catalogue d'hier
     /// qu'on ne saurait pas distinguer d'un catalogue d'aujourd'hui.
@@ -106,7 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // configuration déjà utilisée ne l'accepte plus.
         let pages = InternalPageHandler(history: history, downloads: downloads,
                                         favorites: favorites, icons: favicons)
-        pages.blocking = { [unowned self] in BlockingPage.html(state: blockingState) }
+        pages.blocking = { [unowned self] path in blockingHTML(path: path) }
         pages.scripts = { [unowned self] in
             ScriptsPage.html(scripts: userScripts.scripts,
                              isEnabled: settings.userScriptsEnabled)
@@ -264,7 +266,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         blocking.restore()
         // Le magasin de WebKit ne se vide pas tout seul : les listes de l'ancien bloqueur
         // intégré y dormaient encore, des mois après sa suppression.
-        blocking.sweep()
+        blocking.sweep { [weak self] jetées in
+            self?.blockingLog.record(.swept, "Magasin de WebKit",
+                                     "\(jetées) liste\(jetées > 1 ? "s" : "") périmée"
+                                        + (jetées > 1 ? "s" : "") + " retirée"
+                                        + (jetées > 1 ? "s" : ""))
+        }
         userRules.onChange = { [weak self] in
             self?.applyBlockingToOpenTabs()
             self?.syncChrome()
