@@ -257,6 +257,10 @@ extension AppDelegate {
                 handleSettingsAction(action, payload: payload)
                 return
             }
+            if message.name == ElementPicker.handler {
+                handlePickedElement(payload)
+                return
+            }
             if message.name == "wujiBlocking" {
                 handleBlockingAction(action, id: payload["id"] as? String)
                 return

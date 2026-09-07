@@ -72,6 +72,31 @@ final class ContentBlocker {
         }
     }
 
+    /// Jette du magasin ce qui n'est plus à personne.
+    ///
+    /// **Les règles compilées survivent au code qui les a demandées.** Le magasin de WebKit
+    /// est sur le disque et ne se vide pas tout seul : les six listes de l'ancien bloqueur
+    /// intégré y dormaient encore, des mois après sa suppression, et y seraient restées
+    /// pour toujours. Le même sort attend une liste dont la conversion change de découpage,
+    /// ou qu'on décoche pendant que l'application ne tourne pas.
+    ///
+    /// On ne touche qu'à ce qui porte notre préfixe : le magasin est partagé avec WebKit
+    /// lui-même, qui y range ses propres listes.
+    func sweep() {
+        let keep = Set(settings.enabledRuleLists.flatMap { settings.ruleListFiles[$0] ?? [] }
+            .map { identifier(for: $0) })
+            .union([UserRules.identifier])
+
+        store?.getAvailableContentRuleListIdentifiers { identifiers in
+            MainActor.assumeIsolated {
+                for id in identifiers ?? []
+                where id.hasPrefix("wuji.") && !keep.contains(id) {
+                    self.store?.removeContentRuleList(forIdentifier: id) { _ in }
+                }
+            }
+        }
+    }
+
     // MARK: - Installer, retirer
 
     /// Télécharge, compile et met en service. Rend l'erreur en français, ou `nil`.
@@ -139,9 +164,7 @@ final class ContentBlocker {
     /// qui chargent en même temps de se voler leurs scripts —, donc les règles se posent
     /// une fois par vue, à sa création.
     func apply(to configuration: WKWebViewConfiguration) {
-        for lists in installed.values {
-            for list in lists { configuration.userContentController.add(list) }
-        }
+        reapply(to: configuration.userContentController)
     }
 
     /// Repose les règles sur une vue déjà ouverte : activer une liste doit valoir tout de
@@ -151,7 +174,14 @@ final class ContentBlocker {
         for lists in installed.values {
             for list in lists { controller.add(list) }
         }
+        // Les règles posées à la main sont une liste comme les autres, et se posent avec.
+        if let mine = userRules?.compiled { controller.add(mine) }
     }
+
+    /// Les règles personnelles, pour les poser en même temps que les listes. Une référence
+    /// faible : c'est l'application qui tient les deux, et deux objets qui se retiendraient
+    /// l'un l'autre ne partiraient jamais.
+    weak var userRules: UserRules?
 
     // MARK: - Le magasin de WebKit
 

@@ -20,8 +20,7 @@ extension AppDelegate {
         case .back:    currentTab?.webView.goBack()
         case .forward: currentTab?.webView.goForward()
         case .menu:       NativeMenu.popUp(mainMenu(), below: bar.menuButton)
-        case .blocking:
-            showBlocking(nil)
+        case .blocking:   NativeMenu.popUp(blockingMenu(), below: bar.blockingButton)
         case .scripts:    NativeMenu.popUp(scriptsMenu(), below: bar.scriptsButton)
         case .security:   NativeMenu.popUp(securityMenu(), below: bar.securityButton)
         case .zoomReset:  zoomReset(nil)

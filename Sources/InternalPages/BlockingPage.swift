@@ -25,26 +25,55 @@ enum BlockingPage {
         var unreachable: Bool
     }
 
-    static func html(state: State) -> String {
+    /// Ce que l'en-tête annonce. Extrait parce que la mise à jour sur place le renvoie
+    /// aussi : deux formulations du même compte finiraient par diverger.
+    static func tally(_ state: State) -> String {
         let active = state.installed.count
-        let tally = state.catalog.isEmpty && state.unreachable
+        return state.catalog.isEmpty && state.unreachable
             ? "catalogue injoignable"
             : "\(active) liste\(active > 1 ? "s" : "") en service"
                 + (state.activeRules > 0 ? " · \(format(state.activeRules)) règles" : "")
+    }
 
-        let notice: String
+    /// Ce que la page reçoit pour se mettre à jour **sans se redessiner**.
+    ///
+    /// Recharger la page à chaque changement remettait la liste en haut et effaçait le
+    /// filtre qu'on venait de taper — deux fois de suite, puisque cocher une liste produit
+    /// un état « en cours » puis un état « en service ». Ce n'est pas un détail de confort :
+    /// on ne peut pas cocher trois listes trouvées par un mot-clé si chaque clic efface le
+    /// mot-clé.
+    static func patch(_ state: State) -> String {
+        let payload: [String: Any] = [
+            "tally": tally(state),
+            "notice": notice(state),
+            "installed": Array(state.installed),
+            "outdated": Array(state.outdated)
+        ]
+        let json = (try? JSONSerialization.data(withJSONObject: payload))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        return "window.__wujiBlockingPatch && window.__wujiBlockingPatch(\(json))"
+    }
+
+    private static func notice(_ state: State) -> String {
         if let busy = state.busy {
-            notice = #"<p class="busy">"# + escape(busy) + "…</p>"
-        } else if let failure = state.failure {
-            notice = #"<p class="failure">"# + escape(failure) + "</p>"
-        } else if state.unreachable {
-            notice = """
+            return #"<p class="busy">"# + escape(busy) + "…</p>"
+        }
+        if let failure = state.failure {
+            return #"<p class="failure">"# + escape(failure) + "</p>"
+        }
+        if state.unreachable {
+            return """
             <p class="failure">Le catalogue n'a pas pu être lu. Vérifiez la connexion, puis
             <button class="link" data-action="reload">réessayez</button>.</p>
             """
-        } else {
-            notice = ""
         }
+        return ""
+    }
+
+    static func html(state: State) -> String {
+        let tally = tally(state)
+
+        let notice = notice(state)
 
         return InternalShell.page(
             title: "Blocage", current: "wuji://blocking",
@@ -57,7 +86,7 @@ enum BlockingPage {
                 <button class="ghost" data-action="reload">Actualiser</button>
               </header>
               <main>
-                \(notice)
+                <div id="notice">\(notice)</div>
                 \(state.catalog.isEmpty ? "" : search)
                 <ul>\(state.catalog.map { row($0, state) }.joined())</ul>
                 <p class="note">
@@ -104,18 +133,20 @@ enum BlockingPage {
             // une version manquante à afficher, alors qu'il n'y en a simplement pas.
             + (list.version.isEmpty ? "" : " · v\(list.version)")
 
-        let update = installed && outdated ? """
-        <button class="button" data-action="update">Mettre à jour</button>
-        """ : ""
-
+        // **Le bouton et la mention existent toujours, cachés quand ils ne servent pas.**
+        // La page se met à jour sur place — cocher une liste ne la redessine plus —, et
+        // patcher un attribut `hidden` est autrement plus sûr que de reconstruire du HTML
+        // depuis du JavaScript.
+        let stale = outdated && installed
         return """
         <li data-id="\(escape(list.id))">
           <input type="checkbox" class="toggle"\(installed ? " checked" : "")>
           <div class="body">
-            <span class="name">\(escape(list.name))\(outdated && installed ? " · à jour disponible" : "")</span>
+            <span class="name">\(escape(list.name))<span class="stale"\(stale ? "" : " hidden") \
+        > · à jour disponible</span></span>
             <span class="detail">\(escape(detail))</span>
           </div>
-          \(update)
+          <button class="button update" data-action="update"\(stale ? "" : " hidden")>Mettre à jour</button>
         </li>
         """
     }
@@ -184,6 +215,31 @@ enum BlockingPage {
       const row = button.closest('li');
       send({ action: button.dataset.action, id: row ? row.dataset.id : null });
     });
+
+    // **La page se met à jour sur place, elle ne se recharge pas.** Recharger remettait la
+    // liste en haut et effaçait le filtre à chaque case cochée. On patche donc ce qui a
+    // changé — le compte, le bandeau, l'état de chaque ligne — et rien d'autre ne bouge.
+    window.__wujiBlockingPatch = (état) => {
+      const compte = document.querySelector('header .titles p');
+      if (compte) compte.textContent = état.tally;
+      const bandeau = document.getElementById('notice');
+      if (bandeau) bandeau.innerHTML = état.notice;
+
+      const posées = new Set(état.installed);
+      const vieilles = new Set(état.outdated);
+      for (const ligne of document.querySelectorAll('li[data-id]')) {
+        const id = ligne.dataset.id;
+        const case_ = ligne.querySelector('.toggle');
+        // On ne touche à la case que si elle ment : réécrire `checked` à l'identique
+        // relancerait l'animation de la coche à chaque rafraîchissement.
+        if (case_ && case_.checked !== posées.has(id)) case_.checked = posées.has(id);
+        const périmée = posées.has(id) && vieilles.has(id);
+        const mention = ligne.querySelector('.stale');
+        if (mention) mention.hidden = !périmée;
+        const bouton = ligne.querySelector('.update');
+        if (bouton) bouton.hidden = !périmée;
+      }
+    };
 
     // Le filtrage se fait ici : cent soixante et une lignes qu'un aller-retour par message
     // redessinerait à chaque frappe, pour un texte que la page a déjà sous la main.

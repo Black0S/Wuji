@@ -162,6 +162,48 @@ c'est la **version installée** qu'on retient, et non la présence du fichier : 
 dit s'il faut refaire le travail. C'est aussi ce qui explique la place occupée — décocher
 une liste la rend.
 
+### La limite des 150 000 règles
+
+WebKit refuse de compiler plus de cent cinquante mille règles dans une seule liste. Les
+grandes listes la dépassent largement : AdGuard Tracking Protection en compte 329 494,
+HaGeZi's Gambling Blocklist 469 517.
+
+**La limite porte sur une liste, pas sur le navigateur.** La conversion découpe donc à
+150 000 exactement, et Wuji compile chaque morceau en liste distincte puis les pose toutes
+sur la vue. Mesuré sur cette machine : `AdGuard-DNS-filter` occupe deux entrées du magasin,
+`AdGuard-Tracking-Protection-filter` en occupe trois, et treize listes totalisant **782 754
+règles** sont en service ensemble.
+
+Ce qui se paie, c'est la place : les tables compilées font 308 Mo pour ces treize listes.
+C'est le prix d'un filtrage qui coûte zéro à l'exécution — décocher une liste la rend.
+
+**Le magasin ne se vide pas tout seul**, et Wuji le balaie au lancement : les six listes de
+l'ancien bloqueur intégré y dormaient encore, des mois après sa suppression, et y seraient
+restées pour toujours. Seul ce qui porte notre préfixe est touché — le magasin est partagé
+avec WebKit, qui y range les siennes.
+
+### Masquer un élément soi-même
+
+Une liste bloque ce que quelqu'un d'autre a listé ; il reste toujours l'encart d'un site
+qu'on est seul à visiter. Le bouclier de la barre ouvre **« Masquer un élément… »** : le
+survol met en évidence, le clic choisit, `esc` renonce.
+
+**Ce qui en sort est une règle WebKit, pas un script.** Le sélecteur devient une règle
+`css-display-none` compilée avec les autres : elle s'applique dans le moteur, avant que la
+page ne se dessine. Un masquage posé par un script arriverait après le premier rendu — on
+verrait l'élément apparaître puis disparaître.
+
+Le sélecteur est calculé court : un identifiant s'il est unique, sinon on remonte les
+parents en s'appuyant sur les classes et l'on s'arrête dès que le chemin ne désigne plus
+qu'un élément. Un chemin complet depuis `body` casserait au premier remaniement de la page.
+La règle est rangée sous le **site** et non sous la machine — `www.exemple.fr` et
+`m.exemple.fr` servent la même page, et c'est la liste des suffixes publics qui dit où
+s'arrête « ce site ».
+
+**Elles sont à vous et ne vont nulle part** : écrites dans les réglages, jamais envoyées.
+Une règle dit ce qu'on ne veut pas voir sur un site qu'on visite — c'est une information sur
+soi, pas une contribution.
+
 ### Ce que la conversion ne sait pas rendre
 
 Le pourcentage affiché est la part des règles d'origine convertie. En dessous de cent, une

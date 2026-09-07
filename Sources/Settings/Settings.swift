@@ -178,6 +178,17 @@ final class Settings {
         didSet { store.set(ruleListRules, forKey: Key.ruleListRules); changed() }
     }
 
+    /// Les règles posées à la main, par le sélecteur d'éléments.
+    ///
+    /// **Elles ne vont nulle part.** Une règle dit ce qu'on ne veut pas voir sur un site
+    /// qu'on visite : c'est une information sur soi, et elle reste ici.
+    var userBlockRules: [UserRules.Rule] {
+        didSet {
+            store.set(try? JSONEncoder().encode(userBlockRules), forKey: Key.userBlockRules)
+            changed()
+        }
+    }
+
     /// Retient tout ce qu'il faut pour remettre une liste en service au lancement suivant.
     func rememberRuleList(_ id: String, version: String, files: [String], rules: Int) {
         if !enabledRuleLists.contains(id) { enabledRuleLists.append(id) }
@@ -213,6 +224,7 @@ final class Settings {
         static let ruleListVersions = "ruleListVersions"
         static let ruleListFiles = "ruleListFiles"
         static let ruleListRules = "ruleListRules"
+        static let userBlockRules = "userBlockRules"
         /// L'ancienne clé, relue une fois pour ne rien perdre — voir l'initialisation.
         static let extensionFolders = "extensionFolders"
     }
@@ -233,6 +245,8 @@ final class Settings {
         ruleListVersions = store.dictionary(forKey: Key.ruleListVersions) as? [String: String] ?? [:]
         ruleListFiles = store.dictionary(forKey: Key.ruleListFiles) as? [String: [String]] ?? [:]
         ruleListRules = store.dictionary(forKey: Key.ruleListRules) as? [String: Int] ?? [:]
+        userBlockRules = (store.data(forKey: Key.userBlockRules))
+            .flatMap { try? JSONDecoder().decode([UserRules.Rule].self, from: $0) } ?? []
     }
 
     private func changed() { onChange?() }

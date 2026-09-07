@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
 
     /// Le blocage de contenu : ce qui est compilé, et ce qui l'applique.
     lazy var blocking = ContentBlocker(settings: settings)
+    /// Les règles posées à la main par le sélecteur d'éléments.
+    lazy var userRules = UserRules(settings: settings)
     /// Le catalogue lu au dernier passage sur la page. Il n'est pas gardé sur le disque :
     /// deux cents kilo-octets relus à l'ouverture valent mieux qu'un catalogue d'hier
     /// qu'on ne saurait pas distinguer d'un catalogue d'aujourd'hui.
@@ -130,6 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         config.userContentController.add(self, name: "wujiError")
         config.userContentController.add(self, name: PageContextMenu.handler)
         config.userContentController.add(self, name: "wujiBlocking")
+        config.userContentController.add(self, name: ElementPicker.handler)
         config.userContentController.add(self, name: RouteWatcher.handler)
         config.userContentController.add(self, name: PasswordForm.handler)
         config.userContentController.addUserScript(PageContextMenu.script)
@@ -257,7 +260,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
             self?.syncChrome()
             self?.refreshBlockingPages()
         }
+        blocking.userRules = userRules
         blocking.restore()
+        // Le magasin de WebKit ne se vide pas tout seul : les listes de l'ancien bloqueur
+        // intégré y dormaient encore, des mois après sa suppression.
+        blocking.sweep()
+        userRules.onChange = { [weak self] in
+            self?.applyBlockingToOpenTabs()
+            self?.syncChrome()
+        }
+        Task { @MainActor in await userRules.restore() }
         restoreSession()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()

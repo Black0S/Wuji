@@ -13,10 +13,25 @@ extension AppDelegate {
         loadRuleCatalog()
     }
 
+    /// Met à jour les pages de blocage ouvertes — **sur place, pas par un rechargement**.
+    ///
+    /// Recharger remettait la liste en haut et effaçait le filtre qu'on venait de taper, et
+    /// cela deux fois par case cochée puisqu'installer produit un état « en cours » puis un
+    /// état « en service ». Ce n'est pas un détail de confort : on ne peut pas cocher trois
+    /// listes trouvées par un mot-clé si chaque clic efface le mot-clé.
+    ///
+    /// Le repli sur le rechargement reste pour le premier affichage — une page qui n'a pas
+    /// encore posé son crochet ne saurait pas quoi faire du correctif.
     func refreshBlockingPages() {
-        spaces.flatMap(\.allTabs)
-            .filter { $0.url?.host() == "blocking" }
-            .forEach { $0.webView.reload() }
+        let patch = BlockingPage.patch(blockingState)
+        for tab in spaces.flatMap(\.allTabs) where tab.url?.host() == "blocking" {
+            tab.webView.evaluateJavaScript(patch) { value, _ in
+                MainActor.assumeIsolated {
+                    guard value == nil else { return }
+                    tab.webView.reload()
+                }
+            }
+        }
     }
 
     /// Ce que la page affiche, à l'instant où on la dessine.
@@ -55,6 +70,70 @@ extension AppDelegate {
                 catalogUnreachable = ruleCatalog.isEmpty
             }
             refreshBlockingPages()
+        }
+    }
+
+    // MARK: - Le menu du bouclier
+
+    /// Ce que le bouclier ouvre.
+    ///
+    /// **Pas la page directement.** Le bouclier porte deux gestes de natures différentes :
+    /// choisir des listes, ce qui se fait rarement, et masquer un élément de la page qu'on
+    /// regarde, ce qui se fait sur le coup. Mener droit à la page aurait enterré le second
+    /// derrière une navigation, pour le seul motif que le premier existait avant.
+    func blockingMenu() -> [ActionItem] {
+        var items: [ActionItem] = []
+        let host = currentTab?.url.flatMap { UserRules.registrable($0.host ?? "") }
+
+        if let host, currentTab?.url?.scheme?.hasPrefix("http") == true {
+            items.append(ActionItem(title: "Masquer un élément…", symbol: "square.dashed",
+                                    action: { [weak self] in self?.startElementPicker() }))
+            let mine = userRules.rules.filter { $0.host == host }
+            if !mine.isEmpty {
+                items.append(ActionItem(
+                    title: "Retirer mes \(mine.count) règle\(mine.count > 1 ? "s" : "") sur \(host)",
+                    symbol: "arrow.uturn.left", isDestructive: true,
+                    action: { [weak self] in
+                        self?.userRules.removeAll(for: host)
+                        self?.layout.toast.show("Règles de « \(host) » retirées")
+                    }))
+            }
+            items.append(.separator)
+        }
+        items.append(ActionItem(title: "Listes de blocage…", symbol: "shield.lefthalf.filled",
+                                action: { [weak self] in self?.showBlocking(nil) }))
+        return items
+    }
+
+    /// Ouvre le sélecteur sur la page courante.
+    ///
+    /// Il n'y a rien à ouvrir sur une page interne ou une page d'erreur : une règle y
+    /// désignerait un élément de Wuji, pas du web.
+    func startElementPicker() {
+        guard let tab = currentTab, let url = tab.url,
+              url.scheme?.hasPrefix("http") == true else {
+            layout.toast.show("Rien à masquer sur cette page")
+            return
+        }
+        tab.webView.evaluateJavaScript(ElementPicker.script)
+        layout.toast.show("Désignez l'élément à masquer — échap pour renoncer")
+    }
+
+    /// Ce que le sélecteur renvoie.
+    func handlePickedElement(_ payload: [String: Any]) {
+        guard let selector = payload["selector"] as? String,
+              let host = payload["host"] as? String, !selector.isEmpty else { return }
+        Task { @MainActor in
+            let site = UserRules.registrable(host)
+            guard await userRules.add(host: site, selector: selector) else {
+                layout.toast.show("Cette règle existait déjà")
+                return
+            }
+            applyBlockingToOpenTabs()
+            syncChrome()
+            layout.toast.show("Masqué sur « \(site) » — rechargez pour voir l'effet") {
+                [weak self] in self?.currentTab?.webView.reload()
+            }
         }
     }
 
