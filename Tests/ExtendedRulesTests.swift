@@ -123,6 +123,45 @@ struct ExtendedRulesTests {
         #expect(p.scriptlets.isEmpty)
     }
 
+    @Test func uneAnnexeIncompleteNeFaitPasTomberLaListe() {
+        // **Swift ne se sert pas des valeurs par défaut quand une clé manque : il refuse.**
+        // Une annexe sans `procedural`, ou une entrée sans `excluded`, aurait donc fait
+        // tomber la liste entière — silencieusement, et l'on aurait cherché longtemps
+        // pourquoi ses règles n'arrivaient pas.
+        let minimal = #"{"styles":[{"selector":".a","declarations":"display:none"}]}"#
+        let lu = ExtendedRules.decode(Data(minimal.utf8))
+        #expect(lu?.styles.count == 1)
+        #expect(lu?.styles.first?.domains.isEmpty == true)
+        #expect(lu?.styles.first?.exception == false)
+
+        #expect(ExtendedRules.decode(Data("{}".utf8))?.isEmpty == true)
+        // Ce qui n'est pas du JSON reste refusé : la liste garde alors ses règles compilées,
+        // qui sont l'essentiel.
+        #expect(ExtendedRules.decode(Data("pas du json".utf8)) == nil)
+    }
+
+    @Test func leCacheSeRelitSansReseau() throws {
+        let dossier = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("wuji-cache-\(UUID().uuidString)", isDirectory: true)
+        let magasin = ExtendedStore(directory: dossier)
+        let voulu = ExtendedStore.Wanted(id: "EasyList.txt", file: "Extended-EasyList.json",
+                                         cache: ExtendedStore.cacheName("EasyList.txt", "2.1"))
+
+        // Rien sur le disque : il faut aller chercher, et le magasin le dit.
+        #expect(!magasin.loadCached([voulu]))
+
+        let contenu = #"{"scriptlets":[{"domains":["exemple.fr"],"name":"aopr","args":["a.b"]}]}"#
+        try Data(contenu.utf8).write(to: dossier.appendingPathComponent(voulu.cache))
+        #expect(magasin.loadCached([voulu]))
+        #expect(magasin.payload(for: "exemple.fr").scriptlets
+                == [["abort-on-property-read", "a.b"]])
+
+        // Une liste sans annexe ne manque jamais : elle n'a rien à charger.
+        let sansAnnexe = ExtendedStore.Wanted(id: "Autre.txt", file: nil, cache: "Autre.txt@1.json")
+        #expect(magasin.loadCached([voulu, sansAnnexe]))
+        try? FileManager.default.removeItem(at: dossier)
+    }
+
     @Test func leMoteurNePartQueSilADuTravail() {
         var feuille = ExtendedStore.Payload()
         feuille.css = ".pub { display: none }"

@@ -9,13 +9,35 @@ extension AppDelegate {
     /// Rien n'est téléchargé quand l'interrupteur est fermé : une fonction coupée ne doit
     /// pas coûter de réseau, sans quoi la couper ne servirait qu'à moitié.
     func syncExtendedRules() {
-        guard settings.injectedRulesEnabled else { return extended.clear() }
+        guard settings.injectedRulesEnabled, !settings.enabledRuleLists.isEmpty else {
+            return extended.clear()
+        }
+
+        // **Rien n'est demandé à personne quand rien n'a changé.** On sait déjà, pour chaque
+        // liste en service, si elle publie une annexe et sous quel nom : le retenir évite de
+        // relire le catalogue à chaque lancement pour l'apprendre. Un navigateur qui
+        // contacte un dépôt au démarrage doit avoir une raison, et « savoir ce qu'il sait
+        // déjà » n'en est pas une.
+        let voulus = settings.enabledRuleLists.map { id in
+            ExtendedStore.Wanted(
+                id: id,
+                file: settings.extendedFiles[id].flatMap { $0.isEmpty ? nil : $0 },
+                cache: ExtendedStore.cacheName(id, settings.ruleListVersions[id] ?? ""))
+        }
+        let tousConnus = settings.enabledRuleLists.allSatisfy { settings.extendedFiles[$0] != nil }
+        if tousConnus, extended.loadCached(voulus) { return }
+
         Task { @MainActor in
             if ruleCatalog.isEmpty {
                 ruleCatalog = (try? await RuleCatalog.fetch()) ?? []
             }
+            guard !ruleCatalog.isEmpty else { return }
             let posées = Set(settings.enabledRuleLists)
-            await extended.sync(ruleCatalog.filter { posées.contains($0.id) })
+            let listes = ruleCatalog.filter { posées.contains($0.id) }
+            settings.batch {
+                for liste in listes { settings.extendedFiles[liste.id] = liste.extendedFile ?? "" }
+            }
+            await extended.sync(listes)
         }
     }
 

@@ -73,28 +73,67 @@ final class ExtendedStore {
     ///
     /// Les téléchargements partent **ensemble** : ce sont quatre-vingt-quatre fichiers au
     /// plus, indépendants les uns des autres, et les enchaîner ne paierait que l'attente.
-    func sync(_ lists: [RuleList]) async {
-        let voulus = lists.compactMap { liste -> (id: String, fichier: String, cache: String)? in
-            guard let annexe = liste.extendedFile else { return nil }
-            return (liste.id, annexe, Self.cacheName(liste))
+    /// Ce qu'on veut avoir : une liste, son annexe si elle en a une, et le nom du fichier
+    /// de cache qui porte sa version.
+    struct Wanted: Sendable {
+        let id: String
+        /// `nil` quand la liste ne publie pas d'annexe — soixante-dix-sept sur cent
+        /// soixante et une. Le savoir évite d'aller le redemander à chaque lancement.
+        let file: String?
+        let cache: String
+    }
+
+    static func wanted(for list: RuleList) -> Wanted {
+        Wanted(id: list.id, file: list.extendedFile, cache: cacheName(list))
+    }
+
+    /// Charge ce qui est déjà sur le disque, **sans toucher au réseau**.
+    ///
+    /// Rend `false` s'il manque quelque chose : à l'appelant d'aller chercher le catalogue.
+    /// C'est ce qui permet de ne rien demander à personne au lancement quand rien n'a
+    /// changé — un navigateur qui contacte un dépôt à chaque démarrage le fait savoir, ou
+    /// ne le fait pas.
+    @discardableResult
+    func loadCached(_ voulus: [Wanted]) -> Bool {
+        var chargées: [String: ExtendedRules] = [:]
+        for item in voulus {
+            guard item.file != nil else { continue }
+            let url = directory.appendingPathComponent(item.cache)
+            guard let data = try? Data(contentsOf: url),
+                  let règles = ExtendedRules.decode(data) else { return false }
+            chargées[item.id] = règles
         }
+        loaded = chargées
+        rebuild()
+        onChange?()
+        return true
+    }
+
+    func sync(_ lists: [RuleList]) async {
+        await sync(lists.map(Self.wanted(for:)))
+    }
+
+    func sync(_ voulus: [Wanted]) async {
 
         // Ce qui n'est plus voulu s'en va du disque : une annexe périmée est un fichier de
         // plusieurs mégaoctets que rien ne relira jamais.
-        let gardés = Set(voulus.map(\.cache))
+        let gardés = Set(voulus.filter { $0.file != nil }.map(\.cache))
         for fichier in (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         where !gardés.contains(fichier) {
             try? FileManager.default.removeItem(at: directory.appendingPathComponent(fichier))
         }
 
         let manquants = voulus.filter {
-            !FileManager.default.fileExists(atPath: directory.appendingPathComponent($0.cache).path)
+            $0.file != nil
+                && !FileManager.default.fileExists(
+                    atPath: directory.appendingPathComponent($0.cache).path)
         }
         if !manquants.isEmpty {
             let dossier = directory
             await withTaskGroup(of: (String, Data?).self) { groupe in
                 for item in manquants {
-                    groupe.addTask { (item.cache, await Self.download(item.fichier)) }
+                    guard let fichier = item.file else { continue }
+                    groupe.addTask { (item.cache, await Self.download(fichier)) }
                 }
                 for await (nom, data) in groupe {
                     guard let data, ExtendedRules.decode(data) != nil else { continue }
@@ -104,7 +143,7 @@ final class ExtendedStore {
         }
 
         loaded = [:]
-        for item in voulus {
+        for item in voulus where item.file != nil {
             let url = directory.appendingPathComponent(item.cache)
             guard let data = try? Data(contentsOf: url),
                   let règles = ExtendedRules.decode(data) else { continue }
@@ -135,8 +174,10 @@ final class ExtendedStore {
         clear()
     }
 
-    private static func cacheName(_ liste: RuleList) -> String {
-        let base = (liste.id + "@" + liste.version)
+    static func cacheName(_ liste: RuleList) -> String { cacheName(liste.id, liste.version) }
+
+    static func cacheName(_ id: String, _ version: String) -> String {
+        let base = (id + "@" + version)
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: ":", with: "_")
         return base + ".json"

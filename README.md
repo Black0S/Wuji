@@ -272,6 +272,13 @@ nouvelle en service. Seules celles dont la nouvelle version n'a plus l'usage son
 une conversion qui change de découpage laisserait sinon ses tranches d'hier sur le disque
 pour toujours.
 
+**« Périmée » ne se lit pas que dans la version.** Seize listes du dépôt n'en publient
+aucune — celles d'uBlock et d'EasyList n'ont pas de numéro dans leur en-tête —, et comparer
+deux chaînes vides les déclarait à jour pour toujours. Une conversion améliorée ne touche pas
+non plus à la version d'origine : un correctif du convertisseur n'atteignait donc personne.
+Le nombre de règles produites répond aux deux — il vient du même index, il change quand la
+liste change *et* quand la conversion change — et il était déjà retenu.
+
 **Décocher rend la place, tout de suite.** Les règles compilées ne sont pas le fichier
 téléchargé : ce sont des tables de décision, et elles pèsent davantage. Le magasin de WebKit
 est sur le disque et ne se vide pas tout seul — décocher une liste l'en retire, fichier par

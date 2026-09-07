@@ -239,9 +239,20 @@ final class ContentBlocker {
     }
 
     /// La version installée diffère-t-elle de celle du catalogue ?
+    ///
+    /// **La version amont ne dit pas tout, et pour deux raisons mesurées.** Seize listes du
+    /// dépôt n'en publient aucune — les listes d'uBlock et celles d'EasyList n'ont pas de
+    /// numéro dans leur en-tête : comparer deux chaînes vides les aurait déclarées à jour
+    /// pour toujours. Et une conversion améliorée ne touche pas à la version d'origine :
+    /// un correctif du convertisseur n'aurait donc atteint personne.
+    ///
+    /// Le nombre de règles produites répond aux deux : il vient du même index, il change
+    /// quand la liste change **et** quand la conversion change, et on le retient déjà.
     func isOutdated(_ list: RuleList) -> Bool {
         guard let known = settings.ruleListVersions[list.id] else { return false }
-        return known != list.version
+        if known != list.version { return true }
+        if let comptées = settings.ruleListRules[list.id], comptées != list.rules { return true }
+        return false
     }
 
     func isInstalled(_ id: String) -> Bool { installed[id] != nil }

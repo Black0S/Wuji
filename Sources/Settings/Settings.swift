@@ -185,6 +185,15 @@ final class Settings {
         didSet { store.set(ruleListFiles, forKey: Key.ruleListFiles); changed() }
     }
 
+    /// Le nom de l'annexe de chaque liste — vide quand elle n'en publie pas.
+    ///
+    /// **Retenu pour ne pas avoir à redemander.** Sans cela, il fallait relire le catalogue
+    /// à chaque lancement, uniquement pour savoir lesquelles des listes en service ont une
+    /// annexe — c'est-à-dire contacter un dépôt au démarrage alors que rien n'a changé.
+    var extendedFiles: [String: String] {
+        didSet { store.set(extendedFiles, forKey: Key.extendedFiles); changed() }
+    }
+
     /// Combien de règles chaque liste apporte — pour le dire, rien d'autre.
     var ruleListRules: [String: Int] {
         didSet { store.set(ruleListRules, forKey: Key.ruleListRules); changed() }
@@ -226,6 +235,7 @@ final class Settings {
             ruleListVersions[id] = nil
             ruleListFiles[id] = nil
             ruleListRules[id] = nil
+            extendedFiles[id] = nil
         }
     }
 
@@ -265,6 +275,7 @@ final class Settings {
         static let agent = "agent"
         static let userScripts = "userScriptsEnabled"
         static let injectedRules = "injectedRulesEnabled"
+        static let extendedFiles = "extendedRuleFiles"
         static let checkUpdates = "checkUpdatesAtLaunch"
         static let passwords = "passwordsEnabled"
         static let enabledRuleLists = "enabledRuleLists"
@@ -288,6 +299,7 @@ final class Settings {
         agent = Agent(rawValue: store.string(forKey: Key.agent) ?? "") ?? .safari
         userScriptsEnabled = store.object(forKey: Key.userScripts) as? Bool ?? true
         injectedRulesEnabled = store.object(forKey: Key.injectedRules) as? Bool ?? true
+        extendedFiles = store.dictionary(forKey: Key.extendedFiles) as? [String: String] ?? [:]
         checkUpdatesAtLaunch = store.bool(forKey: Key.checkUpdates)
         passwordsEnabled = store.object(forKey: Key.passwords) as? Bool ?? true
         enabledRuleLists = store.stringArray(forKey: Key.enabledRuleLists) ?? []

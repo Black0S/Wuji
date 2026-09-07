@@ -18,6 +18,12 @@ import Foundation
 struct ExtendedRules: Sendable {
 
     /// Une déclaration de style posée sur un sélecteur — `#$#` en syntaxe AdGuard.
+    ///
+    /// **Le décodage est explicite, et ce n'est pas une préférence de style.** Swift ne se
+    /// sert *pas* de la valeur par défaut d'une propriété quand la clé manque : il refuse.
+    /// Une annexe dont une entrée n'écrit pas `excluded` aurait donc fait tomber la liste
+    /// entière, silencieusement, et l'on aurait cherché longtemps pourquoi les règles d'une
+    /// liste n'arrivaient pas. Le format du dépôt peut changer sans nous casser.
     struct Style: Decodable, Sendable {
         var domains: [String] = []
         var excluded: [String] = []
@@ -25,6 +31,26 @@ struct ExtendedRules: Sendable {
         let declarations: String
         var extended = false
         var exception = false
+
+        init(domains: [String] = [], excluded: [String] = [], selector: String,
+             declarations: String, extended: Bool = false, exception: Bool = false) {
+            self.domains = domains; self.excluded = excluded; self.selector = selector
+            self.declarations = declarations; self.extended = extended; self.exception = exception
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            domains = try c.decodeIfPresent([String].self, forKey: .domains) ?? []
+            excluded = try c.decodeIfPresent([String].self, forKey: .excluded) ?? []
+            selector = try c.decode(String.self, forKey: .selector)
+            declarations = try c.decodeIfPresent(String.self, forKey: .declarations) ?? ""
+            extended = try c.decodeIfPresent(Bool.self, forKey: .extended) ?? false
+            exception = try c.decodeIfPresent(Bool.self, forKey: .exception) ?? false
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case domains, excluded, selector, declarations, extended, exception
+        }
     }
 
     /// Un sélecteur que le CSS seul ne sait pas résoudre — `:contains()`, `:upward()`,
@@ -35,6 +61,22 @@ struct ExtendedRules: Sendable {
         var excluded: [String] = []
         let selector: String
         var exception = false
+
+        init(domains: [String] = [], excluded: [String] = [], selector: String,
+             exception: Bool = false) {
+            self.domains = domains; self.excluded = excluded
+            self.selector = selector; self.exception = exception
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            domains = try c.decodeIfPresent([String].self, forKey: .domains) ?? []
+            excluded = try c.decodeIfPresent([String].self, forKey: .excluded) ?? []
+            selector = try c.decode(String.self, forKey: .selector)
+            exception = try c.decodeIfPresent(Bool.self, forKey: .exception) ?? false
+        }
+
+        private enum CodingKeys: String, CodingKey { case domains, excluded, selector, exception }
     }
 
     /// Une primitive nommée à exécuter dans la page — `set-constant`, `set-cookie`…
@@ -51,6 +93,26 @@ struct ExtendedRules: Sendable {
         var args: [String] = []
         var syntax = ""
         var exception = false
+
+        init(domains: [String] = [], excluded: [String] = [], name: String,
+             args: [String] = [], syntax: String = "", exception: Bool = false) {
+            self.domains = domains; self.excluded = excluded; self.name = name
+            self.args = args; self.syntax = syntax; self.exception = exception
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            domains = try c.decodeIfPresent([String].self, forKey: .domains) ?? []
+            excluded = try c.decodeIfPresent([String].self, forKey: .excluded) ?? []
+            name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+            args = try c.decodeIfPresent([String].self, forKey: .args) ?? []
+            syntax = try c.decodeIfPresent(String.self, forKey: .syntax) ?? ""
+            exception = try c.decodeIfPresent(Bool.self, forKey: .exception) ?? false
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case domains, excluded, name, args, syntax, exception
+        }
     }
 
     var styles: [Style] = []
@@ -67,6 +129,15 @@ struct ExtendedRules: Sendable {
         var styles: [Style] = []
         var procedural: [Procedural] = []
         var scriptlets: [Scriptlet] = []
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            styles = try c.decodeIfPresent([Style].self, forKey: .styles) ?? []
+            procedural = try c.decodeIfPresent([Procedural].self, forKey: .procedural) ?? []
+            scriptlets = try c.decodeIfPresent([Scriptlet].self, forKey: .scriptlets) ?? []
+        }
+
+        private enum CodingKeys: String, CodingKey { case styles, procedural, scriptlets }
     }
 
     /// Lit un fichier `Extended-<Nom>.json`. Rend `nil` s'il n'est pas lisible : une liste
