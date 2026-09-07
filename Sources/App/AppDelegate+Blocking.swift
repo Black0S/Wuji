@@ -52,19 +52,8 @@ extension AppDelegate {
             installed: Set(settings.enabledRuleLists),
             outdated: Set(ruleCatalog.filter { blocking.isOutdated($0) }.map(\.id)),
             activeRules: blocking.ruleCount,
-            busy: {
-                switch blocking.progress {
-                case .downloading(let name): return "Téléchargement de « \(name) »"
-                case .compiling(let name):   return "Compilation de « \(name) »"
-                default:                     return nil
-                }
-            }(),
-            failure: {
-                if case .failed(let name, let why) = blocking.progress {
-                    return "« \(name) » : \(why)"
-                }
-                return nil
-            }(),
+            working: blocking.working,
+            failure: blocking.failure,
             unreachable: catalogUnreachable,
             paused: settings.pausedHosts)
     }
@@ -265,8 +254,13 @@ extension AppDelegate {
         case "install", "update":
             guard let id, let list = ruleCatalog.first(where: { $0.id == id }) else { return }
             Task { @MainActor in
-                if action == "update" { blocking.remove(id) }
-                if let failure = await blocking.install(list) {
+                // **Mettre à jour n'est plus « retirer puis réinstaller ».** Une coupure
+                // entre les deux laissait la liste décochée alors qu'on avait demandé le
+                // contraire : la nouvelle version se compile d'abord, et les anciennes
+                // tranches ne partent qu'une fois la nouvelle en service.
+                let failure = action == "update" ? await blocking.update(list)
+                                                 : await blocking.install(list)
+                if let failure {
                     layout.toast.show("« \(list.name) » : \(failure)")
                 } else {
                     layout.toast.show("« \(list.name) » en service — \(list.rules) règles")
@@ -275,13 +269,32 @@ extension AppDelegate {
                 refreshBlockingPages()
                 syncChrome()
             }
+        case "update-all":
+            let périmées = BlockingPage.updatable(blockingState)
+            guard !périmées.isEmpty else { return }
+            Task { @MainActor in
+                let échecs = await blocking.updateAll(périmées)
+                // **Un seul repositionnement des règles, à la fin.** Reposer dix-neuf fois
+                // les listes sur chaque onglet ouvert coûte plus que la mise à jour
+                // elle-même, et rien de visible ne se produit entre-temps.
+                applyBlockingToOpenTabs()
+                refreshBlockingPages()
+                syncChrome()
+                layout.toast.show(échecs.isEmpty
+                    ? "\(périmées.count) liste\(périmées.count > 1 ? "s" : "") à jour"
+                    : "\(périmées.count - échecs.count) sur \(périmées.count) — \(échecs[0])")
+            }
         case "remove":
             guard let id else { return }
             let name = ruleCatalog.first { $0.id == id }?.name ?? id
+            // Les règles compilées partent du magasin avec elle : elles pèsent sur le
+            // disque bien plus que le fichier téléchargé, et rien ne les jetterait plus
+            // tard si on les laissait là.
             blocking.remove(id)
+            applyBlockingToOpenTabs()
             refreshBlockingPages()
             syncChrome()
-            layout.toast.show("« \(name) » retirée")
+            layout.toast.show("« \(name) » retirée — règles supprimées du disque")
         default:
             break
         }

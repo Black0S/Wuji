@@ -21,12 +21,28 @@ import WebKit
 @MainActor
 final class ContentBlocker {
 
-    /// Ce qu'une liste est en train de faire, pour que la page le dise.
-    enum Progress: Equatable {
-        case idle
-        case downloading(String)
-        case compiling(String)
-        case failed(String, String)
+    /// Le dernier échec, s'il y en a eu un. Il porte l'identité autant que le nom : la
+    /// page doit savoir **quelle ligne** a échoué pour lui rendre sa case, et un nom
+    /// affiché ne suffit pas à retrouver une ligne.
+    struct Failure: Equatable {
+        let id: String
+        let name: String
+        let why: String
+    }
+
+    /// Un fichier téléchargé, prêt à compiler. Séparé du téléchargement pour que celui-ci
+    /// puisse se faire hors de l'acteur principal : convertir trente-sept mégaoctets en
+    /// chaîne sur le fil de l'interface fige la fenêtre le temps de la conversion.
+    struct Ready: Sendable {
+        let identifier: String
+        let json: String
+    }
+
+    /// Ce qu'un téléchargement rapporte. Un type à nous plutôt que `Result` : la raison
+    /// d'un refus est une phrase qu'on affiche, pas une erreur qu'on relance.
+    enum Fetched: Sendable {
+        case ready([Ready])
+        case refused(String)
     }
 
     private let settings: Settings
@@ -34,7 +50,15 @@ final class ContentBlocker {
 
     /// Les listes compilées et prêtes, par identité de liste.
     private(set) var installed: [String: [WKContentRuleList]] = [:]
-    private(set) var progress: Progress = .idle
+    /// Ce que chaque liste est en train de faire — « téléchargement », « compilation ».
+    ///
+    /// **Un dictionnaire, pas un état unique.** « Tout mettre à jour » en enchaîne dix-neuf,
+    /// et un seul état courant aurait obligé la page à deviner de qui il parlait. C'est
+    /// aussi ce qui permet de tenir la case cochée pendant le travail : une liste en cours
+    /// d'installation n'est pas encore dans les réglages, et la page la décochait sous le
+    /// doigt de celui qui venait de la cocher.
+    private(set) var working: [String: String] = [:]
+    private(set) var failure: Failure?
     /// Prévenu quand l'état change — la page se redessine, la barre rallume son bouclier.
     var onChange: (() -> Void)?
 
@@ -59,7 +83,7 @@ final class ContentBlocker {
             Task { @MainActor in
                 var lists: [WKContentRuleList] = []
                 for file in files {
-                    guard let list = await lookUp(identifier: identifier(for: file)) else {
+                    guard let list = await lookUp(identifier: Self.identifier(for: file)) else {
                         lists = []
                         break
                     }
@@ -84,7 +108,7 @@ final class ContentBlocker {
     /// lui-même, qui y range ses propres listes.
     func sweep(_ report: ((Int) -> Void)? = nil) {
         let keep = Set(settings.enabledRuleLists.flatMap { settings.ruleListFiles[$0] ?? [] }
-            .map { identifier(for: $0) })
+            .map { Self.identifier(for: $0) })
             .union([UserRules.identifier])
 
         store?.getAvailableContentRuleListIdentifiers { identifiers in
@@ -105,50 +129,113 @@ final class ContentBlocker {
     /// Télécharge, compile et met en service. Rend l'erreur en français, ou `nil`.
     @discardableResult
     func install(_ list: RuleList) async -> String? {
-        progress = .downloading(list.name)
+        working[list.id] = "téléchargement"
+        failure = nil
         onChange?()
-        defer { progress = .idle; onChange?() }
+        defer { working[list.id] = nil; onChange?() }
 
-        var compiled: [WKContentRuleList] = []
-        for part in list.parts {
-            let identifier = identifier(for: part.file)
-            do {
-                let (data, response) = try await URLSession.shared.data(
-                    from: RuleCatalog.file(part.file))
-                guard (response as? HTTPURLResponse)?.statusCode == 200,
-                      let json = String(data: data, encoding: .utf8) else {
-                    return fail(list, "téléchargement refusé")
-                }
-                progress = .compiling(list.name)
-                onChange?()
-                guard let rules = await compile(identifier: identifier, json: json) else {
-                    // WebKit refuse une liste qu'il ne sait pas lire, et ne dit pas
-                    // laquelle des cent mille règles l'a gênée. On nomme le fichier :
-                    // c'est ce qu'il faut pour aller voir dans le dépôt.
-                    return fail(list, "règles refusées par WebKit (\(part.file))")
-                }
-                compiled.append(rules)
-            } catch {
-                return fail(list, "réseau indisponible")
-            }
+        switch await Self.download(list) {
+        case .refused(let why):
+            return fail(list, why)
+        case .ready(let parts):
+            return await compileAndRemember(list, parts)
         }
+    }
 
-        installed[list.id] = compiled
-        settings.rememberRuleList(list.id, version: list.version,
-                                  files: list.parts.map(\.file), rules: list.rules)
+    /// Met une liste à jour **sans jamais la laisser sans règles**.
+    ///
+    /// L'ancienne façon retirait puis réinstallait : un échec de réseau entre les deux
+    /// laissait la liste absente des réglages, c'est-à-dire décochée, alors qu'on n'avait
+    /// rien demandé de tel. On compile donc d'abord — le magasin remplace un fichier de même
+    /// nom sans qu'on ait à le supprimer — et l'on ne jette ensuite que les morceaux dont la
+    /// nouvelle version n'a plus l'usage : une conversion qui change de découpage laisserait
+    /// sinon ses anciennes tranches sur le disque pour toujours.
+    @discardableResult
+    func update(_ list: RuleList) async -> String? {
+        let anciens = Set(settings.ruleListFiles[list.id] ?? [])
+        if let why = await install(list) { return why }
+        discard(anciens.subtracting(list.parts.map(\.file)))
         return nil
     }
+
+    /// Met à jour tout ce qui est périmé, en **recouvrant le réseau et la compilation**.
+    ///
+    /// Une mise à jour se passe en deux temps de natures différentes : télécharger, qui
+    /// attend le réseau, et compiler, qui occupe WebKit pendant plusieurs secondes. Faites
+    /// à la file, dix-neuf listes paient les deux dix-neuf fois. La suivante se télécharge
+    /// donc pendant que la courante compile — une seule d'avance, jamais deux : on ne garde
+    /// pas deux fichiers de trente mégaoctets en mémoire pour gagner deux secondes.
+    ///
+    /// Rend les échecs, dans l'ordre. Une liste qui échoue n'arrête pas les autres : c'est
+    /// souvent une seule liste qui a bougé chez elle, et abandonner les dix-huit restantes
+    /// pour celle-là serait le contraire de ce qu'on a demandé.
+    func updateAll(_ lists: [RuleList]) async -> [String] {
+        var failures: [String] = []
+        var avance: (id: String, résultat: Fetched)?
+        failure = nil
+
+        for (index, list) in lists.enumerated() {
+            working[list.id] = "téléchargement"
+            onChange?()
+
+            let téléchargé: Fetched
+            if let avance, avance.id == list.id {
+                téléchargé = avance.résultat
+            } else {
+                téléchargé = await Self.download(list)
+            }
+            avance = nil
+
+            // La suivante part maintenant : elle traversera le réseau pendant que WebKit
+            // compile celle-ci, et sera prête quand son tour viendra.
+            var suivante: Task<Fetched, Never>?
+            let après = index + 1 < lists.count ? lists[index + 1] : nil
+            if let après, après.bytes <= Self.lookAheadLimit {
+                suivante = Task.detached { await Self.download(après) }
+            }
+
+            let anciens = Set(settings.ruleListFiles[list.id] ?? [])
+            switch téléchargé {
+            case .refused(let why):
+                failures.append("« \(list.name) » : \(why)")
+                _ = fail(list, why)
+            case .ready(let parts):
+                if let why = await compileAndRemember(list, parts) {
+                    failures.append("« \(list.name) » : \(why)")
+                } else {
+                    discard(anciens.subtracting(list.parts.map(\.file)))
+                }
+            }
+            working[list.id] = nil
+            onChange?()
+
+            if let suivante, let après { avance = (après.id, await suivante.value) }
+        }
+        return failures
+    }
+
+    /// Au-delà, on ne prend pas d'avance : deux gros fichiers en mémoire coûtent plus que
+    /// les secondes qu'ils font gagner.
+    private static let lookAheadLimit = 32 * 1_048_576
 
     /// Retire une liste du service **et du disque**. Garder des règles compilées pour une
     /// liste qu'on a décochée occuperait des centaines de mégaoctets pour rien.
     func remove(_ id: String) {
         let files = settings.ruleListFiles[id] ?? []
         installed[id] = nil
+        working[id] = nil
+        if failure?.id == id { failure = nil }
         forget(id)
-        for file in files {
-            store?.removeContentRuleList(forIdentifier: identifier(for: file)) { _ in }
-        }
+        discard(Set(files))
         onChange?()
+    }
+
+    /// Jette des fichiers compilés du magasin. C'est **la** façon de rendre la place : le
+    /// magasin est sur le disque et ne se vide pas tout seul.
+    private func discard(_ files: Set<String>) {
+        for file in files {
+            store?.removeContentRuleList(forIdentifier: Self.identifier(for: file)) { _ in }
+        }
     }
 
     /// La version installée diffère-t-elle de celle du catalogue ?
@@ -211,8 +298,77 @@ final class ContentBlocker {
 
     /// L'identité dans le magasin. Préfixée : le magasin est celui de l'application, et un
     /// nom nu risquerait de croiser celui d'autre chose un jour.
-    private func identifier(for file: String) -> String {
+    ///
+    /// `nonisolated` : le téléchargement en a besoin, et il ne travaille pas sur l'acteur
+    /// principal. Un calcul de chaîne n'a de toute façon rien à y faire.
+    nonisolated static func identifier(for file: String) -> String {
         "wuji." + file.replacingOccurrences(of: ".json", with: "")
+    }
+
+    /// Va chercher les morceaux d'une liste, **hors de l'acteur principal**.
+    ///
+    /// Ce qui se passait avant sur le fil de l'interface : trente-sept mégaoctets reçus,
+    /// puis convertis en `String`, ce qui recopie l'octet à l'octet — la fenêtre ne
+    /// répondait plus pendant la conversion, sans qu'aucune ligne ne dise pourquoi. Rien
+    /// ici ne touche à l'état de la classe : c'est ce qui rend le déplacement possible.
+    ///
+    /// Les morceaux partent **en parallèle**. Une grande liste est découpée en tranches
+    /// parce que WebKit refuse au-delà de cent cinquante mille règles ; elles ne dépendent
+    /// pas les unes des autres, et les demander à la file ne payait que l'attente.
+    nonisolated static func download(_ list: RuleList) async -> Fetched {
+        await withTaskGroup(of: (Int, Fetched).self) { group in
+            for (rang, part) in list.parts.enumerated() {
+                group.addTask {
+                    do {
+                        let (data, response) = try await URLSession.shared.data(
+                            from: RuleCatalog.file(part.file))
+                        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                            return (rang, .refused("téléchargement refusé"))
+                        }
+                        guard let json = String(data: data, encoding: .utf8) else {
+                            return (rang, .refused("fichier illisible (\(part.file))"))
+                        }
+                        return (rang, .ready([Ready(identifier: identifier(for: part.file),
+                                                    json: json)]))
+                    } catch {
+                        return (rang, .refused("réseau indisponible"))
+                    }
+                }
+            }
+            // Rassemblés dans l'ordre des tranches : elles se posent dans cet ordre, et
+            // l'ordre d'arrivée du réseau n'a rien à voir avec celui des règles.
+            var prêts = [Ready?](repeating: nil, count: list.parts.count)
+            for await (rang, résultat) in group {
+                switch résultat {
+                case .refused(let why):
+                    group.cancelAll()
+                    return .refused(why)
+                case .ready(let prêt):
+                    prêts[rang] = prêt.first
+                }
+            }
+            return .ready(prêts.compactMap { $0 })
+        }
+    }
+
+    /// Compile ce qui a été téléchargé et le met en service.
+    private func compileAndRemember(_ list: RuleList, _ parts: [Ready]) async -> String? {
+        working[list.id] = "compilation"
+        onChange?()
+        var compiled: [WKContentRuleList] = []
+        for part in parts {
+            guard let rules = await compile(identifier: part.identifier, json: part.json) else {
+                // WebKit refuse une liste qu'il ne sait pas lire, et ne dit pas laquelle des
+                // cent mille règles l'a gênée. On nomme le fichier : c'est ce qu'il faut
+                // pour aller voir dans le dépôt.
+                return fail(list, "règles refusées par WebKit (\(part.identifier))")
+            }
+            compiled.append(rules)
+        }
+        installed[list.id] = compiled
+        settings.rememberRuleList(list.id, version: list.version,
+                                  files: list.parts.map(\.file), rules: list.rules)
+        return nil
     }
 
     private func lookUp(identifier: String) async -> WKContentRuleList? {
@@ -233,7 +389,7 @@ final class ContentBlocker {
     }
 
     private func fail(_ list: RuleList, _ reason: String) -> String {
-        progress = .failed(list.name, reason)
+        failure = Failure(id: list.id, name: list.name, why: reason)
         return reason
     }
 

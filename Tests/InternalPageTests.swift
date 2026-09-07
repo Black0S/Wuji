@@ -85,7 +85,7 @@ struct InternalPageTests {
         // Vide **et injoignable** : c'est le cas qui compte, parce qu'une liste vide sans
         // explication se lit « il n'y a rien à bloquer » au lieu de « je n'ai pas pu lire ».
         let muet = BlockingPage.State(catalog: [], installed: [], outdated: [],
-                                      activeRules: 0, busy: nil, failure: nil,
+                                      activeRules: 0, working: [:], failure: nil,
                                       unreachable: true, paused: [])
         #expect(BlockingPage.html(state: muet).contains("catalogue injoignable"))
 
@@ -95,7 +95,7 @@ struct InternalPageTests {
                                            rules: 123902, bytes: 12566360)])
         let plein = BlockingPage.State(catalog: [liste], installed: [liste.id],
                                        outdated: [liste.id], activeRules: 123902,
-                                       busy: nil, failure: nil, unreachable: false,
+                                       working: [:], failure: nil, unreachable: false,
                                        paused: [])
         let html = BlockingPage.html(state: plein)
         #expect(html.contains("AdGuard Base filter"))
@@ -104,13 +104,78 @@ struct InternalPageTests {
         #expect(!html.contains("Optional("))
     }
 
+    @Test func uneListeEnCoursResteCochee() {
+        // **Le cas qui décochait la case sous le doigt.** Une liste qu'on vient de cocher
+        // n'entre dans les réglages qu'une fois téléchargée et compilée : entre-temps elle
+        // n'est « installée » nulle part, et la page la rendait décochée.
+        let liste = RuleList(name: "EasyList", source: "EasyList.txt", version: "2.1",
+                             coverage: 99,
+                             parts: [.init(file: "Webkit-EasyList.json",
+                                           rules: 62969, bytes: 7_500_000)])
+        let état = BlockingPage.State(catalog: [liste], installed: [], outdated: [],
+                                      activeRules: 0,
+                                      working: [liste.id: "téléchargement"],
+                                      failure: nil, unreachable: false, paused: [])
+        let html = BlockingPage.html(state: état)
+        #expect(html.contains("checked"))
+        #expect(html.contains("téléchargement"))
+        // Ce qui travaille se dit sur la ligne : un bandeau en tête pousserait la liste
+        // vers le bas puis la laisserait remonter, à chaque case cochée.
+        #expect(!html.contains(#"<p class="busy""#))
+    }
+
+    @Test func toutMettreAJourNeVisiteQueLesListesEnService() {
+        let posée = RuleList(name: "EasyList", source: "EasyList.txt", version: "2.1",
+                             coverage: 99, parts: [.init(file: "a.json", rules: 1, bytes: 1)])
+        let absente = RuleList(name: "EasyPrivacy", source: "EasyPrivacy.txt", version: "1.0",
+                               coverage: 99, parts: [.init(file: "b.json", rules: 1, bytes: 1)])
+        // Les deux sont périmées ; une seule est en service. Proposer de mettre à jour une
+        // liste qu'on n'a pas installée n'aurait aucun sens — il n'y a rien à remplacer.
+        let état = BlockingPage.State(catalog: [posée, absente], installed: [posée.id],
+                                      outdated: [posée.id, absente.id], activeRules: 1,
+                                      working: [:], failure: nil, unreachable: false,
+                                      paused: [])
+        #expect(BlockingPage.updatable(état).map(\.id) == [posée.id])
+        #expect(BlockingPage.html(state: état).contains("Tout mettre à jour (1)"))
+
+        let àJour = BlockingPage.State(catalog: [posée], installed: [posée.id], outdated: [],
+                                       activeRules: 1, working: [:], failure: nil,
+                                       unreachable: false, paused: [])
+        #expect(BlockingPage.updatable(àJour).isEmpty)
+        #expect(BlockingPage.html(state: àJour).contains(#"data-action="update-all" hidden"#))
+    }
+
+    @Test func lesFamillesSAffichentEnJetons() {
+        let pub = RuleList(name: "EasyList", source: "a.txt", version: "1",
+                           group: "Publicité", coverage: 100,
+                           parts: [.init(file: "a.json", rules: 1, bytes: 1)])
+        let sécurité = RuleList(name: "Malware", source: "b.txt", version: "1",
+                                group: "Sécurité", coverage: 100,
+                                parts: [.init(file: "b.json", rules: 1, bytes: 1)])
+        let html = BlockingPage.html(state: BlockingPage.State(
+            catalog: [pub, sécurité], installed: [], outdated: [], activeRules: 0,
+            working: [:], failure: nil, unreachable: false, paused: []))
+        #expect(html.contains(#"data-famille="Publicité""#))
+        #expect(html.contains(#"data-famille="Sécurité""#))
+        // « Toutes » d'abord, et actif : un jeu de filtres sans état neutre oblige à
+        // deviner comment revenir en arrière.
+        #expect(html.contains(#"<button class="puce active" data-famille="">Toutes"#))
+
+        // Une seule famille ne se filtre pas : un unique jeton « Publicité » à côté de
+        // « Toutes » ne dirait rien que le titre de section ne dise déjà.
+        let seule = BlockingPage.html(state: BlockingPage.State(
+            catalog: [pub], installed: [], outdated: [], activeRules: 0,
+            working: [:], failure: nil, unreachable: false, paused: []))
+        #expect(!seule.contains("data-famille"))
+    }
+
     @Test func leCorrectifDeLaPageDeBlocageSAnnonce() {
         // **Le mot convenu est le correctif.** Une fonction qui ne renvoie rien vaut
         // `undefined`, que WebKit rend comme « rien » — indistinguable d'un crochet absent :
         // le côté natif rechargeait alors la page qu'il venait de mettre à jour, et la liste
         // remontait en haut à chaque case cochée.
         let état = BlockingPage.State(catalog: [], installed: [], outdated: [],
-                                      activeRules: 0, busy: nil, failure: nil,
+                                      activeRules: 0, working: [:], failure: nil,
                                       unreachable: false, paused: [])
         #expect(BlockingPage.patch(état).contains("'wuji-ok'"))
         // Le catalogue ne repasse que lorsqu'on le demande : cent soixante et une lignes

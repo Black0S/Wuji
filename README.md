@@ -228,8 +228,86 @@ index — celui de `dist` qui porte les règles converties, celui de `main` qui 
 métadonnée — **en parallèle**, puisqu'ils ne dépendent pas l'un de l'autre. La métadonnée
 est facultative : sans elle, tout atterrit dans « Divers » et le catalogue reste utilisable.
 
+**Les familles se filtrent aussi, en jetons.** Le filtre par mot-clé suppose qu'on connaît
+déjà le nom de ce qu'on cherche ; on vient plus souvent chercher *une catégorie* — la
+publicité, le pistage — sans savoir quelle liste la couvre. Une rangée de jetons sous le
+champ répond à cette question-là, et les deux se combinent : « Publicité » puis « adguard »
+n'est pas la même demande que l'un ou l'autre seul. « Toutes » vient en premier et reste
+actif par défaut — un jeu de filtres sans état neutre oblige à deviner comment revenir en
+arrière.
+
 Le filtre traverse les sections, et une famille dont plus rien ne ressort disparaît avec son
 titre — « Par langue · 57 » au-dessus du vide se lirait comme un défaut d'affichage.
+
+### Mettre à jour, et rendre la place
+
+**Tout mettre à jour d'un coup.** Un bouton en tête, qui n'apparaît que lorsqu'il a quelque
+chose à faire et qui dit combien : « Tout mettre à jour (4) ». Il ne visite que ce qui est
+**en service et périmé** — proposer de mettre à jour une liste qu'on n'a pas installée n'a
+pas de sens, il n'y a rien à remplacer. Une liste qui échoue n'arrête pas les autres : c'est
+souvent une seule liste qui a bougé chez elle, et abandonner les dix-huit restantes pour
+celle-là serait le contraire de ce qu'on a demandé.
+
+**Le réseau et la compilation se recouvrent.** Une mise à jour se passe en deux temps de
+natures différentes : télécharger, qui attend le réseau, et compiler, qui occupe WebKit
+plusieurs secondes. À la file, dix-neuf listes paient les deux dix-neuf fois. La suivante se
+télécharge donc pendant que la courante compile — une seule d'avance, jamais deux : on ne
+garde pas deux fichiers de trente mégaoctets en mémoire pour gagner deux secondes. Les
+tranches d'une même liste, elles, partent ensemble : une grande liste est découpée parce que
+WebKit refuse au-delà de cent cinquante mille règles, et ses morceaux ne dépendent pas les
+uns des autres. Mesuré : les deux tranches d'*AdGuard DNS filter* en 1,8 s au lieu de la
+somme des deux.
+
+**Le téléchargement a quitté le fil de l'interface.** Trente-sept mégaoctets reçus puis
+convertis en chaîne — ce qui recopie octet à octet — se faisaient sur le fil principal : la
+fenêtre ne répondait plus le temps de la conversion, sans qu'aucune ligne ne dise pourquoi.
+Rien dans cette étape ne touche à l'état du bloqueur, et c'est précisément ce qui permet de
+la sortir de là.
+
+**Mettre à jour n'est plus « retirer puis réinstaller ».** Une coupure entre les deux
+laissait la liste absente des réglages, c'est-à-dire décochée, alors qu'on avait demandé le
+contraire. La nouvelle version se compile d'abord — le magasin remplace un fichier de même
+nom sans qu'on ait à le supprimer — et les anciennes tranches ne partent qu'une fois la
+nouvelle en service. Seules celles dont la nouvelle version n'a plus l'usage sont jetées :
+une conversion qui change de découpage laisserait sinon ses tranches d'hier sur le disque
+pour toujours.
+
+**Décocher rend la place, tout de suite.** Les règles compilées ne sont pas le fichier
+téléchargé : ce sont des tables de décision, et elles pèsent davantage. Le magasin de WebKit
+est sur le disque et ne se vide pas tout seul — décocher une liste l'en retire, fichier par
+fichier. C'est aussi ce que fait le balayage au lancement, pour ce qu'on aurait décoché
+pendant que l'application ne tournait pas.
+
+### Rien ne bouge sous le doigt
+
+**La case reste cochée pendant le travail.** Une liste qu'on vient de cocher n'entre dans les
+réglages qu'une fois téléchargée et compilée — plusieurs secondes. Entre-temps elle n'est
+« installée » nulle part : la page la décochait donc, puis la recochait à la fin, ce qui se
+lit comme un clic qui n'a pas pris. Une liste en cours compte maintenant comme cochée, parce
+qu'elle l'est : c'est la demande qui a été faite. La page garde en plus l'intention le temps
+que le natif la rejoigne — ou qu'il annonce qu'il a échoué dessus, auquel cas la case revient
+d'elle-même plutôt que de mentir pour toujours.
+
+**Ce qui travaille se dit sur la ligne, pas en tête de page.** Un bandeau « Téléchargement
+de… » poussait toute la liste vers le bas, puis la laissait remonter en disparaissant : un
+soubresaut à chaque case cochée, sous le doigt qui venait de cliquer. La ligne a déjà sa
+hauteur ; un mot de plus à la suite du nom ne déplace rien.
+
+Deux autres sauts venaient de la même famille, et ne se voyaient qu'à certains moments : le
+bouton « Mettre à jour » d'une ligne était le plus haut de ses éléments, et le cacher — donc
+juste après avoir mis cette liste à jour — faisait remonter tout ce qui suivait ; les boutons
+de l'en-tête, serrés par le titre dans une fenêtre étroite, repliaient leur libellé sur deux
+lignes, si bien que la disparition de « Tout mettre à jour » raccourcissait l'en-tête. La
+ligne réserve maintenant la hauteur de son bouton, les boutons d'en-tête ne se compriment
+plus, et le compte d'une famille ne passe plus à la ligne quand il gagne « · 4 en service ».
+Mesuré sur banc, en fenêtre étroite : zéro point de déplacement à chaque étape —
+téléchargement, compilation, mise en service, mise à jour, retour.
+
+**Quatre écritures, un seul avis.** Retenir une liste touche quatre réglages, et chacun
+prévenait à part ; l'avis relit tous les onglets ouverts pour leur reposer zoom, agent et
+couleur de fond. C'était quatre parcours de la session pour un seul geste, et soixante-seize
+pour « Tout mettre à jour » sur dix-neuf listes. Les écritures d'un même geste se groupent
+désormais, et les règles ne sont reposées sur les onglets qu'une fois, à la fin du lot.
 
 **Cocher une case ne redessine pas la page.** Elle se rechargerait sinon deux fois par
 liste, puisque l'installation produit un état « en cours » puis un état « en service » : la

@@ -200,18 +200,43 @@ final class Settings {
 
     /// Retient tout ce qu'il faut pour remettre une liste en service au lancement suivant.
     func rememberRuleList(_ id: String, version: String, files: [String], rules: Int) {
-        if !enabledRuleLists.contains(id) { enabledRuleLists.append(id) }
-        ruleListVersions[id] = version
-        ruleListFiles[id] = files
-        ruleListRules[id] = rules
+        batch {
+            if !enabledRuleLists.contains(id) { enabledRuleLists.append(id) }
+            ruleListVersions[id] = version
+            ruleListFiles[id] = files
+            ruleListRules[id] = rules
+        }
     }
 
     func forgetRuleList(_ id: String) {
-        enabledRuleLists.removeAll { $0 == id }
-        ruleListVersions[id] = nil
-        ruleListFiles[id] = nil
-        ruleListRules[id] = nil
+        batch {
+            enabledRuleLists.removeAll { $0 == id }
+            ruleListVersions[id] = nil
+            ruleListFiles[id] = nil
+            ruleListRules[id] = nil
+        }
     }
+
+    /// Quatre écritures, **un seul avis**.
+    ///
+    /// Chaque champ prévient à part, et l'avis relit tous les onglets ouverts pour leur
+    /// reposer zoom, agent et couleur de fond. Retenir une liste touche quatre champs :
+    /// c'était donc quatre parcours de la session pour un seul geste, et soixante-seize
+    /// pour « Tout mettre à jour » sur dix-neuf listes. On garde l'avis pour la fin.
+    ///
+    /// Le compteur plutôt qu'un booléen : deux lots imbriqués — cela arrivera — ne doivent
+    /// pas laisser le premier rendre la main au milieu du second.
+    func batch(_ body: () -> Void) {
+        batching += 1
+        body()
+        batching -= 1
+        guard batching == 0, pending else { return }
+        pending = false
+        onChange?()
+    }
+
+    private var batching = 0
+    private var pending = false
 
     var onChange: (() -> Void)?
 
@@ -260,5 +285,8 @@ final class Settings {
             .flatMap { try? JSONDecoder().decode([UserRules.Rule].self, from: $0) } ?? []
     }
 
-    private func changed() { onChange?() }
+    private func changed() {
+        guard batching == 0 else { pending = true; return }
+        onChange?()
+    }
 }

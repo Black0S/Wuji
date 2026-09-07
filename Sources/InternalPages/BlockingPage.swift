@@ -16,10 +16,16 @@ enum BlockingPage {
         var installed: Set<String>
         var outdated: Set<String>
         var activeRules: Int
-        /// Ce qui est en cours, en français — ou `nil` quand rien ne travaille.
-        var busy: String?
-        /// L'échec du dernier essai, s'il y en a eu un.
-        var failure: String?
+        /// Ce que chaque liste est en train de faire — « téléchargement », « compilation ».
+        ///
+        /// **Par liste, et pas un état unique.** Une liste en cours d'installation n'est pas
+        /// encore dans les réglages : la page la décochait sous le doigt de celui qui venait
+        /// de la cocher, le temps du téléchargement. Elle compte ici comme cochée, parce
+        /// qu'elle l'est — c'est la demande qui a été faite.
+        var working: [String: String] = [:]
+        /// L'échec du dernier essai, s'il y en a eu un. Il porte l'identité de la ligne :
+        /// sans elle, la page ne saurait pas à qui rendre sa case.
+        var failure: ContentBlocker.Failure?
         /// Le catalogue n'a pas pu être lu : la page le dit et propose de réessayer, au
         /// lieu d'afficher une liste vide qu'on prendrait pour « il n'y a rien ».
         var unreachable: Bool
@@ -59,7 +65,10 @@ enum BlockingPage {
             "tally": tally(state),
             "notice": notice(state),
             "installed": Array(state.installed),
-            "outdated": Array(state.outdated)
+            "outdated": Array(state.outdated),
+            "working": state.working,
+            "failed": state.failure?.id ?? "",
+            "updates": updatable(state).count
         ]
         if catalog { payload["catalog"] = groups(state) }
         let json = (try? JSONSerialization.data(withJSONObject: payload))
@@ -75,12 +84,21 @@ enum BlockingPage {
         """
     }
 
+    /// Ce qui est en service **et** périmé : ce que « Tout mettre à jour » a à faire.
+    static func updatable(_ state: State) -> [RuleList] {
+        state.catalog.filter { state.installed.contains($0.id) && state.outdated.contains($0.id) }
+    }
+
+    /// Le bandeau ne dit plus que les échecs.
+    ///
+    /// **Ce qui travaille se dit sur la ligne concernée.** Un bandeau qui apparaît en haut
+    /// de la page pousse toute la liste vers le bas, puis la laisse remonter quand il
+    /// disparaît : un soubresaut à chaque case cochée, sous le doigt qui vient de cliquer.
+    /// La ligne, elle, a déjà sa hauteur — un mot de plus sur son titre ne déplace rien.
     private static func notice(_ state: State) -> String {
-        if let busy = state.busy {
-            return #"<p class="busy">"# + escape(busy) + "…</p>"
-        }
         if let failure = state.failure {
-            return #"<p class="failure">"# + escape(failure) + "</p>"
+            return #"<p class="failure">« "# + escape(failure.name) + " » : "
+                + escape(failure.why) + "</p>"
         }
         if state.unreachable {
             return """
@@ -93,8 +111,14 @@ enum BlockingPage {
 
     static func html(state: State) -> String {
         let tally = tally(state)
-
         let notice = notice(state)
+        // **Le bouton existe toujours, caché quand il n'a rien à faire.** La page se met à
+        // jour sur place : un bouton absent du document ne pourrait pas apparaître quand
+        // une nouvelle version l'est.
+        let attente = updatable(state).count
+        let updateAll = #"<button class="button" id="tout-jour" data-action="update-all""#
+            + (attente == 0 ? " hidden" : "")
+            + ">Tout mettre à jour" + (attente == 0 ? "" : " (\(attente))") + "</button>"
 
         return InternalShell.page(
             title: "Blocage", current: "wuji://blocking",
@@ -104,6 +128,7 @@ enum BlockingPage {
                   <h1>Blocage</h1>
                   <p>\(tally)</p>
                 </div>
+                \(updateAll)
                 <button class="ghost" data-action="reload">Actualiser</button>
               </header>
               <main>
@@ -155,7 +180,7 @@ enum BlockingPage {
             if byGroup[list.group] == nil { order.append(list.group) }
             byGroup[list.group, default: []].append(list)
         }
-        return order.map { group in
+        let sections = order.map { group in
             let lists = byGroup[group] ?? []
             let active = lists.filter { state.installed.contains($0.id) }.count
             return """
@@ -166,6 +191,32 @@ enum BlockingPage {
             </div>
             """
         }.joined()
+        return families(order, byGroup) + sections
+    }
+
+    /// **Les familles en tête, comme des jetons.** Le filtre par mot-clé suppose qu'on
+    /// connaît déjà le nom de ce qu'on cherche ; on vient plus souvent chercher *une
+    /// catégorie* — la publicité, le pistage — sans savoir quelle liste la couvre. Les
+    /// jetons répondent à cette question-là, et se combinent avec le mot-clé : « Publicité »
+    /// puis « adguard » n'est pas la même demande que l'un ou l'autre seul.
+    ///
+    /// « Toutes » d'abord, et actif par défaut : un jeu de filtres sans état neutre oblige
+    /// à deviner comment revenir en arrière.
+    private static func families(_ order: [String], _ byGroup: [String: [RuleList]]) -> String {
+        guard order.count > 1 else { return "" }
+        let total = byGroup.values.reduce(0) { $0 + $1.count }
+        let jetons = order.map { group in
+            """
+            <button class="puce" data-famille="\(escape(group))">\(escape(group))\
+            <span>\(byGroup[group]?.count ?? 0)</span></button>
+            """
+        }.joined()
+        return """
+        <div class="familles">
+          <button class="puce active" data-famille="">Toutes<span>\(total)</span></button>
+          \(jetons)
+        </div>
+        """
     }
 
     /// Les sites où le blocage est suspendu.
@@ -203,12 +254,14 @@ enum BlockingPage {
         // patcher un attribut `hidden` est autrement plus sûr que de reconstruire du HTML
         // depuis du JavaScript.
         let stale = outdated && installed
+        let working = state.working[list.id]
         return """
         <li data-id="\(escape(list.id))">
-          <input type="checkbox" class="toggle"\(installed ? " checked" : "")>
+          <input type="checkbox" class="toggle"\(installed || working != nil ? " checked" : "")>
           <div class="body">
             <span class="name">\(escape(list.name))<span class="stale"\(stale ? "" : " hidden") \
-        > · à jour disponible</span></span>
+        > · à jour disponible</span><span class="work"\(working == nil ? " hidden" : "")> · \
+        \(escape(working ?? ""))…</span></span>
             <span class="detail">\(escape(detail))</span>
             \(list.summary.isEmpty ? "" : #"<span class="detail">"# + escape(list.summary) + "</span>")
           </div>
@@ -241,7 +294,17 @@ enum BlockingPage {
     private static let style = """
     header { display: flex; align-items: flex-start; gap: 12px; }
     header .titles { flex: 1; min-width: 0; }
-    li { height: auto; padding: 10px 12px; align-items: flex-start; gap: 12px; }
+    /* **Les boutons de l'en-tête ne se compriment pas.** Serrés par le titre, ils
+       repliaient leur libellé sur deux lignes et grandissaient l'en-tête ; « Tout mettre à
+       jour » disparaissant une fois le travail fait, tout ce qui suivait remontait alors de
+       dix-sept points. C'est le titre qui cède la place, et il sait se tronquer. */
+    header .button, header .ghost { flex: none; white-space: nowrap; }
+    /* **La ligne garde sa hauteur, bouton ou pas.** « Mettre à jour » est le plus haut de
+       ses éléments — trente-deux points, bordure comprise — et le cacher faisait remonter
+       de vingt-trois points tout ce qui se trouvait dessous : c'est-à-dire au moment précis
+       où l'on venait de mettre cette liste à jour, là où l'on regardait. La hauteur
+       réservée est celle du bouton plus les marges, pas un nombre choisi à l'œil. */
+    li { min-height: 54px; padding: 10px 12px; align-items: flex-start; gap: 12px; }
     li input[type=checkbox] { margin-top: 3px; }
     li[hidden] { display: none; }
     .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -257,6 +320,21 @@ enum BlockingPage {
     }
     .search input:focus { outline: 1px solid var(--muted); }
     .search .count { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    /* Les familles en jetons : une ligne qui se replie, jamais une barre qui déborde. */
+    .familles { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+    .puce {
+      display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 11px;
+      font: inherit; font-size: 12px; color: var(--muted); background: var(--hover);
+      border: 0; border-radius: 999px; cursor: pointer; white-space: nowrap;
+    }
+    .puce span { font-size: 11px; opacity: .65; }
+    .puce:hover { color: var(--text); }
+    .puce.active { color: var(--bg, #000); background: var(--text); }
+    .puce.active span { opacity: .55; }
+    /* Ce qui travaille se dit sur la ligne, en gris, à la suite du nom : aucune hauteur
+       n'est ajoutée, donc rien ne se déplace sous le doigt qui vient de cliquer. */
+    .work { color: var(--muted); font-weight: 400; }
+    .work[hidden] { display: none; }
     /* Ce qui travaille et ce qui a échoué : deux lignes, jamais deux fenêtres. */
     .busy, .failure { font-size: 13px; margin: 0 0 10px; }
     .busy { color: var(--muted); }
@@ -269,7 +347,12 @@ enum BlockingPage {
       display: flex; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 600;
       margin: 22px 0 6px; padding: 0 2px; color: var(--text);
     }
-    .group h2 .tally, .block h2 .tally { color: var(--muted); font-weight: 400; font-size: 12px; }
+    /* Le compte ne se replie pas : « 4 · 4 en service » passait à la ligne dans une fenêtre
+       étroite dès qu'une liste entrait en service, et le titre gagnait une ligne — donc
+       tout ce qui suivait descendait, à chaque case cochée. */
+    .group h2 .tally, .block h2 .tally {
+      color: var(--muted); font-weight: 400; font-size: 12px; white-space: nowrap;
+    }
     .block .hint { margin: 0 2px 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
     /* Le filtre traverse les sections : celles qui n'ont plus rien à montrer disparaissent
        avec leur titre, sinon on lirait « Par langue · 57 » au-dessus du vide. */
@@ -291,20 +374,40 @@ enum BlockingPage {
     private static let script = """
     const send = (payload) => window.webkit.messageHandlers.wujiBlocking.postMessage(payload);
 
+    // **Ce que l'utilisateur vient de demander, avant que le natif l'ait fait.**
+    // Une liste cochée n'entre dans les réglages qu'une fois téléchargée et compilée —
+    // plusieurs secondes. Sans cette mémoire, le premier correctif qui passait entre-temps
+    // décochait la case sous le doigt qui venait de la cocher. On garde donc l'intention
+    // jusqu'à ce que le natif la rejoigne, ou qu'il annonce qu'il a échoué dessus.
+    const attente = new Map();
+
+    const travail = (ligne, texte) => {
+      const mention = ligne.querySelector('.work');
+      if (!mention) return;
+      mention.textContent = texte ? ' · ' + texte + '…' : '';
+      mention.hidden = !texte;
+    };
+
     document.addEventListener('change', (event) => {
       if (!event.target.classList.contains('toggle')) return;
-      send({ action: event.target.checked ? 'install' : 'remove',
-             id: event.target.closest('li').dataset.id });
+      const ligne = event.target.closest('li');
+      const id = ligne.dataset.id;
+      const voulu = event.target.checked;
+      attente.set(id, voulu);
+      travail(ligne, voulu ? 'en attente' : '');
+      send({ action: voulu ? 'install' : 'remove', id });
     });
 
     document.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-action]');
-      if (!button) return;
-      // Trois porteurs d'identité : une ligne de liste, une règle, un site en pause. On
-      // envoie celui qu'on trouve — le nom du champ compte peu, l'action dit ce que c'est.
-      const ligne = button.closest('li');
-      const règle = button.closest('.rule');
-      send({ action: button.dataset.action,
+      const bouton = event.target.closest('[data-action]');
+      if (!bouton) return;
+      const ligne = bouton.closest('li');
+      const règle = bouton.closest('.rule');
+      if (bouton.dataset.action === 'update' && ligne) {
+        attente.set(ligne.dataset.id, true);
+        travail(ligne, 'en attente');
+      }
+      send({ action: bouton.dataset.action,
              id: (ligne && ligne.dataset.id) || (règle && (règle.dataset.rule || règle.dataset.host)) || null });
     });
 
@@ -316,6 +419,11 @@ enum BlockingPage {
       if (compte) compte.textContent = état.tally;
       const bandeau = document.getElementById('notice');
       if (bandeau) bandeau.innerHTML = état.notice;
+      const tout = document.getElementById('tout-jour');
+      if (tout) {
+        tout.hidden = !état.updates;
+        if (état.updates) tout.textContent = `Tout mettre à jour (${état.updates})`;
+      }
 
       // Le catalogue n'arrive qu'une fois, et seulement quand il a changé : la page servie
       // avant la fin du téléchargement n'a aucune ligne, et aucun attribut ne sait en créer.
@@ -324,18 +432,28 @@ enum BlockingPage {
         if (catalogue) catalogue.innerHTML = état.catalog;
         const recherche = document.querySelector('.search');
         if (recherche) recherche.hidden = !document.querySelector('li[data-id]');
-        const champ = document.querySelector('.filter');
-        if (champ && champ.value.trim()) filtrer(champ.value);
+        famille = '';
+        filtrer();
       }
 
       const posées = new Set(état.installed);
       const vieilles = new Set(état.outdated);
       for (const ligne of document.querySelectorAll('li[data-id]')) {
         const id = ligne.dataset.id;
+        const enCours = état.working[id];
+        // Le natif a rejoint l'intention, ou il a échoué dessus : dans les deux cas, la
+        // page n'a plus rien à retenir. Sans la seconde condition, une case resterait
+        // cochée pour toujours après un téléchargement refusé.
+        const réel = posées.has(id) || enCours !== undefined;
+        if (attente.get(id) === réel || état.failed === id) attente.delete(id);
+        const cible = attente.has(id) ? attente.get(id) : réel;
+
         const case_ = ligne.querySelector('.toggle');
         // On ne touche à la case que si elle ment : réécrire `checked` à l'identique
         // relancerait l'animation de la coche à chaque rafraîchissement.
-        if (case_ && case_.checked !== posées.has(id)) case_.checked = posées.has(id);
+        if (case_ && case_.checked !== cible) case_.checked = cible;
+        travail(ligne, enCours || (attente.get(id) === true ? 'en attente' : ''));
+
         const périmée = posées.has(id) && vieilles.has(id);
         const mention = ligne.querySelector('.stale');
         if (mention) mention.hidden = !périmée;
@@ -357,12 +475,19 @@ enum BlockingPage {
     // Le filtrage se fait ici : cent soixante et une lignes qu'un aller-retour par message
     // redessinerait à chaque frappe, pour un texte que la page a déjà sous la main.
     const plier = (t) => t.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');
-    const filtrer = (valeur) => {
-      const aiguille = plier(valeur.trim());
+    let famille = '';
+
+    const filtrer = () => {
+      const champ = document.querySelector('.filter');
+      const aiguille = plier(champ ? champ.value.trim() : '');
       const lignes = document.querySelectorAll('li[data-id]');
       let visibles = 0;
       for (const ligne of lignes) {
-        const montrer = !aiguille || plier(ligne.textContent || '').includes(aiguille);
+        // Les deux filtres se combinent : une famille choisie **et** un mot-clé sont deux
+        // moitiés d'une même demande, pas deux demandes qui se remplacent.
+        const groupe = ligne.closest('.group');
+        const sienne = !famille || (groupe && groupe.dataset.group === famille);
+        const montrer = sienne && (!aiguille || plier(ligne.textContent || '').includes(aiguille));
         ligne.hidden = !montrer;
         if (montrer) visibles++;
       }
@@ -372,11 +497,23 @@ enum BlockingPage {
         groupe.hidden = ![...groupe.querySelectorAll('li')].some((l) => !l.hidden);
       }
       const compteur = document.querySelector('.search .count');
-      if (compteur) compteur.textContent = aiguille ? `${visibles} sur ${lignes.length}` : '';
+      if (compteur) {
+        compteur.textContent = (aiguille || famille) ? `${visibles} sur ${lignes.length}` : '';
+      }
     };
 
     document.addEventListener('input', (event) => {
-      if (event.target.classList.contains('filter')) filtrer(event.target.value);
+      if (event.target.classList.contains('filter')) filtrer();
+    });
+
+    document.addEventListener('click', (event) => {
+      const puce = event.target.closest('.puce');
+      if (!puce) return;
+      famille = puce.dataset.famille;
+      for (const autre of document.querySelectorAll('.puce')) {
+        autre.classList.toggle('active', autre === puce);
+      }
+      filtrer();
     });
     """
 }
