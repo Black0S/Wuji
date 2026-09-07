@@ -86,7 +86,7 @@ struct InternalPageTests {
         // explication se lit « il n'y a rien à bloquer » au lieu de « je n'ai pas pu lire ».
         let muet = BlockingPage.State(catalog: [], installed: [], outdated: [],
                                       activeRules: 0, busy: nil, failure: nil,
-                                      unreachable: true)
+                                      unreachable: true, paused: [])
         #expect(BlockingPage.html(state: muet).contains("catalogue injoignable"))
 
         let liste = RuleList(name: "AdGuard Base filter", source: "AdGuard-Base-filter.txt",
@@ -95,7 +95,8 @@ struct InternalPageTests {
                                            rules: 123902, bytes: 12566360)])
         let plein = BlockingPage.State(catalog: [liste], installed: [liste.id],
                                        outdated: [liste.id], activeRules: 123902,
-                                       busy: nil, failure: nil, unreachable: false)
+                                       busy: nil, failure: nil, unreachable: false,
+                                       paused: [])
         let html = BlockingPage.html(state: plein)
         #expect(html.contains("AdGuard Base filter"))
         #expect(html.contains("Mettre à jour"))
@@ -103,18 +104,41 @@ struct InternalPageTests {
         #expect(!html.contains("Optional("))
     }
 
-    @Test func leJournalDuBlocageSeDessineVideEtPlein() {
-        #expect(BlockingLogPage.html(entries: []).contains("rien à signaler"))
+    @Test func leCorrectifDeLaPageDeBlocageSAnnonce() {
+        // **Le mot convenu est le correctif.** Une fonction qui ne renvoie rien vaut
+        // `undefined`, que WebKit rend comme « rien » — indistinguable d'un crochet absent :
+        // le côté natif rechargeait alors la page qu'il venait de mettre à jour, et la liste
+        // remontait en haut à chaque case cochée.
+        let état = BlockingPage.State(catalog: [], installed: [], outdated: [],
+                                      activeRules: 0, busy: nil, failure: nil,
+                                      unreachable: false, paused: [])
+        #expect(BlockingPage.patch(état).contains("'wuji-ok'"))
+        // Le catalogue ne repasse que lorsqu'on le demande : cent soixante et une lignes
+        // n'ont pas à traverser le pont pour une case cochée.
+        #expect(!BlockingPage.patch(état).contains("\"catalog\""))
+        #expect(BlockingPage.patch(état, catalog: true).contains("\"catalog\""))
+    }
 
-        let entries = [BlockingLog.Entry(.installed, "EasyList", "62 969 règles · 1,2 s"),
-                       BlockingLog.Entry(.hidden, "exemple.fr", "#pub"),
-                       BlockingLog.Entry(.failed, "Catalogue", "injoignable")]
-        let html = BlockingLogPage.html(entries: entries)
-        #expect(html.contains("EasyList"))
+    @Test func laPageDesReglesSeDessineVideEtPleine() {
+        // Vide, elle explique le geste : une page qui ne montre rien sans dire comment on
+        // y met quelque chose se lit comme une fonction cassée.
+        let vide = RulesPage.State(mine: [])
+        #expect(RulesPage.html(state: vide).contains("Masquer un élément"))
+        #expect(RulesPage.tally(vide) == "aucune règle posée")
+
+        let état = RulesPage.State(mine: [
+            .init(host: "exemple.fr", selector: "#pub"),
+            .init(host: "exemple.fr", selector: ".banniere"),
+            .init(host: "autre.fr", selector: "#encart")
+        ])
+        let html = RulesPage.html(state: état)
+        // Rangées par site : on se souvient du site, jamais du sélecteur.
+        #expect(html.contains("exemple.fr"))
         #expect(html.contains("#pub"))
-        // Un échec doit se distinguer du reste sans qu'on lise la ligne entière.
-        #expect(html.contains("1 échec"))
+        #expect(html.contains("Tout retirer"))
+        #expect(RulesPage.tally(état) == "3 éléments masqués sur 2 sites")
         #expect(!html.contains("Optional("))
+        #expect(RulesPage.patch(état).contains("'wuji-ok'"))
     }
 
     @Test func laPageDesScriptsSuitSonInterrupteur() {

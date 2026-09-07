@@ -24,6 +24,7 @@ final class InternalPageHandler: NSObject, WKURLSchemeHandler {
     /// machine et ce qui tourne réellement : c'est l'application qui sait les assembler,
     /// pas ce gestionnaire.
     var blocking: ((String) -> String)?
+    var rules: (() -> String)?
     var scripts: (() -> String)?
     var settings: ((String) -> String)?
 
@@ -59,7 +60,8 @@ final class InternalPageHandler: NSObject, WKURLSchemeHandler {
         case "history":   return HistoryPage.html(entries: history.recent(), icons: icons)
         case "downloads": return DownloadsPage.html(items: downloads.items)
         case "favorites": return FavoritesPage.html(items: favorites.items, icons: icons)
-        case "blocking": return blocking?(url.path) ?? NewTabPage.html
+        case "blocking":  return blocking?(url.path) ?? NewTabPage.html
+        case "rules":     return rules?() ?? NewTabPage.html
         case "scripts":   return scripts?() ?? NewTabPage.html
         case "settings":  return settings?(url.path) ?? NewTabPage.html
         default:          return NewTabPage.html

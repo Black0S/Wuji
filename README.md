@@ -204,6 +204,17 @@ s'arrête « ce site ».
 Une règle dit ce qu'on ne veut pas voir sur un site qu'on visite — c'est une information sur
 soi, pas une contribution.
 
+**L'élément disparaît au clic, pas au rechargement.** WebKit pose un bloqueur de contenu au
+moment où le document commence : la règle qu'on vient d'écrire est juste, elle est en
+service, et l'élément resterait pourtant à l'écran jusqu'à la prochaine visite. Wuji ajoute
+donc, dans les documents déjà ouverts sur ce site, une feuille de style d'une ligne qui meurt
+avec eux — la règle compilée reste la seule chose durable. Ce n'est pas un second mécanisme
+de blocage, et ce n'est pas un script qui tourne : une feuille insérée ne coûte rien après
+l'insertion. Retirer une règle rend l'élément par le même chemin, tout de suite. Demander de
+recharger pour voir l'effet d'un clic qu'on vient de faire est un détour qu'on n'accepterait
+d'aucun autre bouton ; recharger d'office ferait perdre un formulaire à moitié rempli pour
+cacher un encart.
+
 ### Le catalogue par familles
 
 Cent soixante et une lignes à plat ne se parcourent pas : on y cherche une liste dont on
@@ -220,12 +231,25 @@ est facultative : sans elle, tout atterrit dans « Divers » et le catalogue res
 Le filtre traverse les sections, et une famille dont plus rien ne ressort disparaît avec son
 titre — « Par langue · 57 » au-dessus du vide se lirait comme un défaut d'affichage.
 
+**Cocher une case ne redessine pas la page.** Elle se rechargerait sinon deux fois par
+liste, puisque l'installation produit un état « en cours » puis un état « en service » : la
+liste remonterait en haut et le filtre qu'on vient de taper s'effacerait. On ne peut pas
+cocher trois listes trouvées par un mot-clé si chaque clic efface le mot-clé. Ce qui traverse
+le pont est donc le strict changement — le compte, le bandeau, l'état de chaque ligne —, et
+la page répond un mot convenu pour dire qu'elle a su l'appliquer. Le rechargement reste, mais
+pour le seul cas qu'il vise : une page servie avant la fin du téléchargement du catalogue,
+qui n'a aucune ligne à corriger. Les cent soixante et une lignes ne repassent alors qu'une
+fois, à leur arrivée — aucun correctif d'attribut ne sait faire apparaître ce qui n'existe pas.
+
 ### Vos règles, et la pause
 
-**Les règles posées à la main sont visibles.** Le sélecteur les créait, le menu du bouclier
-permettait de tout retirer d'un site, mais rien ne montrait ce qu'on avait masqué ni où. Une
-règle qu'on ne peut pas relire est une règle qu'on n'ose plus poser : elles ont leur section
-sur `wuji://blocking`, avec le site, le sélecteur, et de quoi en oublier une.
+**Les règles posées à la main ont leur page**, `wuji://rules`, sous « Blocage » dans le
+sommaire. Elles vivaient en haut du catalogue, au-dessus de cent soixante et une listes : on
+les croisait en cherchant autre chose, jamais quand on les cherchait. Ce ne sont pourtant pas
+les mêmes objets — une liste vient d'ailleurs et se coche, une règle vient d'un geste qu'on a
+fait sur une page précise. Elles y sont rangées **par site**, parce qu'on ne se souvient pas
+d'un sélecteur : on se souvient d'avoir masqué quelque chose sur un site, et l'on vient voir
+ce qu'on y a fait — ou le défaire quand la page a changé sous la règle.
 
 **Le blocage se suspend par site.** Un site qui se casse à cause d'une règle se répare en
 levant le blocage sur lui seul ; couper partout pour un site est le geste qu'on ne défait
@@ -233,7 +257,7 @@ jamais, parce qu'on oublie l'avoir fait. La pause se fait **en ne posant rien** 
 pas de « désactiver », une liste posée s'applique —, et les règles reviennent dès qu'on
 quitte le site : elles sont reposées à chaque navigation, pour l'adresse où l'on va.
 
-### Le journal, et ce qu'il ne dit pas
+### Ce que le bouclier n'annonce pas
 
 Le bouclier annonce ce qui est en service — combien de listes, combien de règles — et
 combien d'éléments *vos* règles masquent sur le site où vous êtes. **Il n'annonce pas de
@@ -243,21 +267,12 @@ une application tierce — vérifié sur `WKNavigationDelegate`, où les sélect
 correspondants n'existent pas. Un « 247 éléments bloqués sur cette page » serait un nombre
 inventé, c'est-à-dire le genre de chiffre qui rassure et qu'on ne peut pas vérifier.
 
-**Le journal a sa propre fenêtre**, une seule, sans colonne de navigation. Un onglet
-n'était pas le bon endroit : on consulte le journal *pendant* qu'on regarde la page qui se
-comporte mal, et il aurait fallu quitter cette page pour le lire. Il occupait aussi une
-place dans la session, où il n'a rien à faire — on ne rouvre pas un journal au démarrage.
-
-Il dit ce que Wuji a **fait**, ce qui se recoupe : quelle liste
-est entrée quand, en combien de millisecondes, avec combien de règles ; quel échec et pour
-quelle raison ; quel élément masqué, sur quel site, avec quel sélecteur ; quand le magasin a
-été balayé et de combien de listes périmées. C'est ce qu'on vient lire quand une page se
-comporte autrement qu'hier.
-
-Quatre cents entrées, pas davantage : un journal qui grossit sans fin finit par être le plus
-gros fichier de l'application, et personne n'y remonte au-delà de quelques centaines de
-lignes. Il reste sur la machine et n'est envoyé nulle part — il porte les sites où vous avez
-posé des règles.
+Un journal du blocage a existé, avec sa fenêtre : ce que Wuji avait fait, quelle liste était
+entrée quand et en combien de millisecondes. Il a été retiré. Ce qu'il montrait, la page de
+blocage le montre déjà — les listes en service, leurs comptes, l'échec du dernier essai — et
+ce qu'on serait venu y chercher, la trace d'une requête empêchée, il ne pouvait pas le dire.
+Un journal qui ne journalise que ses propres gestes n'est pas un journal ; c'était surtout un
+fichier de plus, portant les sites où l'on avait posé des règles.
 
 ### Ce que la conversion ne sait pas rendre
 

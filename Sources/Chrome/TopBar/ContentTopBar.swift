@@ -59,11 +59,10 @@ final class ContentTopBar: ThemedView {
         configure(more, symbol: "ellipsis", label: "Menu")
         // Le bouclier n'apparaît que si une liste est en service : un bouton qui
         // n'ouvrirait qu'une liste vide n'a pas à occuper la barre.
-        // **Le bouclier n'apparaît que quand une liste est en service.** Un bouton qui
-        // n'ouvrirait qu'une page vide apprend à ne plus être regardé — c'est la règle de
-        // toute cette barre.
+        // **Le bouclier est toujours là.** Il l'était seulement quand une liste tournait —
+        // mais c'est lui qui mène au sélecteur d'éléments et au catalogue : caché, il
+        // rendait inatteignable ce qui sert précisément à le remplir.
         configure(shield, symbol: "shield.lefthalf.filled", label: "Blocage")
-        shield.isHidden = true
         // Les scripts ont leur propre bouton, et pas une ligne dans le menu des
         // extensions : ce sont deux pouvoirs différents. Une extension arrive avec ses
         // permissions déclarées et son bac à sable ; un script utilisateur est du code à

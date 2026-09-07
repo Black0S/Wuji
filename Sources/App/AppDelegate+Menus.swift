@@ -106,11 +106,12 @@ extension AppDelegate {
         viewMenu.addItem(favoritesItem)
         viewMenu.addItem(withTitle: "Blocage", action: #selector(showBlocking(_:)), keyEquivalent: "")
         viewMenu.addItem(withTitle: "Scripts", action: #selector(showScripts(_:)), keyEquivalent: "")
-        // Le journal est une fenêtre, pas un onglet : il lui faut son entrée, sans quoi
-        // on ne l'atteindrait que par le menu du bouclier — lui-même absent tant qu'aucune
-        // liste n'est en service.
-        viewMenu.addItem(withTitle: "Journal du blocage", action: #selector(showBlockingLog(_:)),
-                         keyEquivalent: "")
+        // **Le sélecteur mérite son entrée de menu.** Il n'était atteignable que par le
+        // menu du bouclier, lui-même absent tant qu'aucune liste n'est en service : on ne
+        // pouvait donc masquer un élément qu'après avoir installé une liste, ce qui n'a
+        // aucun rapport.
+        viewMenu.addItem(withTitle: "Masquer un élément…",
+                         action: #selector(startElementPickerCommand(_:)), keyEquivalent: "")
         viewMenu.addItem(withTitle: "Historique", action: #selector(showHistory(_:)), keyEquivalent: "y")
         viewMenu.addItem(withTitle: "Téléchargements", action: #selector(showDownloads(_:)), keyEquivalent: "j")
         viewMenu.addItem(withTitle: "Rechercher dans la page…", action: #selector(findInPage(_:)), keyEquivalent: "f")

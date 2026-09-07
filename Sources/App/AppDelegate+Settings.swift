@@ -380,7 +380,7 @@ extension AppDelegate {
     /// Ce que la barre du haut doit montrer à droite : le blocage et les scripts.
     func syncToolbarButtons() {
         guard layout != nil else { return }
-        layout.topBar.setBlocking(active: blocking.isActive || !userRules.isEmpty)
+        layout.topBar.setBlocking(active: true)
         layout.topBar.setScripts(
             installed: settings.userScriptsEnabled && !userScripts.scripts.isEmpty,
             activeHere: settings.userScriptsEnabled && !userScripts.matching(currentTab?.url).isEmpty)

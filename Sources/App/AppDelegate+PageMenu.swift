@@ -243,6 +243,17 @@ extension AppDelegate {
                 currentTab?.webView.load(URLRequest(url: url))
                 return
             }
+            // **Avant la garde sur « action », et c'est tout le correctif.** Le sélecteur
+            // d'éléments renvoie `{selector, host}` : il n'a pas d'action, parce qu'il n'en
+            // demande pas une — il rapporte ce qu'on a désigné. Rangé après la garde, son
+            // message était écarté sans un mot, et le masquage ne faisait rien du tout.
+            //
+            // La leçon vaut au-delà : une garde commune posée au milieu d'un aiguillage
+            // décide pour des messages qu'elle ne connaît pas.
+            if message.name == ElementPicker.handler {
+                handlePickedElement(payload)
+                return
+            }
             guard let action = payload["action"] as? String else { return }
             if message.name == "wujiDownloads" {
                 handleDownloadAction(action, id: payload["id"] as? String)
@@ -255,10 +266,6 @@ extension AppDelegate {
             if message.name == "wujiSettings" {
                 handlePasswordAction(action, payload: payload)
                 handleSettingsAction(action, payload: payload)
-                return
-            }
-            if message.name == ElementPicker.handler {
-                handlePickedElement(payload)
                 return
             }
             if message.name == "wujiBlocking" {

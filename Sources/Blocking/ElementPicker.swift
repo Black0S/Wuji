@@ -1,3 +1,4 @@
+import Foundation
 import WebKit
 
 /// Désigner un élément d'une page pour le faire disparaître.
@@ -16,6 +17,58 @@ import WebKit
 enum ElementPicker {
 
     static let handler = "wujiPicker"
+
+    /// Masque tout de suite, dans la page qu'on regarde.
+    ///
+    /// **La règle compilée ne vaut qu'à la navigation suivante.** WebKit applique un
+    /// bloqueur de contenu au chargement du document : la règle qu'on vient de poser est
+    /// juste, elle est en service, et pourtant l'élément reste à l'écran jusqu'au prochain
+    /// rechargement. Demander de recharger pour voir l'effet d'un clic qu'on vient de faire
+    /// est le genre de détour qu'on n'accepte d'aucun autre bouton.
+    ///
+    /// **Ce n'est pas un second mécanisme de blocage.** C'est une feuille de style d'une
+    /// ligne, posée sur ce document-ci et qui meurt avec lui ; la règle compilée reste la
+    /// seule chose durable, et c'est elle qui vaudra dès la prochaine visite. Rien ne
+    /// s'exécute ensuite : une feuille insérée ne coûte pas de script.
+    ///
+    /// Le sélecteur est encodé en JSON plutôt que concaténé : il vient de la page, et une
+    /// apostrophe y suffirait à casser l'expression — ou à y glisser autre chose.
+    static func hide(_ selector: String) -> String {
+        apply(selector, hiding: true)
+    }
+
+    /// Défait le masquage immédiat, pour une règle qu'on retire.
+    static func unhide(_ selector: String) -> String {
+        apply(selector, hiding: false)
+    }
+
+    private static func apply(_ selector: String, hiding: Bool) -> String {
+        let encoded = (try? JSONSerialization.data(withJSONObject: [selector]))
+            .flatMap { String(data: $0, encoding: .utf8) }
+            .map { String($0.dropFirst().dropLast()) } ?? "\"\""
+        return """
+        (() => {
+          const sel = \(encoded);
+          let feuille = document.getElementById('__wujiMasque');
+          if (!feuille) {
+            if (!\(hiding)) return 'rien';
+            feuille = document.createElement('style');
+            feuille.id = '__wujiMasque';
+            // Sur `documentElement` et non `head` : une page peut n'en avoir aucun, et la
+            // feuille doit survivre à un `head` que la page reconstruit.
+            document.documentElement.appendChild(feuille);
+          }
+          const règle = sel + '{display:none!important}';
+          const index = [...feuille.sheet.cssRules].findIndex((r) => r.selectorText === sel);
+          if (\(hiding)) {
+            if (index < 0) feuille.sheet.insertRule(règle, feuille.sheet.cssRules.length);
+          } else if (index >= 0) {
+            feuille.sheet.deleteRule(index);
+          }
+          return 'fait';
+        })();
+        """
+    }
 
     /// Le survol met en évidence, le clic choisit, `esc` renonce.
     ///
@@ -99,7 +152,7 @@ enum ElementPicker {
         try {
           window.webkit.messageHandlers.wujiPicker.postMessage(
             choisi ? { selector: choisi, host: location.hostname } : { cancelled: true });
-        } catch (_) {}
+        } catch (_) { /* la vue a été démontée */ }
       };
 
       const clic = (e) => {

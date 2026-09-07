@@ -20,15 +20,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     lazy var blocking = ContentBlocker(settings: settings)
     /// Les règles posées à la main par le sélecteur d'éléments.
     lazy var userRules = UserRules(settings: settings)
-    /// Le journal du blocage : ce que Wuji a fait, et rien qu'il n'ait fait.
-    let blockingLog = BlockingLog()
-    /// Le journal a sa fenêtre, et une seule.
-    let logWindow = LogWindow()
     /// Le catalogue lu au dernier passage sur la page. Il n'est pas gardé sur le disque :
     /// deux cents kilo-octets relus à l'ouverture valent mieux qu'un catalogue d'hier
     /// qu'on ne saurait pas distinguer d'un catalogue d'aujourd'hui.
     var ruleCatalog: [RuleList] = []
     var catalogUnreachable = false
+    /// Ce que les pages de blocage ouvertes ont déjà reçu du catalogue. Sert à ne leur
+    /// renvoyer les cent soixante et une lignes que lorsqu'elles ont changé — cocher une
+    /// case ne change pas le catalogue, seulement son état.
+    var patchedCatalog: [String] = []
     let userScripts = UserScriptStore()
     let permissions = Permissions()
     let location = LocationAccess()
@@ -110,7 +110,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         // configuration déjà utilisée ne l'accepte plus.
         let pages = InternalPageHandler(history: history, downloads: downloads,
                                         favorites: favorites, icons: favicons)
-        pages.blocking = { [unowned self] _ in BlockingPage.html(state: blockingState) }
+        pages.blocking = { [unowned self] _ in
+            // Le catalogue se relit à chaque affichage, y compris quand on arrive par le
+            // sommaire ou par l'adresse : `showBlocking` n'est pas le seul chemin, et une
+            // page servie sans catalogue se lit comme « il n'y a rien à activer ».
+            loadRuleCatalog()
+            return BlockingPage.html(state: blockingState)
+        }
+        pages.rules = { [unowned self] in RulesPage.html(state: rulesState) }
         pages.scripts = { [unowned self] in
             ScriptsPage.html(scripts: userScripts.scripts,
                              isEnabled: settings.userScriptsEnabled)
@@ -268,15 +275,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
         blocking.restore()
         // Le magasin de WebKit ne se vide pas tout seul : les listes de l'ancien bloqueur
         // intégré y dormaient encore, des mois après sa suppression.
-        blocking.sweep { [weak self] jetées in
-            self?.blockingLog.record(.swept, "Magasin de WebKit",
-                                     "\(jetées) liste\(jetées > 1 ? "s" : "") périmée"
-                                        + (jetées > 1 ? "s" : "") + " retirée"
-                                        + (jetées > 1 ? "s" : ""))
-        }
+        blocking.sweep()
         userRules.onChange = { [weak self] in
             self?.applyBlockingToOpenTabs()
             self?.syncChrome()
+            // La page des règles est ouverte pendant qu'on en retire : elle doit montrer
+            // ce qui vient de changer, et sur place — un rechargement la remettrait en haut.
+            self?.refreshBlockingPages()
         }
         Task { @MainActor in await userRules.restore() }
         restoreSession()

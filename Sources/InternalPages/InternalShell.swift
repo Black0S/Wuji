@@ -30,6 +30,10 @@ enum InternalShell {
         ]),
         ("Modules", [
             Item(title: "Blocage", address: "wuji://blocking", symbol: "shield.lefthalf.filled"),
+            // Sous « Blocage », parce que c'en est la suite : les listes viennent d'ailleurs,
+            // les règles viennent de vous. Rangées ensemble, on ne trouvait ni l'une ni
+            // l'autre — cent soixante et une listes enterrent trois sélecteurs.
+            Item(title: "Mes règles", address: "wuji://rules", symbol: "eye.slash"),
             Item(title: "Scripts", address: "wuji://scripts", symbol: "curlybraces")
         ]),
         ("Réglages", [
@@ -50,10 +54,10 @@ enum InternalShell {
     /// pour que le sommaire sache quelle ligne marquer.
     /// `standalone` : la page sans son sommaire.
     ///
-    /// **Une fenêtre à part n'a pas de colonne de navigation.** Le journal du blocage a la
-    /// sienne ; y afficher les entrées « Favoris », « Historique », « Réglages » inviterait
-    /// à une navigation qui n'a pas de sens dans une fenêtre d'une seule page — et qui
-    /// remplacerait le journal par autre chose sans moyen d'y revenir.
+    /// **Une page servie hors du navigateur n'a pas de colonne de navigation.** Y afficher
+    /// « Favoris », « Historique », « Réglages » inviterait à une navigation qui n'a pas de
+    /// sens là où il n'y a qu'une page — et qui la remplacerait par autre chose sans moyen
+    /// d'y revenir.
     static func page(title: String, current: String, body: String, script: String = "",
                      style: String = "", standalone: Bool = false) -> String {
         let nav = groups.map { group, items in

@@ -23,8 +23,10 @@ enum BlockingPage {
         /// Le catalogue n'a pas pu être lu : la page le dit et propose de réessayer, au
         /// lieu d'afficher une liste vide qu'on prendrait pour « il n'y a rien ».
         var unreachable: Bool
-        /// Ce que vous avez masqué vous-même, et où le blocage est suspendu.
-        var mine: [UserRules.Rule]
+        /// Les sites où le blocage est suspendu. Ce que vous avez masqué vous-même vit
+        /// maintenant sur `wuji://rules` : cocher une liste écrite ailleurs et poser une
+        /// règle sur une page qu'on regarde sont deux gestes différents, et le catalogue
+        /// enterrait le second.
         var paused: [String]
     }
 
@@ -45,16 +47,32 @@ enum BlockingPage {
     /// un état « en cours » puis un état « en service ». Ce n'est pas un détail de confort :
     /// on ne peut pas cocher trois listes trouvées par un mot-clé si chaque clic efface le
     /// mot-clé.
-    static func patch(_ state: State) -> String {
-        let payload: [String: Any] = [
+    /// `catalog` : le catalogue a changé de contenu, pas seulement d'état — il vient
+    /// d'arriver, ou il a été rechargé. On renvoie alors les familles entières, parce
+    /// qu'aucun correctif d'attribut ne sait faire apparaître des lignes qui n'existent pas.
+    ///
+    /// **Et seulement dans ce cas.** Cent soixante et une lignes pèsent cent kilo-octets ;
+    /// les renvoyer à chaque case cochée les ferait traverser le pont une dizaine de fois
+    /// pour un état que trois attributs suffisent à corriger.
+    static func patch(_ state: State, catalog: Bool = false) -> String {
+        var payload: [String: Any] = [
             "tally": tally(state),
             "notice": notice(state),
             "installed": Array(state.installed),
             "outdated": Array(state.outdated)
         ]
+        if catalog { payload["catalog"] = groups(state) }
         let json = (try? JSONSerialization.data(withJSONObject: payload))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        return "window.__wujiBlockingPatch && window.__wujiBlockingPatch(\(json))"
+        // **La réponse est un mot convenu, pas la valeur du correctif.** Une fonction qui
+        // ne renvoie rien vaut `undefined`, que WebKit rend comme « rien » — c'est-à-dire
+        // exactement comme un crochet absent. Le côté natif en concluait que la page ne
+        // savait pas se mettre à jour et la rechargeait : la liste remontait en haut et le
+        // filtre s'effaçait à chaque case cochée, précisément ce que ce correctif existe
+        // pour éviter. Le repli sur le rechargement demeure, pour le seul cas qu'il vise.
+        return """
+        window.__wujiBlockingPatch ? (window.__wujiBlockingPatch(\(json)), 'wuji-ok') : 'absent'
+        """
     }
 
     private static func notice(_ state: State) -> String {
@@ -90,9 +108,13 @@ enum BlockingPage {
               </header>
               <main>
                 <div id="notice">\(notice)</div>
-                \(personal(state))\(paused(state))
-                \(state.catalog.isEmpty ? "" : search)
-                \(groups(state))
+                \(paused(state))
+                <div class="search"\(state.catalog.isEmpty ? " hidden" : "")>
+                  <input type="search" class="filter" placeholder="Filtrer les listes"
+                         autocomplete="off" spellcheck="false">
+                  <span class="count"></span>
+                </div>
+                <div id="catalogue">\(groups(state))</div>
                 <p class="note">
                   Wuji n'embarque aucune liste. Celles-ci viennent de
                   <code>Black0S/Wuji-Rules-List</code>, qui récupère les listes d'origine —
@@ -146,34 +168,6 @@ enum BlockingPage {
         }.joined()
     }
 
-    /// Les règles posées à la main, là où on les retrouve.
-    ///
-    /// **Elles étaient invisibles.** Le sélecteur d'éléments les créait, le menu du bouclier
-    /// permettait de tout retirer d'un site — mais rien ne montrait ce qu'on avait masqué,
-    /// ni où. Une règle qu'on ne peut pas relire est une règle qu'on n'ose plus poser.
-    private static func personal(_ state: State) -> String {
-        guard !state.mine.isEmpty else { return "" }
-        let rows = state.mine
-            .sorted { ($0.host, $0.selector) < ($1.host, $1.selector) }
-            .map { rule in
-                """
-                <div class="rule" data-rule="\(escape(rule.id))">
-                  <span class="mono host">\(escape(rule.host))</span>
-                  <span class="mono selector">\(escape(rule.selector))</span>
-                  <button class="button danger" data-action="forget-rule">Oublier</button>
-                </div>
-                """
-            }.joined()
-        return """
-        <div class="block">
-          <h2>Règles personnalisées<span class="tally">\(state.mine.count)</span></h2>
-          <p class="hint">Posées avec « Masquer un élément… », depuis le bouclier de la barre.
-            Elles ne vont nulle part : ce sont des informations sur vous.</p>
-        </div>
-        <div class="rules">\(rows)</div>
-        """
-    }
-
     /// Les sites où le blocage est suspendu.
     private static func paused(_ state: State) -> String {
         guard !state.paused.isEmpty else { return "" }
@@ -194,14 +188,6 @@ enum BlockingPage {
         <div class="rules">\(rows)</div>
         """
     }
-
-    private static let search = """
-    <div class="search">
-      <input type="search" class="filter" placeholder="Filtrer les listes"
-             autocomplete="off" spellcheck="false">
-      <span class="count"></span>
-    </div>
-    """
 
     private static func row(_ list: RuleList, _ state: State) -> String {
         let installed = state.installed.contains(list.id)
@@ -264,6 +250,7 @@ enum BlockingPage {
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     input[type=checkbox] { accent-color: var(--text); width: 15px; height: 15px; flex: none; }
     .search { display: flex; align-items: center; gap: 10px; margin: 4px 0 8px; }
+    .search[hidden] { display: none; }
     .search input {
       flex: 1; min-width: 0; padding: 7px 10px; font: inherit; font-size: 13px;
       color: var(--text); background: var(--hover); border: 0; border-radius: 8px;
@@ -330,6 +317,17 @@ enum BlockingPage {
       const bandeau = document.getElementById('notice');
       if (bandeau) bandeau.innerHTML = état.notice;
 
+      // Le catalogue n'arrive qu'une fois, et seulement quand il a changé : la page servie
+      // avant la fin du téléchargement n'a aucune ligne, et aucun attribut ne sait en créer.
+      if (état.catalog !== undefined) {
+        const catalogue = document.getElementById('catalogue');
+        if (catalogue) catalogue.innerHTML = état.catalog;
+        const recherche = document.querySelector('.search');
+        if (recherche) recherche.hidden = !document.querySelector('li[data-id]');
+        const champ = document.querySelector('.filter');
+        if (champ && champ.value.trim()) filtrer(champ.value);
+      }
+
       const posées = new Set(état.installed);
       const vieilles = new Set(état.outdated);
       for (const ligne of document.querySelectorAll('li[data-id]')) {
@@ -344,14 +342,23 @@ enum BlockingPage {
         const bouton = ligne.querySelector('.update');
         if (bouton) bouton.hidden = !périmée;
       }
+      // Le compte de chaque famille se relit dans la page : il est écrit dans le titre du
+      // groupe, et une case cochée le rendrait faux jusqu'au prochain rechargement.
+      for (const groupe of document.querySelectorAll('.group')) {
+        const total = groupe.querySelectorAll('li[data-id]').length;
+        const actives = [...groupe.querySelectorAll('.toggle')].filter((c) => c.checked).length;
+        const compteur = groupe.querySelector('h2 .tally');
+        if (compteur) {
+          compteur.textContent = total + (actives > 0 ? ` · ${actives} en service` : '');
+        }
+      }
     };
 
     // Le filtrage se fait ici : cent soixante et une lignes qu'un aller-retour par message
     // redessinerait à chaque frappe, pour un texte que la page a déjà sous la main.
     const plier = (t) => t.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');
-    document.addEventListener('input', (event) => {
-      if (!event.target.classList.contains('filter')) return;
-      const aiguille = plier(event.target.value.trim());
+    const filtrer = (valeur) => {
+      const aiguille = plier(valeur.trim());
       const lignes = document.querySelectorAll('li[data-id]');
       let visibles = 0;
       for (const ligne of lignes) {
@@ -366,6 +373,10 @@ enum BlockingPage {
       }
       const compteur = document.querySelector('.search .count');
       if (compteur) compteur.textContent = aiguille ? `${visibles} sur ${lignes.length}` : '';
+    };
+
+    document.addEventListener('input', (event) => {
+      if (event.target.classList.contains('filter')) filtrer(event.target.value);
     });
     """
 }

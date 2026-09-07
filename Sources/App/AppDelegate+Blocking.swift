@@ -20,19 +20,25 @@ extension AppDelegate {
     /// état « en service ». Ce n'est pas un détail de confort : on ne peut pas cocher trois
     /// listes trouvées par un mot-clé si chaque clic efface le mot-clé.
     ///
-    /// Le repli sur le rechargement reste pour le premier affichage — une page qui n'a pas
-    /// encore posé son crochet ne saurait pas quoi faire du correctif.
+    /// **La page répond un mot convenu.** Elle le faisait déjà, mais le correctif ne
+    /// renvoyait rien : `undefined` traverse WebKit comme « rien », c'est-à-dire comme un
+    /// crochet absent, et l'on rechargeait la page qu'on venait de mettre à jour. Le repli
+    /// sur le rechargement ne vaut plus que pour ce qu'il visait — le premier affichage,
+    /// où la page n'a pas encore posé son crochet.
+    ///
+    /// Les deux pages passent par ici : les règles personnelles ont leur adresse depuis
+    /// qu'elles ont quitté le catalogue, et elles bougent aux mêmes moments.
     func refreshBlockingPages() {
-        // La fenêtre du journal suit les mêmes changements : elle est ouverte pendant
-        // qu'on coche des listes, et un journal qui ne montre pas ce qui vient d'arriver
-        // n'est pas un journal.
-        if logWindow.isOpen { logWindow.refresh() }
-
-        let patch = BlockingPage.patch(blockingState)
-        for tab in spaces.flatMap(\.allTabs) where tab.url?.host() == "blocking" {
+        let ids = ruleCatalog.map(\.id)
+        let renewed = ids != patchedCatalog
+        patchedCatalog = ids
+        let patches = ["blocking": BlockingPage.patch(blockingState, catalog: renewed),
+                       "rules": RulesPage.patch(rulesState)]
+        for tab in spaces.flatMap(\.allTabs) {
+            guard let host = tab.url?.host(), let patch = patches[host] else { continue }
             tab.webView.evaluateJavaScript(patch) { value, _ in
                 MainActor.assumeIsolated {
-                    guard value == nil else { return }
+                    guard (value as? String) != "wuji-ok" else { return }
                     tab.webView.reload()
                 }
             }
@@ -60,9 +66,11 @@ extension AppDelegate {
                 return nil
             }(),
             unreachable: catalogUnreachable,
-            mine: userRules.rules,
             paused: settings.pausedHosts)
     }
+
+    /// Ce que la page des règles personnelles affiche.
+    var rulesState: RulesPage.State { RulesPage.State(mine: userRules.rules) }
 
     /// Va chercher le catalogue. **Rien d'autre n'est téléchargé** : les règles ne partent
     /// qu'à la demande, liste par liste.
@@ -75,7 +83,6 @@ extension AppDelegate {
                 // On garde ce qu'on avait : un catalogue affiché puis effacé par une coupure
                 // de réseau ferait croire que les listes ont disparu.
                 catalogUnreachable = ruleCatalog.isEmpty
-                blockingLog.record(.failed, "Catalogue", "injoignable")
             }
             refreshBlockingPages()
         }
@@ -126,7 +133,8 @@ extension AppDelegate {
                 action: { [weak self] in
                     guard let self else { return }
                     blocking.setPaused(!paused, host: host)
-                    blockingLog.record(paused ? .resumed : .paused, host)
+                    // Une pause qui n'atteindrait pas les vues déjà ouvertes ne vaudrait
+                    // qu'à la navigation suivante : on repose donc les règles tout de suite.
                     applyBlockingToOpenTabs()
                     layout.toast.show(paused ? "Blocage repris sur « \(host) »"
                                              : "Blocage suspendu sur « \(host) »") {
@@ -138,21 +146,19 @@ extension AppDelegate {
             let mine = userRules.rules.filter { $0.host == host }
             if !mine.isEmpty {
                 items.append(ActionItem(
-                    title: "Retirer mes \(mine.count) règle\(mine.count > 1 ? "s" : "") sur \(host)",
+                    title: mine.count == 1 ? "Retirer ma règle sur \(host)"
+                                           : "Retirer mes \(mine.count) règles sur \(host)",
                     symbol: "arrow.uturn.left", isDestructive: true,
                     action: { [weak self] in
-                        self?.userRules.removeAll(for: host)
-                        self?.blockingLog.record(.unhidden, host,
-                                                 "\(mine.count) règle\(mine.count > 1 ? "s" : "")")
-                        self?.layout.toast.show("Règles de « \(host) » retirées")
+                        self?.forgetRules(of: host)
                     }))
             }
             items.append(.separator)
         }
         items.append(ActionItem(title: "Listes de blocage…", symbol: "list.bullet",
                                 action: { [weak self] in self?.showBlocking(nil) }))
-        items.append(ActionItem(title: "Journal du blocage…", symbol: "text.alignleft",
-                                action: { [weak self] in self?.showBlockingLog(nil) }))
+        items.append(ActionItem(title: "Mes règles…", symbol: "eye.slash",
+                                action: { [weak self] in self?.showRules(nil) }))
         return items
     }
 
@@ -164,21 +170,52 @@ extension AppDelegate {
         return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
-    /// Ouvre le journal dans sa fenêtre.
+
+    static let rulesPage = URL(string: "wuji://rules")!
+
+    @objc func showRules(_ sender: Any?) { openInternal(Self.rulesPage) }
+
+    /// Masque — ou démasque — tout de suite, dans les documents déjà ouverts sur ce site.
     ///
-    /// **Pas un onglet.** On consulte le journal pendant qu'on regarde la page qui se
-    /// comporte mal ; dans un onglet il aurait fallu quitter cette page pour le lire.
-    @objc func showBlockingLog(_ sender: Any?) {
-        logWindow.html = { [unowned self] in
-            BlockingLogPage.html(entries: blockingLog.entries)
+    /// **La règle compilée ne vaut qu'au chargement suivant.** WebKit pose un bloqueur de
+    /// contenu au moment où le document commence : la règle qu'on vient d'écrire est juste,
+    /// elle est en service, et l'élément reste pourtant à l'écran jusqu'au rechargement.
+    /// Demander de recharger pour voir l'effet d'un clic qu'on vient de faire est un détour
+    /// qu'on n'accepterait d'aucun autre bouton — et recharger d'office ferait perdre un
+    /// formulaire à moitié rempli pour cacher un encart.
+    ///
+    /// Ce n'est pas un second mécanisme de blocage : une feuille de style d'une ligne, posée
+    /// sur ce document-ci, qui meurt avec lui. La règle compilée reste la seule chose
+    /// durable, et c'est elle qui vaudra dès la prochaine visite.
+    ///
+    /// Tous les onglets du site, pas seulement celui de devant : la même page ouverte deux
+    /// fois n'a aucune raison de se comporter de deux façons.
+    func hideNow(selector: String, on host: String, hiding: Bool = true) {
+        let script = hiding ? ElementPicker.hide(selector) : ElementPicker.unhide(selector)
+        for tab in spaces.flatMap(\.allTabs)
+        where tab.url.flatMap({ UserRules.registrable($0.host() ?? "") }) == host {
+            tab.webView.evaluateJavaScript(script)
         }
-        logWindow.show(configuration: makeConfiguration())
+    }
+
+    /// Retire toutes les règles d'un site, et rend ce qu'elles cachaient.
+    func forgetRules(of host: String) {
+        let rules = userRules.rules.filter { $0.host == host }
+        guard !rules.isEmpty else { return }
+        userRules.removeAll(for: host)
+        for rule in rules { hideNow(selector: rule.selector, on: host, hiding: false) }
+        refreshBlockingPages()
+        syncChrome()
+        layout.toast.show(rules.count == 1 ? "Règle de « \(host) » retirée"
+                                           : "Règles de « \(host) » retirées")
     }
 
     /// Ouvre le sélecteur sur la page courante.
     ///
     /// Il n'y a rien à ouvrir sur une page interne ou une page d'erreur : une règle y
     /// désignerait un élément de Wuji, pas du web.
+    @objc func startElementPickerCommand(_ sender: Any?) { startElementPicker() }
+
     func startElementPicker() {
         guard let tab = currentTab, let url = tab.url,
               url.scheme?.hasPrefix("http") == true else {
@@ -199,12 +236,10 @@ extension AppDelegate {
                 layout.toast.show("Cette règle existait déjà")
                 return
             }
-            blockingLog.record(.hidden, site, selector)
-            applyBlockingToOpenTabs()
+            hideNow(selector: selector, on: site)
             syncChrome()
-            layout.toast.show("Masqué sur « \(site) » — rechargez pour voir l'effet") {
-                [weak self] in self?.currentTab?.webView.reload()
-            }
+            refreshBlockingPages()
+            layout.toast.show("Masqué sur « \(site) »")
         }
     }
 
@@ -213,31 +248,27 @@ extension AppDelegate {
         case "reload":
             loadRuleCatalog()
         case "forget-rule":
-            guard let id else { return }
+            // On lit la règle avant de la retirer : c'est elle qui dit quoi démasquer.
+            guard let id, let rule = userRules.rules.first(where: { $0.id == id }) else { return }
             userRules.remove(id: id)
+            hideNow(selector: rule.selector, on: rule.host, hiding: false)
             refreshBlockingPages()
             syncChrome()
+        case "forget-host":
+            guard let id else { return }
+            forgetRules(of: id)
         case "resume":
             guard let id else { return }
             blocking.setPaused(false, host: id)
-            blockingLog.record(.resumed, id)
             applyBlockingToOpenTabs()
             refreshBlockingPages()
-        case "clear-log":
-            blockingLog.clear()
-            logWindow.refresh()
         case "install", "update":
             guard let id, let list = ruleCatalog.first(where: { $0.id == id }) else { return }
             Task { @MainActor in
                 if action == "update" { blocking.remove(id) }
-                let début = Date()
                 if let failure = await blocking.install(list) {
-                    blockingLog.record(.failed, list.name, failure)
                     layout.toast.show("« \(list.name) » : \(failure)")
                 } else {
-                    let ms = Int(Date().timeIntervalSince(début) * 1000)
-                    blockingLog.record(action == "update" ? .updated : .installed, list.name,
-                                       "\(list.rules) règles · v\(list.version) · \(ms) ms")
                     layout.toast.show("« \(list.name) » en service — \(list.rules) règles")
                 }
                 applyBlockingToOpenTabs()
@@ -248,8 +279,6 @@ extension AppDelegate {
             guard let id else { return }
             let name = ruleCatalog.first { $0.id == id }?.name ?? id
             blocking.remove(id)
-            blockingLog.record(.removed, name)
-            applyBlockingToOpenTabs()
             refreshBlockingPages()
             syncChrome()
             layout.toast.show("« \(name) » retirée")
