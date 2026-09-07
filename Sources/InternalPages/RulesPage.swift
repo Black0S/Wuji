@@ -182,6 +182,9 @@ enum RulesPage {
     private static let script = """
     const send = (payload) => window.webkit.messageHandlers.wujiBlocking.postMessage(payload);
 
+    // Tout ce que cette page masque vit là-dedans, et nulle part ailleurs.
+    const liste = () => document.getElementById('liste') || document.createDocumentFragment();
+
     document.addEventListener('click', (event) => {
       const bouton = event.target.closest('[data-action]');
       if (!bouton) return;
@@ -220,8 +223,10 @@ enum RulesPage {
         if (montrer) visibles++;
       }
       // Un site dont plus rien ne ressort disparaît avec son titre : « exemple.fr · 3 »
-      // au-dessus du vide se lit comme un défaut d'affichage.
-      for (const groupe of document.querySelectorAll('.group')) {
+      // au-dessus du vide se lit comme un défaut d'affichage. **Sous `#liste` seulement** :
+      // le sommaire de la coquille a ses propres sections, et un balayage à la racine du
+      // document les emportait avec — la colonne de gauche disparaissait au premier filtre.
+      for (const groupe of liste().querySelectorAll('.group')) {
         groupe.hidden = ![...groupe.querySelectorAll('.rule')].some((r) => !r.hidden);
       }
       const compteur = document.querySelector('.search .count');

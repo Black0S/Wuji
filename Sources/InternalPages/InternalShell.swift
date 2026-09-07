@@ -67,10 +67,14 @@ enum InternalShell {
                 <a class="entry\(isCurrent ? " current" : "")" href="\(item.address)">\(escape(item.title))</a>
                 """
             }.joined()
-            // Un `div` et non un `section` : les pages masquent leurs sections vides
-            // quand on filtre, et le sommaire disparaissait avec elles. La coquille ne
-            // doit rien porter qu'une page puisse viser sans le vouloir.
-            return "<div class=\"group\"><h4>\(escape(group))</h4>\(rows)</div>"
+            // **Une classe que personne d'autre ne porte.** Les pages masquent leurs
+            // sections devenues vides quand on filtre — `for (const groupe of
+            // document.querySelectorAll('.group')) groupe.hidden = …` — et le sommaire,
+            // qui s'appelait `group` lui aussi, disparaissait avec elles : filtrer par
+            // mot-clé ou choisir une famille effaçait toute la colonne de gauche. La
+            // coquille ne doit rien porter qu'une page puisse viser sans le vouloir, et
+            // c'est le nom, pas la balise, qui décide de cela.
+            return "<div class=\"rubrique\"><h4>\(escape(group))</h4>\(rows)</div>"
         }.joined()
 
         return """
@@ -110,7 +114,7 @@ enum InternalShell {
     nav {
       width: 202px; flex: none; padding: 44px 12px 12px; overflow-y: auto;
     }
-    nav .group { margin: 0 0 18px; }
+    nav .rubrique { margin: 0 0 18px; }
     nav h4 {
       margin: 0 0 4px; padding: 0 12px; font-size: 10px; font-weight: 600;
       letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted);

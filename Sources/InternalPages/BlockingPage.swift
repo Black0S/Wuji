@@ -379,6 +379,9 @@ enum BlockingPage {
     private static let script = """
     const send = (payload) => window.webkit.messageHandlers.wujiBlocking.postMessage(payload);
 
+    // Tout ce que cette page masque ou recompte vit là-dedans, et nulle part ailleurs.
+    const catalogue = () => document.getElementById('catalogue') || document.createDocumentFragment();
+
     // **Ce que l'utilisateur vient de demander, avant que le natif l'ait fait.**
     // Une liste cochée n'entre dans les réglages qu'une fois téléchargée et compilée —
     // plusieurs secondes. Sans cette mémoire, le premier correctif qui passait entre-temps
@@ -467,7 +470,11 @@ enum BlockingPage {
       }
       // Le compte de chaque famille se relit dans la page : il est écrit dans le titre du
       // groupe, et une case cochée le rendrait faux jusqu'au prochain rechargement.
-      for (const groupe of document.querySelectorAll('.group')) {
+      //
+      // **Sous `#catalogue`, jamais dans tout le document.** Le sommaire de la coquille a
+      // ses propres sections ; une page qui balaie `.group` à la racine finit par les
+      // atteindre, et la colonne de gauche disparaît sans que rien ne l'explique.
+      for (const groupe of catalogue().querySelectorAll('.group')) {
         const total = groupe.querySelectorAll('li[data-id]').length;
         const actives = [...groupe.querySelectorAll('.toggle')].filter((c) => c.checked).length;
         const compteur = groupe.querySelector('h2 .tally');
@@ -497,8 +504,9 @@ enum BlockingPage {
         if (montrer) visibles++;
       }
       // Une famille dont plus rien ne ressort disparaît avec son titre : « Par langue · 57 »
-      // au-dessus du vide se lit comme un défaut d'affichage.
-      for (const groupe of document.querySelectorAll('.group')) {
+      // au-dessus du vide se lit comme un défaut d'affichage. Sous `#catalogue` seulement :
+      // le sommaire de la coquille ne doit jamais entrer dans ce balayage.
+      for (const groupe of catalogue().querySelectorAll('.group')) {
         groupe.hidden = ![...groupe.querySelectorAll('li')].some((l) => !l.hidden);
       }
       const compteur = document.querySelector('.search .count');

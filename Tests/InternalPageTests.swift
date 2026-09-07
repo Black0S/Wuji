@@ -145,6 +145,24 @@ struct InternalPageTests {
         #expect(BlockingPage.html(state: àJour).contains(#"data-action="update-all" hidden"#))
     }
 
+    @Test func leSommaireNeSeFaitPasEmporterParLesFiltres() {
+        // **Le sommaire disparaissait quand on filtrait.** Il portait `class="group"`,
+        // comme les familles du catalogue, et les pages masquent les groupes devenus vides :
+        // `document.querySelectorAll('.group')` les atteignait, `[hidden]` faisait le reste,
+        // et toute la colonne de gauche s'effaçait. Deux verrous plutôt qu'un — la coquille
+        // ne porte plus ce nom, et les pages ne balaient plus que chez elles.
+        let page = InternalShell.page(title: "T", current: "wuji://blocking", body: "<main></main>")
+        #expect(page.contains(#"class="rubrique""#))
+        #expect(!page.contains(#"<div class="group">"#))
+
+        for script in [BlockingPage.html(state: BlockingPage.State(
+                           catalog: [], installed: [], outdated: [], activeRules: 0,
+                           working: [:], failure: nil, unreachable: false, paused: [])),
+                       RulesPage.html(state: RulesPage.State(mine: []))] {
+            #expect(!script.contains("document.querySelectorAll('.group')"))
+        }
+    }
+
     @Test func lesFamillesSAffichentEnJetons() {
         let pub = RuleList(name: "EasyList", source: "a.txt", version: "1",
                            group: "Publicité", coverage: 100,
