@@ -31,6 +31,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ContentTopBarDelegate,
     /// renvoyer les cent soixante et une lignes que lorsqu'elles ont changé — cocher une
     /// case ne change pas le catalogue, seulement son état.
     var patchedCatalog: [String] = []
+    /// Où en est le lot en cours — « 3 sur 16 » sur le bouton. Zéro quand rien ne tourne.
+    var batchDone = 0
+    var batchTotal = 0
     let userScripts = UserScriptStore()
     let permissions = Permissions()
     let location = LocationAccess()

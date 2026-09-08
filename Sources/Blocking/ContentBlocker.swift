@@ -158,7 +158,7 @@ final class ContentBlocker {
         return nil
     }
 
-    /// Met à jour tout ce qui est périmé, en **recouvrant le réseau et la compilation**.
+    /// Installe ou met à jour un lot de listes, en **recouvrant le réseau et la compilation**.
     ///
     /// Une mise à jour se passe en deux temps de natures différentes : télécharger, qui
     /// attend le réseau, et compiler, qui occupe WebKit pendant plusieurs secondes. Faites
@@ -169,7 +169,10 @@ final class ContentBlocker {
     /// Rend les échecs, dans l'ordre. Une liste qui échoue n'arrête pas les autres : c'est
     /// souvent une seule liste qui a bougé chez elle, et abandonner les dix-huit restantes
     /// pour celle-là serait le contraire de ce qu'on a demandé.
-    func updateAll(_ lists: [RuleList]) async -> [String] {
+    /// `onStep` est appelé après chaque liste, avec le rang et le total : c'est ce que le
+    /// bouton affiche pendant qu'il travaille. Un lot de dix-neuf listes prend une minute,
+    /// et un bouton qui ne dit rien pendant une minute passe pour cassé.
+    func applyAll(_ lists: [RuleList], onStep: (Int, Int) -> Void = { _, _ in }) async -> [String] {
         var failures: [String] = []
         var avance: (id: String, résultat: Fetched)?
         failure = nil
@@ -207,6 +210,7 @@ final class ContentBlocker {
                 }
             }
             working[list.id] = nil
+            onStep(index + 1, lists.count)
             onChange?()
 
             if let suivante, let après { avance = (après.id, await suivante.value) }

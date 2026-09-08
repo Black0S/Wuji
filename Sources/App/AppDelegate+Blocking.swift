@@ -57,6 +57,7 @@ extension AppDelegate {
             unreachable: catalogUnreachable,
             paused: settings.pausedHosts,
             orphans: orphanedLists,
+            batch: batchTotal > 0 ? .init(done: batchDone, total: batchTotal) : nil,
             injection: {
                 let hôte = currentTab?.url.flatMap { $0.host() } ?? ""
                 return BlockingPage.Injection(
@@ -345,21 +346,22 @@ extension AppDelegate {
                 syncChrome()
             }
         case "update-all":
-            let périmées = BlockingPage.updatable(blockingState)
-            guard !périmées.isEmpty else { return }
-            Task { @MainActor in
-                let échecs = await blocking.updateAll(périmées)
-                syncExtendedRules()
-                // **Un seul repositionnement des règles, à la fin.** Reposer dix-neuf fois
-                // les listes sur chaque onglet ouvert coûte plus que la mise à jour
-                // elle-même, et rien de visible ne se produit entre-temps.
-                applyBlockingToOpenTabs()
-                refreshBlockingPages()
-                syncChrome()
-                layout.toast.show(échecs.isEmpty
-                    ? "\(périmées.count) liste\(périmées.count > 1 ? "s" : "") à jour"
-                    : "\(périmées.count - échecs.count) sur \(périmées.count) — \(échecs[0])")
-            }
+            applyLists(BlockingPage.updatable(blockingState), verbe: "à jour")
+        case "install-group":
+            guard let id else { return }
+            let àPoser = ruleCatalog.filter { $0.group == id && !blocking.isInstalled($0.id) }
+            applyLists(àPoser, verbe: "en service")
+        case "remove-group":
+            guard let id else { return }
+            let àRetirer = ruleCatalog.filter { $0.group == id && blocking.isInstalled($0.id) }
+            guard !àRetirer.isEmpty else { return }
+            for liste in àRetirer { blocking.remove(liste.id) }
+            applyBlockingToOpenTabs()
+            syncExtendedRules()
+            refreshBlockingPages()
+            syncChrome()
+            layout.toast.show("\(àRetirer.count) liste\(àRetirer.count > 1 ? "s" : "") "
+                + "de « \(id) » retirée\(àRetirer.count > 1 ? "s" : "")")
         case "remove":
             guard let id else { return }
             let name = ruleCatalog.first { $0.id == id }?.name ?? id
@@ -374,6 +376,37 @@ extension AppDelegate {
             layout.toast.show("« \(name) » retirée — règles supprimées du disque")
         default:
             break
+        }
+    }
+
+    /// Pose un lot de listes : téléchargement, compilation, et un compte rendu.
+    ///
+    /// **Le même chemin pour « Tout mettre à jour » et pour une famille entière.** Installer
+    /// douze listes d'AdGuard et rafraîchir seize listes périmées sont le même travail : le
+    /// réseau d'une liste recouvre la compilation de la précédente, et une liste qui échoue
+    /// n'arrête pas les autres. Deux chemins auraient divergé au premier correctif.
+    func applyLists(_ listes: [RuleList], verbe: String) {
+        guard !listes.isEmpty else { return }
+        batchTotal = listes.count
+        batchDone = 0
+        refreshBlockingPages()
+        Task { @MainActor in
+            let échecs = await blocking.applyAll(listes) { [weak self] fait, _ in
+                self?.batchDone = fait
+                self?.refreshBlockingPages()
+            }
+            batchTotal = 0
+            // **Un seul repositionnement des règles, à la fin.** Les reposer sur chaque
+            // onglet après chaque liste coûte plus que le lot lui-même, et rien de visible
+            // ne se produit entre-temps.
+            applyBlockingToOpenTabs()
+            syncExtendedRules()
+            refreshBlockingPages()
+            syncChrome()
+            let posées = listes.count - échecs.count
+            layout.toast.show(échecs.isEmpty
+                ? "\(listes.count) liste\(listes.count > 1 ? "s" : "") \(verbe)"
+                : "\(posées) sur \(listes.count) — \(échecs[0])")
         }
     }
 

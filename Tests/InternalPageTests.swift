@@ -188,6 +188,66 @@ struct InternalPageTests {
         #expect(!seule.contains("data-famille"))
     }
 
+    @Test func lesTroisCommandesDuBlocageDisentCeQuellesFont() {
+        let liste = RuleList(id: "adguard-base", name: "AdGuard Base filter",
+                             source: "AdGuard-Base-filter.txt", version: "2.4",
+                             group: "AdGuard", coverage: 100, uniqueRules: 1000,
+                             parts: [.init(file: "a.json", rules: 1000, bytes: 1000)])
+        let autre = RuleList(id: "adguard-mobile", name: "AdGuard Mobile Ads filter",
+                             source: "AdGuard-Mobile.txt", version: "2.0",
+                             group: "AdGuard", coverage: 100, uniqueRules: 500,
+                             parts: [.init(file: "b.json", rules: 500, bytes: 500)])
+        var état = BlockingPage.State(catalog: [liste, autre], installed: [liste.id],
+                                      outdated: [liste.id], activeRules: 1000,
+                                      working: [:], failure: nil, unreachable: false,
+                                      paused: [])
+        var html = BlockingPage.html(state: état)
+
+        // **Le bouton qui travaille se distingue de celui qui rafraîchit.** Deux boutons du
+        // même gris se lisent comme deux variantes de la même chose ; l'un télécharge des
+        // dizaines de mégaoctets, l'autre relit un index.
+        #expect(html.contains(#"class="button primaire""#))
+        #expect(html.contains("Tout mettre à jour (1)"))
+
+        // Une famille se coche d'un geste, et le bouton dit ce qu'il ferait — jamais
+        // « basculer », qui n'apprend rien avant de cliquer.
+        #expect(html.contains(#"data-action="install-group""#))
+        #expect(html.contains("Tout activer (1)"))
+
+        état.installed = [liste.id, autre.id]
+        html = BlockingPage.html(state: état)
+        #expect(html.contains(#"data-action="remove-group""#))
+        #expect(html.contains("Tout retirer"))
+
+        // L'interrupteur des règles à injection est un interrupteur, pas un lien : c'est un
+        // état qu'on bascule, et il se lit d'un coup d'œil.
+        état.injection = BlockingPage.Injection(enabled: true, rules: 10, lists: 1)
+        html = BlockingPage.html(state: état)
+        #expect(html.contains(#"<input type="checkbox" data-action="injection" checked>"#))
+        #expect(html.contains(#"<span class="état actif">"#))
+    }
+
+    @Test func leBoutonDitOuIlEnEstPendantQuIlTravaille() {
+        var état = BlockingPage.State(catalog: [], installed: [], outdated: [], activeRules: 0,
+                                      working: [:], failure: nil, unreachable: false, paused: [])
+        // Rien à faire : le bouton existe mais ne se montre pas.
+        #expect(BlockingPage.html(state: état).contains(#"data-action="update-all" hidden"#))
+
+        // Un lot prend une minute ; un bouton muet pendant une minute passe pour cassé.
+        état.batch = BlockingPage.Batch(done: 3, total: 16)
+        let html = BlockingPage.html(state: état)
+        #expect(html.contains("3 sur 16…"))
+        #expect(html.contains("disabled"))
+        #expect(!html.contains(#"data-action="update-all" hidden"#))
+
+        // **Le correctif reste du JSON valide dans les deux cas.** Un `Optional` vide n'est
+        // pas du JSON : `JSONSerialization` aurait refusé la charge entière, et la page
+        // aurait cessé de se mettre à jour sans un mot.
+        #expect(BlockingPage.patch(état).contains("\"total\":16"))
+        état.batch = nil
+        #expect(BlockingPage.patch(état).contains("\"batch\":null"))
+    }
+
     @Test func leCorrectifDeLaPageDeBlocageSAnnonce() {
         // **Le mot convenu est le correctif.** Une fonction qui ne renvoie rien vaut
         // `undefined`, que WebKit rend comme « rien » — indistinguable d'un crochet absent :

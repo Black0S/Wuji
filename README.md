@@ -266,11 +266,23 @@ titre — « Par langue · 57 » au-dessus du vide se lirait comme un défaut d'
 ### Mettre à jour, et rendre la place
 
 **Tout mettre à jour d'un coup.** Un bouton en tête, qui n'apparaît que lorsqu'il a quelque
-chose à faire et qui dit combien : « Tout mettre à jour (4) ». Il ne visite que ce qui est
-**en service et périmé** — proposer de mettre à jour une liste qu'on n'a pas installée n'a
-pas de sens, il n'y a rien à remplacer. Une liste qui échoue n'arrête pas les autres : c'est
-souvent une seule liste qui a bougé chez elle, et abandonner les dix-huit restantes pour
-celle-là serait le contraire de ce qu'on a demandé.
+chose à faire et qui dit combien : « Tout mettre à jour (16) ». Il est **plein** quand
+« Actualiser », à côté, ne l'est pas : deux boutons du même gris se lisent comme deux
+variantes de la même chose, alors que l'un télécharge des dizaines de mégaoctets et recompile
+pendant que l'autre relit un index. Pendant qu'il travaille il dit où il en est — « 3 sur
+16… » — et ne se laisse plus cliquer : un lot prend une minute, et un bouton muet pendant une
+minute passe pour cassé. Il ne visite que ce qui est **en service et périmé** — proposer de
+mettre à jour une liste qu'on n'a pas installée n'a pas de sens, il n'y a rien à remplacer.
+Une liste qui échoue n'arrête pas les autres : c'est souvent une seule liste qui a bougé chez
+elle, et abandonner les dix-huit restantes pour celle-là serait le contraire de ce qu'on a
+demandé.
+
+**Une famille se coche d'un geste.** Douze listes d'AdGuard cochées une à une, c'est douze
+allers-retours pour une seule intention — et l'on ne se souvient pas d'avoir sauté la
+neuvième. Chaque titre de famille porte donc son bouton, qui dit ce qu'il ferait plutôt que
+« basculer » : « Tout activer (7) » tant qu'il reste à poser, « Tout retirer » ensuite. Les
+cases se cochent sous le doigt, avant même que le premier téléchargement ait commencé — c'est
+le même chemin que « Tout mettre à jour », réseau et compilation recouverts compris.
 
 **Le réseau et la compilation se recouvrent.** Une mise à jour se passe en deux temps de
 natures différentes : télécharger, qui attend le réseau, et compiler, qui occupe WebKit
@@ -383,9 +395,10 @@ perdu. Wuji les lit et les applique.
 **Et c'est un autre mécanisme, qui porte son interrupteur.** Les listes compilées filtrent
 dans le processus réseau et ne touchent jamais la page. Celles-ci demandent du style injecté,
 du DOM inspecté, du code exécuté : c'est ce qu'on reproche aux extensions, et il n'y a pas de
-raison de l'imposer sans le dire. La page « Blocage » porte le commutateur et le compte, et
-la ligne du bouclier dit combien de règles s'appliquent **ici** — pas combien dorment en
-mémoire.
+raison de l'imposer sans le dire. La page « Blocage » porte un vrai interrupteur — un état
+qu'on bascule se lit d'un coup d'œil, là où un lien « Couper » demande de lire son libellé
+pour deviner l'état courant — avec le compte à côté, et la ligne du bouclier dit combien de
+règles s'appliquent **ici**, pas combien dorment en mémoire.
 
 **Ce qui arrive dans une page est minuscule.** Trois cent douze mille sites sont couverts, à
 **deux règles par site en médiane**, six au neuvième décile, deux cent quarante au pire.

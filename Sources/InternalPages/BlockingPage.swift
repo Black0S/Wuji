@@ -36,8 +36,16 @@ enum BlockingPage {
         var paused: [String]
         /// Les listes en service que le catalogue ne publie plus.
         var orphans: [String] = []
+        /// Où en est le lot en cours, ou `nil` quand rien ne tourne.
+        var batch: Batch?
         /// Les règles à injection : l'interrupteur, et ce qu'elles pèsent réellement.
         var injection = Injection()
+    }
+
+    /// Un lot de listes en cours de pose : « 3 sur 16 ».
+    struct Batch: Equatable {
+        var done = 0
+        var total = 0
     }
 
     /// Ce que la section « Règles à injection » affiche.
@@ -83,7 +91,11 @@ enum BlockingPage {
             "outdated": Array(state.outdated),
             "working": state.working,
             "failed": state.failure?.id ?? "",
-            "updates": updatable(state).count
+            "updates": updatable(state).count,
+            // `NSNull` et non `nil` : un `Optional` vide n'est pas du JSON, et
+            // `JSONSerialization` refuse alors la charge **entière** — le correctif
+            // devenait « {} » et la page cessait de se mettre à jour, sans un mot.
+            "batch": state.batch.map { ["done": $0.done, "total": $0.total] } ?? NSNull()
         ]
         if catalog { payload["catalog"] = groups(state) }
         let json = (try? JSONSerialization.data(withJSONObject: payload))
@@ -131,9 +143,8 @@ enum BlockingPage {
         // jour sur place : un bouton absent du document ne pourrait pas apparaître quand
         // une nouvelle version l'est.
         let attente = updatable(state).count
-        let updateAll = #"<button class="button" id="tout-jour" data-action="update-all""#
-            + (attente == 0 ? " hidden" : "")
-            + ">Tout mettre à jour" + (attente == 0 ? "" : " (\(attente))") + "</button>"
+        let updateAll = principal(label: "Tout mettre à jour", count: attente,
+                                  action: "update-all", batch: state.batch)
 
         return InternalShell.page(
             title: "Blocage", current: "wuji://blocking",
@@ -182,6 +193,24 @@ enum BlockingPage {
             script: script, style: style)
     }
 
+    /// Le bouton qui fait le travail, par opposition à celui qui rafraîchit l'affichage.
+    ///
+    /// **Il est plein, et « Actualiser » ne l'est pas.** Deux boutons du même gris côte à
+    /// côte se lisent comme deux variantes de la même chose ; celui-ci télécharge des
+    /// dizaines de mégaoctets et recompile, l'autre relit un index. Il porte aussi son
+    /// compte — on décide autrement devant seize listes que devant une — et, pendant qu'il
+    /// travaille, il dit où il en est : un lot prend une minute, et un bouton muet pendant
+    /// une minute passe pour cassé.
+    static func principal(label: String, count: Int, action: String, batch: Batch?) -> String {
+        let travaille = batch != nil
+        let texte = travaille ? "\(batch!.done) sur \(batch!.total)…"
+                              : label + (count > 0 ? " (\(count))" : "")
+        return #"<button class="button primaire" id="tout-jour" data-action="\#(action)""#
+            + (count == 0 && !travaille ? " hidden" : "")
+            + (travaille ? " disabled" : "")
+            + ">" + escape(texte) + "</button>"
+    }
+
     /// **Le catalogue par familles.** Cent soixante et une lignes à plat ne se parcourent
     /// pas : on y cherche une liste dont on connaît le nom, ou l'on renonce. Groupées, on
     /// lit d'abord ce qu'on vient chercher — la publicité, le pistage —, et les cinquante-
@@ -198,10 +227,18 @@ enum BlockingPage {
         let sections = order.map { group in
             let lists = byGroup[group] ?? []
             let active = lists.filter { state.installed.contains($0.id) }.count
+            // **Une famille se coche d'un geste.** Douze listes d'AdGuard cochées une à
+            // une, c'est douze allers-retours pour une seule intention ; et l'on ne se
+            // souvient pas d'avoir sauté la neuvième. Le bouton dit ce qu'il ferait —
+            // poser ce qui manque, ou tout retirer —, jamais « basculer ».
+            let manquantes = lists.count - active
+            let étiquette = manquantes > 0 ? "Tout activer (\(manquantes))" : "Tout retirer"
+            let geste = manquantes > 0 ? "install-group" : "remove-group"
             return """
             <div class="group" data-group="\(escape(group))">
               <h2>\(escape(group))<span class="tally">\(lists.count)\
-            \(active > 0 ? " · \(active) en service" : "")</span></h2>
+            \(active > 0 ? " · \(active) en service" : "")</span>
+                <button class="link famille" data-action="\(geste)">\(étiquette)</button></h2>
               <ul>\(lists.map { row($0, state) }.joined())</ul>
             </div>
             """
@@ -256,9 +293,11 @@ enum BlockingPage {
         }
         return """
         <div class="block">
-          <h2>Règles à injection<span class="tally">\(i.enabled ? "en service" : "coupées")</span>
-            <button class="link" data-action="\(i.enabled ? "injection-off" : "injection-on")">\
-        \(i.enabled ? "Couper" : "Activer")</button></h2>
+          <h2>Règles à injection
+            <span class="état\(i.enabled ? " actif" : "")">\
+        \(i.enabled ? "en service" : "coupées")</span>
+            <label class="switch"><input type="checkbox" data-action="injection"\
+        \(i.enabled ? " checked" : "")><span></span></label></h2>
           <p class="hint">Ce que le format de WebKit ne sait pas porter : styles arbitraires,
             sélecteurs qui lisent le texte d'une page, primitives nommées. <strong>Celles-là
             s'exécutent dans la page</strong>, à la différence des listes compilées qui
@@ -449,6 +488,37 @@ enum BlockingPage {
     /* Le compte ne se replie pas : « 4 · 4 en service » passait à la ligne dans une fenêtre
        étroite dès qu'une liste entrait en service, et le titre gagnait une ligne — donc
        tout ce qui suivait descendait, à chaque case cochée. */
+    /* **Le bouton qui travaille est plein ; celui qui rafraîchit ne l'est pas.** Deux
+       boutons du même gris côte à côte se lisent comme deux variantes de la même chose. */
+    .primaire {
+      background: var(--text); color: var(--bg, #000); border-color: var(--text);
+      font-weight: 500;
+    }
+    .primaire:hover { opacity: .85; }
+    .primaire[disabled] { opacity: .5; cursor: default; }
+    /* L'état se lit à gauche de l'interrupteur, et se colore quand il est actif : un mot
+       gris à côté d'un interrupteur gris n'apprend rien de plus que l'interrupteur. */
+    .état { font-size: 12px; font-weight: 400; color: var(--muted); }
+    .état.actif { color: var(--text); }
+    .switch { position: relative; display: inline-block; width: 38px; height: 22px; flex: none; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch span {
+      position: absolute; inset: 0; cursor: pointer; border-radius: 22px;
+      background: var(--hairline); transition: background .15s ease;
+    }
+    .switch span::before {
+      content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px;
+      background: #fff; border-radius: 50%; transition: transform .15s ease;
+      box-shadow: 0 1px 2px rgba(0,0,0,.3);
+    }
+    .switch input:checked + span { background: var(--text); }
+    .switch input:checked + span::before { transform: translateX(16px); }
+    .block h2 .switch { margin-left: auto; }
+    /* Le geste sur toute une famille se tient à droite de son titre. Visible, mais en
+       retrait : un contrôle qui n'apparaît qu'au survol ne se trouve que par accident, et
+       un contrôle qui crie se clique par erreur. */
+    .famille { margin-left: auto; font-size: 12px; opacity: .55; transition: opacity .12s ease; }
+    .group:hover .famille, .famille:hover, .famille:focus { opacity: 1; }
     .group h2 .tally, .block h2 .tally {
       color: var(--muted); font-weight: 400; font-size: 12px; white-space: nowrap;
     }
@@ -491,6 +561,12 @@ enum BlockingPage {
     };
 
     document.addEventListener('change', (event) => {
+      // L'interrupteur des règles à injection : une case, pas un lien — c'est un état
+      // qu'on bascule, et il se lit d'un coup d'œil.
+      if (event.target.dataset.action === 'injection') {
+        send({ action: event.target.checked ? 'injection-on' : 'injection-off', id: null });
+        return;
+      }
       if (!event.target.classList.contains('toggle')) return;
       const ligne = event.target.closest('li');
       const id = ligne.dataset.id;
@@ -509,6 +585,24 @@ enum BlockingPage {
         attente.set(ligne.dataset.id, true);
         travail(ligne, 'en attente');
       }
+      // Un geste sur toute une famille se voit tout de suite sur ses lignes : le natif
+      // mettra une minute à poser douze listes, et rien ne doit sembler ignoré.
+      const geste = bouton.dataset.action;
+      if (geste === 'install-group' || geste === 'remove-group') {
+        const groupe = bouton.closest('.group');
+        if (groupe) {
+          const voulu = geste === 'install-group';
+          for (const l of groupe.querySelectorAll('li[data-id]')) {
+            const c = l.querySelector('.toggle');
+            if (!c || c.checked === voulu) continue;
+            attente.set(l.dataset.id, voulu);
+            c.checked = voulu;
+            travail(l, voulu ? 'en attente' : '');
+          }
+          send({ action: geste, id: groupe.dataset.group });
+          return;
+        }
+      }
       send({ action: bouton.dataset.action,
              id: (ligne && ligne.dataset.id) || (règle && (règle.dataset.rule || règle.dataset.host)) || null });
     });
@@ -523,8 +617,11 @@ enum BlockingPage {
       if (bandeau) bandeau.innerHTML = état.notice;
       const tout = document.getElementById('tout-jour');
       if (tout) {
-        tout.hidden = !état.updates;
-        if (état.updates) tout.textContent = `Tout mettre à jour (${état.updates})`;
+        const lot = état.batch;
+        tout.hidden = !état.updates && !lot;
+        tout.disabled = !!lot;
+        tout.textContent = lot ? `${lot.done} sur ${lot.total}…`
+                               : `Tout mettre à jour (${état.updates})`;
       }
 
       // Le catalogue n'arrive qu'une fois, et seulement quand il a changé : la page servie
@@ -574,6 +671,14 @@ enum BlockingPage {
         const compteur = groupe.querySelector('h2 .tally');
         if (compteur) {
           compteur.textContent = total + (actives > 0 ? ` · ${actives} en service` : '');
+        }
+        // Le bouton de famille dit ce qu'il ferait, pas ce qu'il est : « Tout activer »
+        // tant qu'il reste quelque chose à poser, « Tout retirer » ensuite.
+        const geste = groupe.querySelector('h2 .famille');
+        if (geste) {
+          const manquantes = total - actives;
+          geste.dataset.action = manquantes > 0 ? 'install-group' : 'remove-group';
+          geste.textContent = manquantes > 0 ? `Tout activer (${manquantes})` : 'Tout retirer';
         }
       }
     };
