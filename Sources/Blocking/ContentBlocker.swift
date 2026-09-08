@@ -249,8 +249,15 @@ final class ContentBlocker {
     /// Le nombre de règles produites répond aux deux : il vient du même index, il change
     /// quand la liste change **et** quand la conversion change, et on le retient déjà.
     func isOutdated(_ list: RuleList) -> Bool {
-        guard let known = settings.ruleListVersions[list.id] else { return false }
-        if known != list.version { return true }
+        guard settings.ruleListFiles[list.id] != nil else { return false }
+        // L'empreinte du fichier d'origine et le nombre de règles produites, ensemble : la
+        // première dit que la liste a changé chez son mainteneur, le second qu'elle a
+        // changé chez le convertisseur. Une liste installée avant que le dépôt ne publie
+        // d'empreinte n'en a pas : on retombe alors sur la version, puis sur le compte.
+        if let posée = settings.ruleListBuilds[list.id], !posée.isEmpty {
+            return posée != list.build
+        }
+        if let connue = settings.ruleListVersions[list.id], connue != list.version { return true }
         if let comptées = settings.ruleListRules[list.id], comptées != list.rules { return true }
         return false
     }
@@ -378,7 +385,8 @@ final class ContentBlocker {
         }
         installed[list.id] = compiled
         settings.rememberRuleList(list.id, version: list.version,
-                                  files: list.parts.map(\.file), rules: list.rules)
+                                  files: list.parts.map(\.file), rules: list.rules,
+                                  build: list.build)
         return nil
     }
 

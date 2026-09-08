@@ -89,7 +89,8 @@ struct InternalPageTests {
                                       unreachable: true, paused: [])
         #expect(BlockingPage.html(state: muet).contains("catalogue injoignable"))
 
-        let liste = RuleList(name: "AdGuard Base filter", source: "AdGuard-Base-filter.txt",
+        let liste = RuleList(id: "adguard-base", name: "AdGuard Base filter",
+                             source: "AdGuard-Base-filter.txt",
                              version: "2.4", coverage: 96,
                              parts: [.init(file: "Webkit-AdGuard-Base-filter.json",
                                            rules: 123902, bytes: 12566360)])
@@ -108,7 +109,7 @@ struct InternalPageTests {
         // **Le cas qui décochait la case sous le doigt.** Une liste qu'on vient de cocher
         // n'entre dans les réglages qu'une fois téléchargée et compilée : entre-temps elle
         // n'est « installée » nulle part, et la page la rendait décochée.
-        let liste = RuleList(name: "EasyList", source: "EasyList.txt", version: "2.1",
+        let liste = RuleList(id: "easylist", name: "EasyList", source: "EasyList.txt", version: "2.1",
                              coverage: 99,
                              parts: [.init(file: "Webkit-EasyList.json",
                                            rules: 62969, bytes: 7_500_000)])
@@ -125,9 +126,9 @@ struct InternalPageTests {
     }
 
     @Test func toutMettreAJourNeVisiteQueLesListesEnService() {
-        let posée = RuleList(name: "EasyList", source: "EasyList.txt", version: "2.1",
+        let posée = RuleList(id: "easylist", name: "EasyList", source: "EasyList.txt", version: "2.1",
                              coverage: 99, parts: [.init(file: "a.json", rules: 1, bytes: 1)])
-        let absente = RuleList(name: "EasyPrivacy", source: "EasyPrivacy.txt", version: "1.0",
+        let absente = RuleList(id: "easyprivacy", name: "EasyPrivacy", source: "EasyPrivacy.txt", version: "1.0",
                                coverage: 99, parts: [.init(file: "b.json", rules: 1, bytes: 1)])
         // Les deux sont périmées ; une seule est en service. Proposer de mettre à jour une
         // liste qu'on n'a pas installée n'aurait aucun sens — il n'y a rien à remplacer.
@@ -164,10 +165,10 @@ struct InternalPageTests {
     }
 
     @Test func lesFamillesSAffichentEnJetons() {
-        let pub = RuleList(name: "EasyList", source: "a.txt", version: "1",
+        let pub = RuleList(id: "a", name: "EasyList", source: "a.txt", version: "1",
                            group: "Publicité", coverage: 100,
                            parts: [.init(file: "a.json", rules: 1, bytes: 1)])
-        let sécurité = RuleList(name: "Malware", source: "b.txt", version: "1",
+        let sécurité = RuleList(id: "b", name: "Malware", source: "b.txt", version: "1",
                                 group: "Sécurité", coverage: 100,
                                 parts: [.init(file: "b.json", rules: 1, bytes: 1)])
         let html = BlockingPage.html(state: BlockingPage.State(

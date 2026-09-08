@@ -34,6 +34,8 @@ enum BlockingPage {
         /// règle sur une page qu'on regarde sont deux gestes différents, et le catalogue
         /// enterrait le second.
         var paused: [String]
+        /// Les listes en service que le catalogue ne publie plus.
+        var orphans: [String] = []
         /// Les règles à injection : l'interrupteur, et ce qu'elles pèsent réellement.
         var injection = Injection()
     }
@@ -146,7 +148,7 @@ enum BlockingPage {
               </header>
               <main>
                 <div id="notice">\(notice)</div>
-                \(injection(state))\(paused(state))
+                \(injection(state))\(orphans(state))\(paused(state))
                 <div class="search"\(state.catalog.isEmpty ? " hidden" : "")>
                   <input type="search" class="filter" placeholder="Filtrer les listes"
                          autocomplete="off" spellcheck="false">
@@ -267,6 +269,34 @@ enum BlockingPage {
         """
     }
 
+    /// Ce qui reste en service sans plus exister dans le catalogue.
+    ///
+    /// **Elles bloquent encore.** Leurs règles compilées sont dans le magasin de WebKit et
+    /// y restent ; ce qu'elles ne peuvent plus, c'est être mises à jour, puisque personne ne
+    /// les publie. Les cacher aurait été le pire des deux : une protection qu'on croit
+    /// disparue et qui agit encore, ou l'inverse.
+    private static func orphans(_ state: State) -> String {
+        guard !state.orphans.isEmpty else { return "" }
+        let rows = state.orphans.map { id in
+            """
+            <div class="rule" data-host="\(escape(id))">
+              <span class="mono host">\(escape(id))</span>
+              <span class="selector">plus publiée</span>
+              <button class="button danger" data-action="forget-orphan">Retirer</button>
+            </div>
+            """
+        }.joined()
+        return """
+        <div class="block">
+          <h2>Hors catalogue<span class="tally">\(state.orphans.count)</span></h2>
+          <p class="hint"><strong>Elles bloquent encore</strong> — leurs règles compilées sont
+            sur le disque et y restent. Ce qu'elles ne peuvent plus, c'est être mises à jour :
+            le dépôt ne les publie plus. Les laisser sans le dire aurait été le pire des deux.</p>
+        </div>
+        <div class="rules">\(rows)</div>
+        """
+    }
+
     /// Les sites où le blocage est suspendu.
     private static func paused(_ state: State) -> String {
         guard !state.paused.isEmpty else { return "" }
@@ -311,11 +341,27 @@ enum BlockingPage {
         > · à jour disponible</span><span class="work"\(working == nil ? " hidden" : "")> · \
         \(escape(working ?? ""))…</span></span>
             <span class="detail">\(escape(detail))</span>
-            \(list.summary.isEmpty ? "" : #"<span class="detail">"# + escape(list.summary) + "</span>")
+            \(provenance(list))
           </div>
           <button class="button update" data-action="update"\(stale ? "" : " hidden")>Mettre à jour</button>
         </li>
         """
+    }
+
+    /// Qui maintient la liste, et sous quelle licence.
+    ///
+    /// **Le dépôt a cessé de publier des descriptions** — soixante-dix listes sur soixante
+    /// et onze en ont une vide. Une ligne vide n'apprend rien ; l'adresse du mainteneur, si,
+    /// et c'est ce qu'on veut savoir avant d'installer le travail de quelqu'un.
+    private static func provenance(_ list: RuleList) -> String {
+        if !list.summary.isEmpty {
+            return #"<span class="detail">"# + escape(list.summary) + "</span>"
+        }
+        let hôte = URL(string: list.homepage)?.host()?
+            .replacingOccurrences(of: "www.", with: "") ?? ""
+        guard !hôte.isEmpty else { return "" }
+        return #"<span class="detail">"# + escape(hôte)
+            + (list.license.isEmpty ? "" : " · sous licence") + "</span>"
     }
 
     /// Les grands nombres se lisent par groupes de trois, ou ne se lisent pas.

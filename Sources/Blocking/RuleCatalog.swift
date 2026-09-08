@@ -10,11 +10,11 @@ import Foundation
 ///
 /// **Les règles viennent déjà au format de WebKit.** Le dépôt
 /// [Wuji-Rules-List](https://github.com/Black0S/Wuji-Rules-List) récupère les listes
-/// d'origine — AdGuard, EasyList, uBlock, les listes par langue — et les convertit en
-/// bloqueur de contenu natif, celui que `WKContentRuleListStore` compile. Wuji n'a donc
-/// aucun analyseur de syntaxe de filtres à maintenir, et surtout aucun moteur de blocage
-/// écrit à la main : c'est WebKit qui filtre, dans son processus réseau, avant que la page
-/// ne voie passer quoi que ce soit.
+/// d'origine chez leurs mainteneurs — AdGuard, EasyList, uBlock, Fanboy, HaGeZi — et les
+/// convertit en bloqueur de contenu natif, celui que `WKContentRuleListStore` compile. Wuji
+/// n'a donc aucun analyseur de syntaxe de filtres à maintenir, et surtout aucun moteur de
+/// blocage écrit à la main : c'est WebKit qui filtre, dans son processus réseau, avant que
+/// la page ne voie passer quoi que ce soit.
 struct RuleList: Identifiable, Sendable, Equatable {
 
     /// Un morceau compilable. WebKit refuse au-delà de cent cinquante mille règles par
@@ -25,32 +25,56 @@ struct RuleList: Identifiable, Sendable, Equatable {
         let bytes: Int
     }
 
+    /// L'identité de la liste dans le catalogue — `adguard-base`.
+    ///
+    /// **Une clé qui ne dit rien du chemin.** C'était le nom du fichier d'origine ; un
+    /// dépôt qui range ses sources autrement changeait alors l'identité de toutes ses
+    /// listes, c'est-à-dire décochait tout chez celui qui les avait cochées. Le dépôt
+    /// publie maintenant un identifiant explicite, et c'est lui qu'on retient.
+    let id: String
     let name: String
-    /// Le nom du fichier d'origine — `AdGuard-Base-filter.txt`. Il sert d'identité : il ne
-    /// change pas quand la liste est mise à jour, à la différence de la version.
+    /// Le fichier d'origine. Il ne sert plus d'identité, mais il reste la seule clé que
+    /// partagent l'ancien catalogue et le nouveau : c'est par lui que passe la reprise.
     let source: String
+    /// L'empreinte du fichier d'origine. **C'est elle qui dit si la liste a changé**, et
+    /// rien d'autre : une version absente — vingt-deux listes n'en publient pas — ou une
+    /// conversion améliorée qui ne touche pas à la version d'origine échappaient toutes
+    /// deux à la comparaison.
+    var sourceHash: String = ""
     let version: String
-    /// La famille à laquelle la liste appartient — « Publicité », « Sécurité », « Par
-    /// langue »… Cent soixante et une lignes à plat ne se parcourent pas : c'est le groupe
-    /// qui rend le catalogue lisible, et il vient du dépôt, pas d'un classement inventé ici.
+    /// La famille, telle que le dépôt la publie : le mainteneur de la liste — AdGuard,
+    /// EasyList, uBlock Origin. Soixante et onze lignes à plat ne se parcourent pas ; c'est
+    /// le groupe qui rend le catalogue lisible, et il vient du dépôt, pas d'ici.
     var group: String = RuleList.otherGroup
     var summary: String = ""
+    /// Chez qui la liste est maintenue, et sous quelle licence. Affichés parce qu'une liste
+    /// est le travail de quelqu'un, et qu'on l'installe plus volontiers en sachant de qui.
+    var homepage: String = ""
+    var license: String = ""
     /// La part des règles d'origine que la conversion a su rendre. Une liste à 100 % dit
     /// tout ce qu'elle disait ; en dessous, une partie de sa syntaxe n'a pas d'équivalent
     /// dans le format de WebKit — le cosmétique, surtout.
     let coverage: Double
+    /// Les règles **distinctes** que la conversion produit.
+    ///
+    /// Pas la somme des fichiers : une liste découpée en tranches réplique ses exceptions
+    /// dans chacune, et l'addition comptait donc plusieurs fois la même règle. Le dépôt
+    /// publie les deux nombres depuis qu'il le dit ; celui-ci est l'honnête.
+    var uniqueRules: Int = 0
     let parts: [Part]
     /// Le fichier des règles à injection, quand la liste en a un — celles que le format de
-    /// WebKit ne sait pas porter. Quatre-vingt-quatre listes sur cent soixante et une.
+    /// WebKit ne sait pas porter. Cinquante listes sur soixante et onze.
     var extendedFile: String?
 
     /// Le groupe des listes qu'on n'a pas su ranger. Nommé plutôt que vide : une section
     /// sans titre se lit comme un défaut d'affichage.
     static let otherGroup = "Divers"
 
-    var id: String { source }
-    var rules: Int { parts.reduce(0) { $0 + $1.rules } }
+    var rules: Int { uniqueRules > 0 ? uniqueRules : parts.reduce(0) { $0 + $1.rules } }
     var bytes: Int { parts.reduce(0) { $0 + $1.bytes } }
+
+    /// Ce qui doit changer pour qu'une liste soit dite périmée. Voir `sourceHash`.
+    var build: String { sourceHash.isEmpty ? version + "|\(rules)" : sourceHash + "|\(rules)" }
 }
 
 /// D'où viennent le catalogue et les règles.
@@ -66,16 +90,19 @@ enum RuleCatalog {
 
     /// Où vivent les règles à injection.
     ///
-    /// **L'index les nomme sans leur dossier.** Il publie `Extended-EasyList.json` quand le
-    /// fichier est à `extended/Extended-EasyList.json` : suivre l'index à la lettre donne un
-    /// 404, mesuré. On accepte donc les deux écritures plutôt que d'exiger que le dépôt
-    /// change — un consommateur qui casse à la première correction d'un chemin n'est pas
-    /// robuste, et celui-ci n'a rien à y perdre.
+    /// Le dépôt les nommait sans leur dossier, ce qui donnait un 404 en suivant l'index à
+    /// la lettre ; il les nomme correctement depuis. On accepte encore les deux écritures :
+    /// un consommateur qui casse au premier changement de chemin n'est pas robuste, et
+    /// celui-ci n'a rien à y perdre.
     static func extended(_ name: String) -> URL {
         base.appending(path: name.contains("/") ? name : "extended/" + name)
     }
 
     /// Ce que le catalogue publie, décodé.
+    ///
+    /// **Tout est facultatif sauf le nom et les fichiers.** Le dépôt a changé de schéma une
+    /// fois ; il le refera. Un décodeur qui exige un champ tombe alors en entier — et l'on
+    /// se retrouve avec un catalogue vide qu'on lit comme « il n'y a rien à activer ».
     private struct Index: Decodable {
         struct Entry: Decodable {
             struct File: Decodable {
@@ -83,83 +110,64 @@ enum RuleCatalog {
                 let rules: Int
                 let bytes: Int
             }
+            let id: String?
             let name: String
-            let source: String
-            let version: String
-            let coverage_pct: Double
+            let source: String?
+            let source_sha256: String?
+            let version: String?
+            let group: String?
+            let homepage: String?
+            let license: String?
+            let coverage_pct: Double?
+            let rules_unique: Int?
             let files: [File]
             let extended_file: String?
         }
-        let generated_at: String
         let lists: [Entry]
     }
 
-    /// Ce que la branche `main` sait de chaque liste : sa famille, ce qu'elle fait, sa
-    /// langue. Le produit de la conversion ne le porte pas — c'est de la métadonnée de
-    /// catalogue, pas des règles.
-    static let metadata = URL(
-        string: "https://raw.githubusercontent.com/Black0S/Wuji-Rules-List/main/filters/index.json")!
-
-    private struct Metadata: Decodable {
-        struct Entry: Decodable {
-            let description: String?
-            let group: String?
-            let languages: [String]?
-            let file: String?
-        }
-        let lists: [String: Entry]
-    }
-
-    /// Les familles du dépôt, en français. Traduites parce qu'elles s'affichent, et rangées
-    /// dans l'ordre où l'on décide : ce qu'on vient chercher d'abord — la publicité, le
-    /// pistage —, puis le reste, puis les cinquante-sept listes par langue qui n'intéressent
-    /// que celui qui parle la langue.
-    static let groups: [String: (label: String, rank: Int)] = [
-        "Ad blocking":       ("Publicité", 0),
-        "General":           ("Généralistes", 1),
-        "Privacy":           ("Pistage et vie privée", 2),
-        "Security":          ("Sécurité", 3),
-        "Annoyances":        ("Gêneurs", 4),
-        "Social widgets":    ("Boutons sociaux", 5),
-        "Regional":          ("Régionales", 6),
-        "Language-specific": ("Par langue", 7),
-        "Other":             ("Divers", 8)
-    ]
+    /// L'ordre des familles.
+    ///
+    /// **Il est d'ici, à la différence des familles elles-mêmes.** Le dépôt range par
+    /// mainteneur ; ce qu'il ne peut pas savoir, c'est ce qu'on vient chercher en premier.
+    /// Les listes générales d'abord, les listes par langue et par région ensuite — on ne
+    /// parcourt les dix-sept listes régionales d'EasyList que si l'on parle la langue.
+    /// Une famille inconnue passe après, par ordre alphabétique : un dépôt qui ajoute un
+    /// mainteneur ne doit pas voir ses listes disparaître d'un classement écrit ici.
+    static let order = ["AdGuard", "AdGuard DNS", "EasyList", "uBlock Origin", "Fanboy",
+                        "HaGeZi", "Dandelion Sprout", "Phishing Army", "Stevo's AI Blocklist",
+                        "AdGuard (langues)", "EasyList (regions)"]
 
     static func rank(of group: String) -> Int {
-        groups.values.first { $0.label == group }?.rank ?? 9
+        order.firstIndex(of: group) ?? order.count
     }
 
-    /// Lit le catalogue. **Rien n'est mis en cache sur le disque** : deux fichiers de deux
-    /// cents kilo-octets relus quand on ouvre la page, et les garder ferait afficher un
-    /// catalogue d'hier sans qu'on sache lequel on regarde.
+    /// Lit le catalogue. **Rien n'est mis en cache sur le disque** : deux cents kilo-octets
+    /// relus quand on ouvre la page, et les garder ferait afficher un catalogue d'hier sans
+    /// qu'on sache lequel on regarde.
     ///
-    /// Les deux index sont lus **en parallèle** : ils viennent de deux branches, ne
-    /// dépendent pas l'un de l'autre, et les enchaîner doublerait l'attente pour rien. La
-    /// métadonnée est facultative — sans elle, tout atterrit dans « Divers » et le
-    /// catalogue reste utilisable.
+    /// **Une seule requête.** Il y en avait deux : le dépôt publiait la métadonnée — famille,
+    /// description — dans un second index, sur l'autre branche. Elle a rejoint le catalogue,
+    /// et le second index ne porte plus qu'une description vide pour soixante-dix listes sur
+    /// soixante et onze. Une requête qui ne rapporte rien est une requête à supprimer.
     static func fetch() async throws -> [RuleList] {
-        async let rules = data(from: index)
-        async let meta = try? data(from: metadata)
-
-        let decoded = try JSONDecoder().decode(Index.self, from: try await rules)
-        let info = (try? await meta).flatMap {
-            try? JSONDecoder().decode(Metadata.self, from: $0)
-        }
-        // Rangé par nom de fichier : c'est la seule clé que les deux index partagent.
-        var byFile: [String: Metadata.Entry] = [:]
-        for entry in info?.lists.values ?? [:].values {
-            if let file = entry.file { byFile[file] = entry }
-        }
+        let decoded = try JSONDecoder().decode(Index.self, from: try await data(from: index))
 
         return decoded.lists
             .map { entry in
-                let extra = byFile[entry.source]
-                let group = extra?.group.flatMap { groups[$0]?.label } ?? RuleList.otherGroup
-                return RuleList(
-                    name: entry.name, source: entry.source, version: entry.version,
-                    group: group, summary: extra?.description ?? "",
-                    coverage: entry.coverage_pct,
+                RuleList(
+                    // Le dépôt d'avant n'avait pas d'identifiant : le nom du fichier en
+                    // tenait lieu, et il faut pouvoir lire les deux le temps d'une reprise.
+                    id: entry.id ?? entry.source ?? entry.name,
+                    name: entry.name,
+                    source: entry.source ?? entry.id ?? entry.name,
+                    sourceHash: entry.source_sha256 ?? "",
+                    version: entry.version ?? "",
+                    group: entry.group ?? RuleList.otherGroup,
+                    homepage: entry.homepage ?? "",
+                    license: entry.license ?? "",
+                    coverage: entry.coverage_pct ?? 0,
+                    uniqueRules: entry.rules_unique ?? 0,
                     parts: entry.files.map { .init(file: $0.file, rules: $0.rules,
                                                    bytes: $0.bytes) },
                     extendedFile: entry.extended_file)
@@ -167,6 +175,7 @@ enum RuleCatalog {
             .sorted {
                 let (a, b) = (rank(of: $0.group), rank(of: $1.group))
                 if a != b { return a < b }
+                if $0.group != $1.group { return $0.group < $1.group }
                 return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
             }
     }

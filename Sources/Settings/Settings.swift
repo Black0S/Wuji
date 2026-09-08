@@ -185,6 +185,14 @@ final class Settings {
         didSet { store.set(ruleListFiles, forKey: Key.ruleListFiles); changed() }
     }
 
+    /// L'empreinte de ce qui est installé : celle du fichier d'origine, et le nombre de
+    /// règles produites. **C'est elle qui dit « périmée »**, pas la version — vingt-deux
+    /// listes du dépôt n'en publient aucune, et une conversion améliorée ne touche pas à
+    /// celle de la liste d'origine.
+    var ruleListBuilds: [String: String] {
+        didSet { store.set(ruleListBuilds, forKey: Key.ruleListBuilds); changed() }
+    }
+
     /// Le nom de l'annexe de chaque liste — vide quand elle n'en publie pas.
     ///
     /// **Retenu pour ne pas avoir à redemander.** Sans cela, il fallait relire le catalogue
@@ -220,12 +228,33 @@ final class Settings {
     }
 
     /// Retient tout ce qu'il faut pour remettre une liste en service au lancement suivant.
-    func rememberRuleList(_ id: String, version: String, files: [String], rules: Int) {
+    func rememberRuleList(_ id: String, version: String, files: [String], rules: Int,
+                          build: String = "") {
         batch {
             if !enabledRuleLists.contains(id) { enabledRuleLists.append(id) }
             ruleListVersions[id] = version
             ruleListFiles[id] = files
             ruleListRules[id] = rules
+            ruleListBuilds[id] = build
+        }
+    }
+
+    /// Reprend une liste sous sa nouvelle identité, sans rien lui faire perdre.
+    ///
+    /// **Le dépôt a changé la clé de ses listes**, du nom de fichier vers un identifiant
+    /// explicite. Sans reprise, les listes cochées auraient simplement disparu des réglages
+    /// — décochées sans qu'on l'ait demandé, et leurs règles compilées abandonnées sur le
+    /// disque, où rien ne les aurait jamais reprises.
+    func renameRuleList(from ancien: String, to nouveau: String) {
+        guard ancien != nouveau, ruleListFiles[ancien] != nil, ruleListFiles[nouveau] == nil
+        else { return }
+        batch {
+            enabledRuleLists = enabledRuleLists.map { $0 == ancien ? nouveau : $0 }
+            ruleListVersions[nouveau] = ruleListVersions.removeValue(forKey: ancien)
+            ruleListFiles[nouveau] = ruleListFiles.removeValue(forKey: ancien)
+            ruleListRules[nouveau] = ruleListRules.removeValue(forKey: ancien)
+            ruleListBuilds[nouveau] = ruleListBuilds.removeValue(forKey: ancien)
+            extendedFiles[nouveau] = extendedFiles.removeValue(forKey: ancien)
         }
     }
 
@@ -235,6 +264,7 @@ final class Settings {
             ruleListVersions[id] = nil
             ruleListFiles[id] = nil
             ruleListRules[id] = nil
+            ruleListBuilds[id] = nil
             extendedFiles[id] = nil
         }
     }
@@ -276,6 +306,7 @@ final class Settings {
         static let userScripts = "userScriptsEnabled"
         static let injectedRules = "injectedRulesEnabled"
         static let extendedFiles = "extendedRuleFiles"
+        static let ruleListBuilds = "ruleListBuilds"
         static let checkUpdates = "checkUpdatesAtLaunch"
         static let passwords = "passwordsEnabled"
         static let enabledRuleLists = "enabledRuleLists"
@@ -300,6 +331,7 @@ final class Settings {
         userScriptsEnabled = store.object(forKey: Key.userScripts) as? Bool ?? true
         injectedRulesEnabled = store.object(forKey: Key.injectedRules) as? Bool ?? true
         extendedFiles = store.dictionary(forKey: Key.extendedFiles) as? [String: String] ?? [:]
+        ruleListBuilds = store.dictionary(forKey: Key.ruleListBuilds) as? [String: String] ?? [:]
         checkUpdatesAtLaunch = store.bool(forKey: Key.checkUpdates)
         passwordsEnabled = store.object(forKey: Key.passwords) as? Bool ?? true
         enabledRuleLists = store.stringArray(forKey: Key.enabledRuleLists) ?? []

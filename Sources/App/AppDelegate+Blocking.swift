@@ -56,6 +56,7 @@ extension AppDelegate {
             failure: blocking.failure,
             unreachable: catalogUnreachable,
             paused: settings.pausedHosts,
+            orphans: orphanedLists,
             injection: {
                 let hôte = currentTab?.url.flatMap { $0.host() } ?? ""
                 return BlockingPage.Injection(
@@ -64,6 +65,40 @@ extension AppDelegate {
                     here: injectionPayload(for: currentTab?.url).count,
                     host: hôte)
             }())
+    }
+
+    /// Reprend les listes cochées sous les identités que le catalogue publie aujourd'hui.
+    ///
+    /// **Le dépôt est passé du nom de fichier à un identifiant explicite.** Sans reprise,
+    /// dix-sept listes en service seraient sorties des réglages d'un coup : décochées sans
+    /// qu'on l'ait demandé, leurs règles compilées laissées sur le disque, et le balayage du
+    /// lancement suivant les aurait jetées. La seule clé que les deux catalogues partagent
+    /// est le nom du fichier d'origine — c'est par elle qu'on passe, une fois.
+    func adoptCatalogIdentities() {
+        var repris = 0
+        for liste in ruleCatalog where liste.id != liste.source {
+            guard settings.ruleListFiles[liste.source] != nil,
+                  settings.ruleListFiles[liste.id] == nil else { continue }
+            settings.renameRuleList(from: liste.source, to: liste.id)
+            repris += 1
+        }
+        guard repris > 0 else { return }
+        // Les règles compilées vivent sous le nom de leurs fichiers, pas sous celui de la
+        // liste : rien à recompiler, il suffit de les retrouver sous la nouvelle clé.
+        blocking.restore()
+        syncExtendedRules()
+    }
+
+    /// Les listes en service que le catalogue ne publie plus.
+    ///
+    /// **Elles bloquent encore.** Leurs règles compilées sont dans le magasin de WebKit et
+    /// y restent ; ce qu'elles ne peuvent plus, c'est être mises à jour — personne ne les
+    /// publie. Les cacher aurait été le pire des deux : une protection qu'on croit disparue
+    /// et qui agit encore, ou l'inverse.
+    var orphanedLists: [String] {
+        guard !ruleCatalog.isEmpty else { return [] }
+        let connues = Set(ruleCatalog.map(\.id)).union(ruleCatalog.map(\.source))
+        return settings.enabledRuleLists.filter { !connues.contains($0) }.sorted()
     }
 
     /// Ce que la page des règles personnelles affiche.
@@ -76,6 +111,7 @@ extension AppDelegate {
             do {
                 ruleCatalog = try await RuleCatalog.fetch()
                 catalogUnreachable = false
+                adoptCatalogIdentities()
             } catch {
                 // On garde ce qu'on avait : un catalogue affiché puis effacé par une coupure
                 // de réseau ferait croire que les listes ont disparu.
@@ -276,6 +312,14 @@ extension AppDelegate {
                 : "Règles à injection coupées — rechargez pour les retirer") {
                     [weak self] in self?.currentTab?.webView.reload()
                 }
+        case "forget-orphan":
+            guard let id else { return }
+            blocking.remove(id)
+            applyBlockingToOpenTabs()
+            syncExtendedRules()
+            refreshBlockingPages()
+            syncChrome()
+            layout.toast.show("« \(id) » retirée — règles supprimées du disque")
         case "resume":
             guard let id else { return }
             blocking.setPaused(false, host: id)

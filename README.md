@@ -138,7 +138,7 @@ différence entre un navigateur qui vous laisse choisir et un navigateur qui a c
 vous — et la seule qui rende le choix vérifiable, puisqu'une liste absente ne peut pas se
 tromper en votre nom.
 
-`wuji://blocking` affiche ce qui **existe**, pas ce qui est en place : cent soixante et une
+`wuji://blocking` affiche ce qui **existe**, pas ce qui est en place : soixante et onze
 listes, avec pour chacune son nombre de règles, sa taille, sa version et la part de sa
 syntaxe que la conversion a su rendre. Cocher en installe une ; décocher la retire du
 service **et du disque**.
@@ -217,16 +217,40 @@ cacher un encart.
 
 ### Le catalogue par familles
 
-Cent soixante et une lignes à plat ne se parcourent pas : on y cherche une liste dont on
-connaît déjà le nom, ou l'on renonce. Le catalogue est donc groupé — **Publicité**,
-**Généralistes**, **Pistage et vie privée**, **Sécurité**, **Gêneurs**, **Boutons sociaux**,
-**Régionales**, **Par langue**, **Divers** — dans cet ordre : ce qu'on vient chercher
-d'abord, et les cinquante-sept listes par langue dans une section qu'on saute d'un regard.
+Soixante et onze lignes à plat ne se parcourent pas : on y cherche une liste dont on
+connaît déjà le nom, ou l'on renonce. Le catalogue est donc groupé par **mainteneur** —
+AdGuard, EasyList, uBlock Origin, Fanboy, HaGeZi… — dans cet ordre : ce qu'on vient chercher
+d'abord, et les vingt-six listes par langue et par région dans des sections qu'on saute d'un
+regard.
 
-Les familles viennent du dépôt, avec la description de chaque liste : Wuji joint les deux
-index — celui de `dist` qui porte les règles converties, celui de `main` qui porte la
-métadonnée — **en parallèle**, puisqu'ils ne dépendent pas l'un de l'autre. La métadonnée
-est facultative : sans elle, tout atterrit dans « Divers » et le catalogue reste utilisable.
+Les familles viennent du dépôt ; leur ordre est d'ici, parce que le dépôt ne peut pas savoir
+ce qu'on vient chercher en premier. Une famille qu'il ajouterait demain ne disparaît pas pour
+autant : elle passe après, par ordre alphabétique.
+
+**Une requête, là où il y en avait deux.** La métadonnée — famille, description — vivait dans
+un second index sur l'autre branche ; elle a rejoint le catalogue, et ce second index ne porte
+plus qu'une description vide pour soixante-dix listes sur soixante et onze. Une requête qui ne
+rapporte rien est une requête à supprimer. Faute de description, chaque ligne dit qui maintient
+la liste et sous quelle licence — c'est ce qu'on veut savoir avant d'installer le travail de
+quelqu'un.
+
+**L'identité d'une liste n'est plus son nom de fichier.** Le dépôt publie un identifiant
+explicite ; ranger les réglages sous le chemin d'un fichier faisait qu'un dépôt qui range ses
+sources autrement décochait tout chez qui les avait cochées. La reprise se fait une fois, par
+la seule clé que les deux catalogues partagent — le nom du fichier d'origine —, et rien n'est
+recompilé : les règles compilées vivent sous le nom de leurs fichiers, pas sous celui de la
+liste.
+
+**Une liste retirée du catalogue ne disparaît pas en silence.** Le dépôt est passé de cent
+soixante et une listes à soixante et onze ; celles qui restaient en service bloquent encore —
+leurs règles compilées sont sur le disque — mais plus personne ne les publie, donc plus
+personne ne les met à jour. Elles ont leur section, avec de quoi les retirer. Les cacher aurait
+été le pire des deux : une protection qu'on croit disparue et qui agit encore, ou l'inverse.
+
+**Le compte affiché est celui des règles distinctes.** Une liste découpée en tranches — WebKit
+refuse au-delà de cent cinquante mille règles — réplique ses exceptions dans chacune, et
+additionner les fichiers comptait donc plusieurs fois la même règle. Le dépôt publie les deux
+nombres depuis qu'il le dit ; celui-ci est l'honnête.
 
 **Les familles se filtrent aussi, en jetons.** Le filtre par mot-clé suppose qu'on connaît
 déjà le nom de ce qu'on cherche ; on vient plus souvent chercher *une catégorie* — la
@@ -272,12 +296,13 @@ nouvelle en service. Seules celles dont la nouvelle version n'a plus l'usage son
 une conversion qui change de découpage laisserait sinon ses tranches d'hier sur le disque
 pour toujours.
 
-**« Périmée » ne se lit pas que dans la version.** Seize listes du dépôt n'en publient
+**« Périmée » ne se lit pas dans la version.** Vingt-deux listes du dépôt n'en publient
 aucune — celles d'uBlock et d'EasyList n'ont pas de numéro dans leur en-tête —, et comparer
 deux chaînes vides les déclarait à jour pour toujours. Une conversion améliorée ne touche pas
 non plus à la version d'origine : un correctif du convertisseur n'atteignait donc personne.
-Le nombre de règles produites répond aux deux — il vient du même index, il change quand la
-liste change *et* quand la conversion change — et il était déjà retenu.
+C'est l'empreinte du fichier d'origine, que le dépôt publie, jointe au nombre de règles
+produites : la première dit que la liste a changé chez son mainteneur, le second qu'elle a
+changé chez le convertisseur.
 
 **Décocher rend la place, tout de suite.** Les règles compilées ne sont pas le fichier
 téléchargé : ce sont des tables de décision, et elles pèsent davantage. Le magasin de WebKit
@@ -323,13 +348,13 @@ cocher trois listes trouvées par un mot-clé si chaque clic efface le mot-clé.
 le pont est donc le strict changement — le compte, le bandeau, l'état de chaque ligne —, et
 la page répond un mot convenu pour dire qu'elle a su l'appliquer. Le rechargement reste, mais
 pour le seul cas qu'il vise : une page servie avant la fin du téléchargement du catalogue,
-qui n'a aucune ligne à corriger. Les cent soixante et une lignes ne repassent alors qu'une
+qui n'a aucune ligne à corriger. Les soixante et onze lignes ne repassent alors qu'une
 fois, à leur arrivée — aucun correctif d'attribut ne sait faire apparaître ce qui n'existe pas.
 
 ### Vos règles, et la pause
 
 **Les règles posées à la main ont leur page**, `wuji://rules`, sous « Blocage » dans le
-sommaire. Elles vivaient en haut du catalogue, au-dessus de cent soixante et une listes : on
+sommaire. Elles vivaient en haut du catalogue, au-dessus de toutes les listes du dépôt : on
 les croisait en cherchant autre chose, jamais quand on les cherchait. Ce ne sont pourtant pas
 les mêmes objets — une liste vient d'ailleurs et se coche, une règle vient d'un geste qu'on a
 fait sur une page précise. Elles y sont rangées **par site**, parce qu'on ne se souvient pas
@@ -351,9 +376,9 @@ texte d'une page ou un style calculé, pas d'exécution de code ; un type d'acti
 refusé, et le refus emporte la liste entière. `redirect` compile et n'a aucun effet, vérifié.
 
 Le dépôt consigne donc à part, sous forme structurée, ce que la conversion a dû écarter :
-quatre-vingt-quatre listes publient une annexe, **69 907 règles** en tout — 29 868 primitives
-nommées, 24 443 injections de style, 15 477 sélecteurs étendus. C'est les trois quarts de ce
-qui était perdu. Wuji les lit et les applique.
+cinquante listes publient une annexe, **58 690 règles** en tout — 30 414 primitives nommées,
+15 623 sélecteurs étendus, 12 458 injections de style. C'est les trois quarts de ce qui était
+perdu. Wuji les lit et les applique.
 
 **Et c'est un autre mécanisme, qui porte son interrupteur.** Les listes compilées filtrent
 dans le processus réseau et ne touchent jamais la page. Celles-ci demandent du style injecté,
@@ -362,8 +387,8 @@ raison de l'imposer sans le dire. La page « Blocage » porte le commutateur et 
 la ligne du bouclier dit combien de règles s'appliquent **ici** — pas combien dorment en
 mémoire.
 
-**Ce qui arrive dans une page est minuscule.** Deux cent trente mille sites sont couverts, à
-**deux règles par site en médiane**, six au neuvième décile, cent soixante et onze au pire.
+**Ce qui arrive dans une page est minuscule.** Trois cent douze mille sites sont couverts, à
+**deux règles par site en médiane**, six au neuvième décile, deux cent quarante au pire.
 Rien n'est envoyé pour un site qu'aucune liste ne mentionne. Trois niveaux, du moins cher au
 plus cher, et c'est le premier qui sert presque toujours :
 
