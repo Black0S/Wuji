@@ -42,6 +42,19 @@ enum BlockingPage {
         var injection = Injection()
     }
 
+    /// Les trois encarts qui vivent au-dessus du catalogue.
+    ///
+    /// **Ils étaient dessinés une fois pour toutes, et se périmaient sur place.** Couper les
+    /// règles à injection laissait « en service » écrit à côté de l'interrupteur qu'on
+    /// venait de basculer ; retirer une liste hors catalogue laissait sa ligne ; reprendre
+    /// un site en pause le laissait dans la liste des sites en pause. Il fallait recharger
+    /// pour voir ce qu'on venait de faire — c'est-à-dire perdre le filtre et la position,
+    /// tout ce que la mise à jour sur place existe pour garder. Ils traversent donc le pont
+    /// avec le reste : quelques centaines d'octets, contre une page entière.
+    static func blocks(_ state: State) -> String {
+        injection(state) + orphans(state) + paused(state)
+    }
+
     /// Un lot de listes en cours de pose : « 3 sur 16 ».
     struct Batch: Equatable {
         var done = 0
@@ -92,6 +105,7 @@ enum BlockingPage {
             "working": state.working,
             "failed": state.failure?.id ?? "",
             "updates": updatable(state).count,
+            "blocks": blocks(state),
             // `NSNull` et non `nil` : un `Optional` vide n'est pas du JSON, et
             // `JSONSerialization` refuse alors la charge **entière** — le correctif
             // devenait « {} » et la page cessait de se mettre à jour, sans un mot.
@@ -159,7 +173,7 @@ enum BlockingPage {
               </header>
               <main>
                 <div id="notice">\(notice)</div>
-                \(injection(state))\(orphans(state))\(paused(state))
+                <div id="blocs">\(blocks(state))</div>
                 <div class="search"\(state.catalog.isEmpty ? " hidden" : "")>
                   <input type="search" class="filter" placeholder="Filtrer les listes"
                          autocomplete="off" spellcheck="false">
@@ -321,7 +335,7 @@ enum BlockingPage {
             <div class="rule" data-host="\(escape(id))">
               <span class="mono host">\(escape(id))</span>
               <span class="selector">plus publiée</span>
-              <button class="button danger" data-action="forget-orphan">Retirer</button>
+              <button class="button petit danger" data-action="forget-orphan">Retirer</button>
             </div>
             """
         }.joined()
@@ -344,7 +358,7 @@ enum BlockingPage {
             <div class="rule" data-host="\(escape(host))">
               <span class="mono host">\(escape(host))</span>
               <span class="selector">blocage suspendu</span>
-              <button class="button" data-action="resume">Reprendre</button>
+              <button class="button petit" data-action="resume">Reprendre</button>
             </div>
             """
         }.joined()
@@ -382,7 +396,7 @@ enum BlockingPage {
             <span class="detail">\(escape(detail))</span>
             \(provenance(list))
           </div>
-          <button class="button update" data-action="update"\(stale ? "" : " hidden")>Mettre à jour</button>
+          <button class="button petit update" data-action="update"\(stale ? "" : " hidden")>Mettre à jour</button>
         </li>
         """
     }
@@ -440,9 +454,8 @@ enum BlockingPage {
     li {
       height: auto; min-height: 54px; padding: 10px 12px; align-items: flex-start; gap: 12px;
     }
-    /* Le bouton d'une ligne est plus court que la ligne la plus courte : c'est ce qui fait
-       qu'apparaître ou disparaître ne change jamais la hauteur du rang. */
-    li .update { height: 26px; padding: 0 10px; font-size: 12px; }
+    /* Le bouton d'une ligne porte `.petit` : plus court que la ligne la plus courte, c'est
+       ce qui fait qu'apparaître ou disparaître ne change jamais la hauteur du rang. */
     li input[type=checkbox] { margin-top: 3px; }
     li[hidden] { display: none; }
     .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -477,8 +490,6 @@ enum BlockingPage {
     .busy, .failure { font-size: 13px; margin: 0 0 10px; }
     .busy { color: var(--muted); }
     .failure { color: var(--danger); }
-    .link { background: none; border: 0; padding: 0; font: inherit;
-            color: var(--text); text-decoration: underline; cursor: pointer; }
     /* Les familles : un titre discret, un compte à droite. Une section se saute d'un
        regard — c'est tout l'intérêt d'en avoir. */
     .group h2, .block h2 {
@@ -488,14 +499,6 @@ enum BlockingPage {
     /* Le compte ne se replie pas : « 4 · 4 en service » passait à la ligne dans une fenêtre
        étroite dès qu'une liste entrait en service, et le titre gagnait une ligne — donc
        tout ce qui suivait descendait, à chaque case cochée. */
-    /* **Le bouton qui travaille est plein ; celui qui rafraîchit ne l'est pas.** Deux
-       boutons du même gris côte à côte se lisent comme deux variantes de la même chose. */
-    .primaire {
-      background: var(--text); color: var(--bg, #000); border-color: var(--text);
-      font-weight: 500;
-    }
-    .primaire:hover { opacity: .85; }
-    .primaire[disabled] { opacity: .5; cursor: default; }
     /* L'état se lit à gauche de l'interrupteur, et se colore quand il est actif : un mot
        gris à côté d'un interrupteur gris n'apprend rien de plus que l'interrupteur. */
     .état { font-size: 12px; font-weight: 400; color: var(--muted); }
@@ -615,6 +618,13 @@ enum BlockingPage {
       if (compte) compte.textContent = état.tally;
       const bandeau = document.getElementById('notice');
       if (bandeau) bandeau.innerHTML = état.notice;
+      // Les encarts du haut — injection, hors catalogue, sites en pause — se redessinent
+      // en bloc : ils changent d'état ensemble et pèsent quelques centaines d'octets.
+      const blocs = document.getElementById('blocs');
+      if (blocs && état.blocks !== undefined && blocs.innerHTML !== état.blocks) {
+        blocs.innerHTML = état.blocks;
+      }
+
       const tout = document.getElementById('tout-jour');
       if (tout) {
         const lot = état.batch;

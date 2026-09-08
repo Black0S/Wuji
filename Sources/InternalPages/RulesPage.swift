@@ -110,7 +110,7 @@ enum RulesPage {
                 <div class="rule" data-rule="\(escape(rule.id))">
                   <span class="mono selector">\(escape(rule.selector))</span>
                   <span class="when">\(escape(when(rule.created)))</span>
-                  <button class="button danger" data-action="forget-rule">Oublier</button>
+                  <button class="button petit danger" data-action="forget-rule">Oublier</button>
                 </div>
                 """
             }.joined()
@@ -161,9 +161,6 @@ enum RulesPage {
     .group h2 .tally { color: var(--muted); font-weight: 400; font-size: 12px; }
     .group h2 .link { margin-left: auto; font-size: 12px; }
     .group[hidden], .rule[hidden] { display: none; }
-    .link { background: none; border: 0; padding: 0; font: inherit;
-            color: var(--muted); text-decoration: underline; cursor: pointer; }
-    .link:hover { color: var(--text); }
     .rules { display: flex; flex-direction: column; }
     .rule {
       display: flex; align-items: center; gap: 12px; padding: 7px 12px;

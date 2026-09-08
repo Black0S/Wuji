@@ -38,7 +38,7 @@ enum HistoryPage {
                   <p id="count">\(entries.count) page\(entries.count > 1 ? "s" : "") · conservées sur cette machine</p>
                 </div>
                 <input id="q" type="search" placeholder="Rechercher" autocomplete="off" spellcheck="false">
-                <button id="clear" class="ghost">Tout effacer</button>
+                <button id="clear" class="button danger">Tout effacer</button>
               </header>
               <main>\(rows)\(empty)<p class="empty" id="none" hidden>Aucun résultat.</p></main>
               """,

@@ -83,13 +83,14 @@ extension SettingsPage {
     .radio { display: inline-flex; align-items: center; gap: 6px; margin-left: 14px;
              font-size: 13px; cursor: pointer; }
     .radio input { accent-color: var(--text); }
-    select, .button {
+    /* Les boutons viennent de la feuille commune : ils sont les mêmes ici et ailleurs.
+       Le menu déroulant partage leur gabarit, et rien d'autre. */
+    select {
       height: 32px; padding: 0 12px; background: transparent; color: var(--text);
       border: 1px solid var(--hairline); border-radius: 8px; font: inherit; cursor: pointer;
       text-decoration: none; display: inline-flex; align-items: center;
     }
-    select:hover, .button:hover { border-color: var(--muted); }
-    .button.danger:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+    select:hover { border-color: var(--muted); }
     input[type=range] { accent-color: var(--text); width: 180px; }
     .row.block { border-bottom: 0; padding-bottom: 4px; }
     .permissions { display: flex; flex-direction: column; gap: 6px; padding-bottom: 16px; }

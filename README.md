@@ -277,6 +277,23 @@ Une liste qui échoue n'arrête pas les autres : c'est souvent une seule liste q
 elle, et abandonner les dix-huit restantes pour celle-là serait le contraire de ce qu'on a
 demandé.
 
+**Un seul vocabulaire de boutons.** Il vivait dans la feuille des réglages, que les autres
+pages n'incluent pas : sur la page de blocage, chaque « Mettre à jour » retombait donc sur le
+bouton par défaut du navigateur — une autre forme, une autre hauteur, une autre police, à côté
+d'un « Actualiser » dessiné par nous. Trois voix désormais, et pas une de plus : le neutre,
+celui qui fait le travail, celui qui détruit ; plus une taille pour les boutons de ligne, qui
+ne doivent jamais dépasser la hauteur du rang. Deux boutons destructeurs se cachaient sous le
+neutre — « Tout effacer » de l'historique, « Effacer la liste » des téléchargements — et se
+déclarent maintenant pour ce qu'ils sont.
+
+**Les encarts du haut se mettent à jour sur place.** Ils étaient dessinés une fois pour
+toutes : couper les règles à injection laissait « en service » écrit à côté de l'interrupteur
+qu'on venait de basculer, retirer une liste hors catalogue laissait sa ligne, reprendre un
+site en pause le laissait dans la liste des sites en pause. Il fallait recharger pour voir ce
+qu'on venait de faire — c'est-à-dire perdre le filtre et la position, tout ce que la mise à
+jour sur place existe pour garder. Ils traversent le pont avec le reste : deux kilo-octets,
+contre une page entière.
+
 **Une famille se coche d'un geste.** Douze listes d'AdGuard cochées une à une, c'est douze
 allers-retours pour une seule intention — et l'on ne se souvient pas d'avoir sauté la
 neuvième. Chaque titre de famille porte donc son bouton, qui dit ce qu'il ferait plutôt que

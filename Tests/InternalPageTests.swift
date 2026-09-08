@@ -248,6 +248,31 @@ struct InternalPageTests {
         #expect(BlockingPage.patch(état).contains("\"batch\":null"))
     }
 
+    @Test func lesEncartsDuHautSeMettentAJourSurPlace() {
+        // **Ils étaient dessinés une fois pour toutes.** Couper les règles à injection
+        // laissait « en service » écrit à côté de l'interrupteur qu'on venait de basculer,
+        // et il fallait recharger pour voir ce qu'on venait de faire — c'est-à-dire perdre
+        // le filtre et la position, tout ce que la mise à jour sur place existe pour garder.
+        var état = BlockingPage.State(catalog: [], installed: [], outdated: [], activeRules: 0,
+                                      working: [:], failure: nil, unreachable: false,
+                                      paused: ["exemple.fr"], orphans: ["vieille.txt"])
+        état.injection = BlockingPage.Injection(enabled: true, rules: 100, lists: 2)
+        let allumé = BlockingPage.blocks(état)
+        #expect(allumé.contains(">en service<"))
+        #expect(allumé.contains(#"data-action="injection" checked"#))
+
+        état.injection.enabled = false
+        let coupé = BlockingPage.blocks(état)
+        #expect(coupé.contains(">coupées<"))
+        #expect(!coupé.contains("checked"))
+
+        // Les trois voyagent ensemble : ils changent d'état ensemble, et séparés l'un
+        // d'eux finirait par être oublié dans le correctif.
+        #expect(coupé.contains("Hors catalogue"))
+        #expect(coupé.contains("En pause"))
+        #expect(BlockingPage.patch(état).contains(#""blocks""#))
+    }
+
     @Test func leCorrectifDeLaPageDeBlocageSAnnonce() {
         // **Le mot convenu est le correctif.** Une fonction qui ne renvoie rien vaut
         // `undefined`, que WebKit rend comme « rien » — indistinguable d'un crochet absent :

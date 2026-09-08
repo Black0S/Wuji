@@ -22,7 +22,7 @@ enum DownloadsPage {
                   <h1>Téléchargements</h1>
                   <p>\(items.count) fichier\(items.count > 1 ? "s" : "") · cette session</p>
                 </div>
-                <button id="clear" class="ghost">Effacer la liste</button>
+                <button id="clear" class="button danger">Effacer la liste</button>
               </header>
               <main><ul>\(rows)</ul>\(empty)</main>
               """,
@@ -231,11 +231,41 @@ enum InternalStyle {
       border: 1px solid var(--hairline); border-radius: 8px; font: inherit; outline: none;
     }
     input[type=search]:focus { border-color: var(--muted); }
-    .ghost {
-      height: 32px; padding: 0 12px; background: transparent; color: var(--muted);
+    /* **Un seul vocabulaire de boutons, pour toutes les pages internes.**
+       Il vivait dans la feuille des réglages, que les autres pages n'incluent pas : sur la
+       page de blocage, chaque « Mettre à jour » retombait donc sur le bouton par défaut du
+       navigateur — une autre forme, une autre hauteur, une autre police, à côté d'un
+       « Actualiser » dessiné par nous. Deux vocabulaires sur la même page, sans que rien ne
+       les distingue en intention.
+
+       Trois voix, et pas une de plus : le neutre, celui qui fait le travail, celui qui
+       détruit. `.petit` n'est pas une quatrième voix mais une taille — un bouton dans une
+       ligne de liste ne doit jamais être plus haut que la ligne, sans quoi la cacher fait
+       sauter tout ce qui suit. */
+    .button, .ghost {
+      height: 32px; padding: 0 12px; background: transparent; color: var(--text);
       border: 1px solid var(--hairline); border-radius: 8px; font: inherit; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      text-decoration: none; white-space: nowrap;
     }
-    .ghost:hover { color: var(--danger); border-color: var(--danger); }
+    .button:hover, .ghost:hover { border-color: var(--muted); }
+    .button[disabled] { opacity: .5; cursor: default; }
+    /* Le neutre discret : « Actualiser », « Installer ». Il est là, il ne se propose pas. */
+    .ghost { color: var(--muted); }
+    .ghost:hover { color: var(--text); }
+    /* Celui qui fait le travail. Plein, parce que deux boutons du même gris côte à côte se
+       lisent comme deux variantes de la même chose — alors que l'un télécharge des dizaines
+       de mégaoctets et que l'autre relit un index. */
+    .button.primaire {
+      background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 500;
+    }
+    .button.primaire:hover { opacity: .85; }
+    .button.danger:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+    .button.petit { height: 26px; padding: 0 10px; font-size: 12px; }
+    /* Un geste écrit en toutes lettres, sans boîte : « Tout activer », « réessayez ». */
+    .link { background: none; border: 0; padding: 0; font: inherit;
+            color: var(--muted); text-decoration: underline; cursor: pointer; }
+    .link:hover { color: var(--text); }
     section { margin-top: 24px; }
     h2 {
       margin: 0 0 6px; padding: 0 12px; font-size: 10px; font-weight: 600;
