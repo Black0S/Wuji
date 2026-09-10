@@ -131,7 +131,7 @@ extension AppDelegate {
     // le contraire — et « rendre cet espace normal » aurait versé dans une session
     // enregistrée ce qu'un espace privé avait promis de ne pas garder.
     //
-    // Un espace privé se crée avec ⇧⌥N et le reste jusqu'à sa fermeture.
+    // Un espace privé se crée avec ⌥N et le reste jusqu'à sa fermeture.
 
     /// **Fermer un espace ne demande plus rien.**
     ///

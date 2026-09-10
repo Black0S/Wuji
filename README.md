@@ -582,7 +582,7 @@ ne chevauche jamais le texte, à droite pour que l'adresse reste centrée et ne 
 demi-largeur de cadenas entre un site et une page interne.
 
 **Espaces et dossiers.** Les onglets appartiennent à un espace, pas à l'application. Un
-espace naît privé ou ne l'est jamais : `⇧⌥N` en crée un — magasin de données éphémère, rien
+espace naît privé ou ne l'est jamais : `⌥N` en crée un — magasin de données éphémère, rien
 sur le disque, un symbole qui ne se change pas — et il l'est jusqu'à sa fermeture.
 
 Il y avait une bascule privé/normal ; elle mentait dans les deux sens. Le magasin de
@@ -1032,7 +1032,7 @@ sites exclus, scripts, réglages — avec le même sommaire à gauche partout.
 | `⌥T` / `⌥W` | Nouvel espace / fermer l'espace — `⌘` agit sur l'onglet, `⌥` sur l'espace |
 | `⌘S` | Enregistrer la page — archive web ou PDF |
 | `⇧⌘R` | Mode lecture |
-| `⇧⌥N` / `⇧⌘N` | Nouvel espace privé / nouveau dossier |
+| `⌥N` / `⇧⌘N` | Nouvel espace privé / nouveau dossier |
 | `⌘F` | Rechercher dans la page · `⌘G` et `⇧⌘G` pour circuler |
 | `⌘R` | Recharger · `⌘+` et `⌘−` pour le zoom |
 | `⌘D` / `⇧⌘B` | Mettre en favori / ouvrir les favoris |

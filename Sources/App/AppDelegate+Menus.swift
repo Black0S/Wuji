@@ -29,16 +29,16 @@ extension AppDelegate {
         fileMenu.addItem(withTitle: "Nouvel onglet", action: #selector(newTab(_:)), keyEquivalent: "t")
         // **⌥ agit sur l'espace, ⌘ sur ce qu'il contient.** C'est la règle de toute cette
         // barre — ⌥T ouvre un espace quand ⌘T ouvre un onglet, ⌥W ferme l'un quand ⌘W ferme
-        // l'autre. Un espace privé est un espace : son raccourci appartient donc à la même
-        // famille, ⇧⌥N, et non à ⇧⌘N.
+        // l'autre. Un espace privé est un espace : ⌥N, sans rien de plus.
         //
-        // ⇧⌘N était emprunté à la navigation privée des autres navigateurs. L'emprunt
-        // coûtait une exception au milieu d'une règle simple, pour un geste qui ne se
-        // trompe de toute façon pas de sens : sur macOS, ⇧⌘N crée un dossier — et c'est
-        // à lui qu'il revient ici.
+        // **La majuscule était la dernière exception qui restait.** ⇧⌥N tenait de ⇧⌘N, que
+        // les autres navigateurs emploient pour la navigation privée ; on avait corrigé le
+        // modificateur sans lâcher la touche morte qui l'accompagnait. Les trois gestes
+        // d'espace se tapent maintenant de la même façon — ⌥T, ⌥W, ⌥N —, et ⇧⌘N reste ce
+        // qu'il est partout sur macOS : créer un dossier.
         let privateItem = NSMenuItem(title: "Nouvel espace privé",
-                                     action: #selector(newPrivateSpace(_:)), keyEquivalent: "N")
-        privateItem.keyEquivalentModifierMask = [.option, .shift]
+                                     action: #selector(newPrivateSpace(_:)), keyEquivalent: "n")
+        privateItem.keyEquivalentModifierMask = [.option]
         fileMenu.addItem(privateItem)
         let folderItem = NSMenuItem(title: "Nouveau dossier",
                                     action: #selector(newFolder(_:)), keyEquivalent: "N")

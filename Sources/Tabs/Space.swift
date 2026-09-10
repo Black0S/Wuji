@@ -77,7 +77,7 @@ final class Space {
     /// l'autre sens, c'était pire : ce qu'un espace privé avait promis de ne pas garder se
     /// serait retrouvé dans une session enregistrée.
     ///
-    /// Un espace privé naît privé — `⇧⌥N`, et rien d'autre — et le reste jusqu'à sa
+    /// Un espace privé naît privé — `⌥N`, et rien d'autre — et le reste jusqu'à sa
     /// fermeture, qui l'efface.
     let isPrivate: Bool
 
