@@ -819,6 +819,16 @@ qui est confié : **trente-deux octets**, la clé du coffre, inutiles sans `coff
 ailleurs. Ce qui n'est jamais confié : aucun identifiant, aucun mot de passe de site, aucun
 nom d'hôte. C'est éteint par défaut, et l'éteindre efface la clé confiée.
 
+**Il suffit d'un certificat pour que rien de tout cela ne s'applique.** `build.sh` signe
+avec une identité dès qu'il en trouve une dans le trousseau — « Developer ID Application »,
+ou simplement « Apple Development », qu'Xcode délivre en une minute — et écrit le fichier de
+droits qui va avec, en lisant l'identifiant d'équipe dans le certificat plutôt qu'en le
+codant en dur. La recherche vit dans `tools/signature.sh`, partagée avec `release.sh` : deux
+scripts qui cherchent l'identité chacun de son côté finissent par ne pas trouver la même. La
+copie de tous les jours cesse ainsi d'être moins capable que celle qu'on publie, sans que
+rien ne le dise. Et le coffre repasse tout seul à l'Enclave à la première ouverture qui
+suit : sans cela, la protection choisie faute de mieux serait restée définitive.
+
 **Deux protections, et l'interface dit laquelle s'applique.** Un élément de trousseau à
 contrôle biométrique demande le droit `keychain-access-groups`, dont le groupe commence par
 l'identifiant de l'équipe : `SecItemAdd` rend `errSecMissingEntitlement` (-34018) sur un

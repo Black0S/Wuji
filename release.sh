@@ -30,9 +30,17 @@ DMG="Wuji.dmg"
 # Le `|| true` n'est pas de la superstition : sans certificat, `grep` ne trouve rien et
 # rend 1, ce qui, sous `set -e`, tuait le script **avant** le message qui explique quoi
 # faire. Une aide qu'on n'atteint jamais ne vaut pas mieux qu'une absence d'aide.
+# La recherche vit dans `tools/signature.sh`, partagée avec `build.sh` : deux scripts qui
+# cherchent l'identité chacun de son côté finissent par ne pas trouver la même.
+#
+# **Mais la publication est plus exigeante que la compilation.** `build.sh` se contente d'un
+# certificat « Apple Development » — stable, avec un identifiant d'équipe, c'est tout ce
+# qu'il faut chez soi. La notarisation, elle, n'accepte que « Developer ID Application » :
+# on le vérifie ici plutôt que d'aller se le faire refuser après une minute d'attente.
+. "$(dirname "$0")/tools/signature.sh"
 IDENTITE="${WUJI_IDENTITY:-}"
 if [ -z "$IDENTITE" ]; then
-    IDENTITE="$(security find-identity -v -p codesigning \
+    IDENTITE="$(security find-identity -v -p codesigning 2>/dev/null \
         | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/' || true)"
 fi
 
@@ -96,24 +104,12 @@ plutil -replace CFBundleVersion -string "$CONSTRUCTION" .build/Wuji.app/Contents
 #
 # Sans ce droit, `SecItemAdd` rend -34018 et Wuji retombe sur sa protection logicielle —
 # ce qu'il dit alors dans ses réglages, plutôt que de laisser croire à l'Enclave.
-EQUIPE="$(security find-certificate -c "$IDENTITE" -p 2>/dev/null \
-    | openssl x509 -noout -subject 2>/dev/null \
-    | sed -n 's/.*OU *= *\([A-Z0-9]*\).*/\1/p' | head -1)"
-DROITS=".build/wuji.entitlements"
-if [ -n "$EQUIPE" ]; then
-  cat > "$DROITS" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>keychain-access-groups</key>
-  <array><string>${EQUIPE}.com.wuji.browser</string></array>
-</dict></plist>
-PLIST
-  echo "→ droits : keychain-access-groups ${EQUIPE}.com.wuji.browser"
+DROITS="$(wuji_droits "$IDENTITE")"
+if [ -n "$DROITS" ]; then
+  echo "→ droits : keychain-access-groups $(wuji_equipe "$IDENTITE").com.wuji.browser"
 else
   echo "→ droits : identifiant d'équipe introuvable, signature sans keychain-access-groups"
   echo "  (Touch ID retombera sur la protection logicielle)"
-  rm -f "$DROITS"
 fi
 
 echo "→ signature"

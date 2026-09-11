@@ -31,11 +31,26 @@ extension AppDelegate {
                   Vault.unlock(key: material) else {
                 return askMasterToUnlock(then: finish)
             }
+            upgradeBiometricProtection()
             layout.toast.show("Coffre ouvert")
             refreshSettingsPages()
             reproposeCompletion()
             finish?(true)
         }
+    }
+
+    /// Reconfie la clé à l'Enclave dès que la version le permet.
+    ///
+    /// **Sinon la protection faible serait définitive.** Elle est choisie faute de mieux sur
+    /// une copie signée ad-hoc ; le jour où Wuji est signé avec un certificat, l'Enclave
+    /// devient accessible — mais rien n'irait le voir, et la clé resterait dans son fichier
+    /// pour toujours. On réessaie donc au moment où l'on a la clé en main, c'est-à-dire à
+    /// l'ouverture du coffre, et on le dit quand ça change.
+    private func upgradeBiometricProtection() {
+        guard Biometrics.protection == .softwareGate,
+              let material = Vault.keyMaterial,
+              Biometrics.enable(key: material) == .secureEnclave else { return }
+        layout.toast.show("\(Biometrics.name) passe à l'Enclave sécurisée")
     }
 
     private func askMasterToUnlock(then finish: (@MainActor (Bool) -> Void)? = nil) {
