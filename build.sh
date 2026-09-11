@@ -30,34 +30,58 @@ cp ".build/$CONFIG/Wuji" "$APP/Contents/MacOS/Wuji"
 # fatale au lancement : elle décide où s'arrête « ce site ».
 cp Sources/PublicSuffix/Data/*.bin "$APP/Contents/Resources/"
 
-# **La signature, avec un certificat s'il y en a un.**
+# **Ad-hoc par défaut, et c'est délibéré.**
 #
-# Ce n'était pas le cas : `build.sh` signait toujours en ad-hoc, et seul `release.sh` savait
-# se servir d'une identité. La copie qu'on utilise tous les jours était donc moins capable
-# que celle qu'on publie — sans que rien ne le dise. Deux conséquences, mesurées toutes les
-# deux : un élément de trousseau gardé par l'Enclave rend -34018 faute du droit
-# `keychain-access-groups`, et l'empreinte d'une signature ad-hoc change à chaque
-# compilation, si bien que le trousseau ne reconnaît jamais l'application d'un lancement à
-# l'autre et redemande son mot de passe à chaque accès.
+# Quelqu'un qui clone ce dépôt doit pouvoir taper `./build.sh` et obtenir une application qui
+# se lance : pas de compte Apple, pas de certificat, rien à configurer. C'est la condition
+# pour qu'un projet ouvert le soit vraiment, et elle passe avant le confort de celui qui en a
+# un.
 #
-# Avec un certificat — « Developer ID Application », ou simplement « Apple Development »
-# qu'Xcode délivre en une minute —, l'exigence porte sur le certificat et non sur le
-# binaire : elle survit aux recompilations, et Touch ID ouvre le coffre par l'Enclave.
+# **Ce que l'ad-hoc coûte, mesuré et non supposé.** Un élément de trousseau gardé par
+# l'Enclave sécurisée rend -34018 faute du droit `keychain-access-groups`, que seule une
+# signature portant un identifiant d'équipe peut déclarer ; et l'empreinte d'une signature
+# ad-hoc est celle du binaire, donc elle change à chaque compilation — le trousseau ne
+# reconnaît alors jamais l'application d'un lancement à l'autre. Touch ID retombe en
+# conséquence sur un fichier gardé par une vérification d'empreinte, ce que les réglages
+# écrivent en toutes lettres.
+#
+# **Qui veut l'Enclave le demande, explicitement.** Une identité prise d'office dans le
+# trousseau signerait Wuji avec le certificat qu'une autre équipe y a laissé, et écrirait son
+# identifiant d'équipe dans les droits, sans que personne l'ait voulu :
+#
+#   WUJI_IDENTITY="Apple Development: …"  ./build.sh     — pour une fois
+#   echo auto > .identite-signature                      — une fois pour toutes
 . "$(dirname "$0")/tools/signature.sh"
 IDENTITE="$(wuji_identite)"
 if [ -n "$IDENTITE" ]; then
+    # **On ne retombe pas sur l'ad-hoc en silence.** L'identité a été demandée
+    # explicitement ; signer autrement donnerait une application qui ressemble à ce qu'on
+    # voulait sans l'être, et l'on chercherait longtemps pourquoi le coffre redemande le
+    # mot de passe du trousseau.
     DROITS="$(wuji_droits "$IDENTITE")"
     if [ -n "$DROITS" ]; then
-        codesign --force --sign "$IDENTITE" --entitlements "$DROITS"                  --generate-entitlement-der "$APP" >/dev/null
+        SIGNE=(codesign --force --sign "$IDENTITE" --entitlements "$DROITS" --generate-entitlement-der "$APP")
+    else
+        SIGNE=(codesign --force --sign "$IDENTITE" "$APP")
+    fi
+    if ! "${SIGNE[@]}" >/dev/null 2>&1; then
+        {
+            echo "Signature impossible avec « $IDENTITE »."
+            echo "  Identités disponibles sur cette machine :"
+            security find-identity -v -p codesigning 2>/dev/null | sed 's/^/  /'
+            echo "  Effacez .identite-signature ou videz WUJI_IDENTITY pour revenir à l'ad-hoc."
+        } >&2
+        exit 1
+    fi
+    if [ -n "$DROITS" ]; then
         echo "→ signé : $IDENTITE · keychain-access-groups"
     else
-        codesign --force --sign "$IDENTITE" "$APP" >/dev/null
         echo "→ signé : $IDENTITE · sans identifiant d'équipe"
+        echo "  (Touch ID retombera sur la protection logicielle)"
     fi
 else
-    # Rien à signer avec : on retombe sur l'ad-hoc, qui suffit à lancer l'application ici.
-    # Le seul droit qu'il y avait — `get-task-allow` — servait à rendre les pages
-    # inspectables depuis Safari, fonction retirée ; il est de toute façon refusé à la
+    # Le cas ordinaire. Le seul droit qu'il y avait — `get-task-allow` — servait à rendre les
+    # pages inspectables depuis Safari, fonction retirée ; il est de toute façon refusé à la
     # notarisation.
     codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 fi

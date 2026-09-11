@@ -819,15 +819,24 @@ qui est confié : **trente-deux octets**, la clé du coffre, inutiles sans `coff
 ailleurs. Ce qui n'est jamais confié : aucun identifiant, aucun mot de passe de site, aucun
 nom d'hôte. C'est éteint par défaut, et l'éteindre efface la clé confiée.
 
-**Il suffit d'un certificat pour que rien de tout cela ne s'applique.** `build.sh` signe
-avec une identité dès qu'il en trouve une dans le trousseau — « Developer ID Application »,
-ou simplement « Apple Development », qu'Xcode délivre en une minute — et écrit le fichier de
-droits qui va avec, en lisant l'identifiant d'équipe dans le certificat plutôt qu'en le
-codant en dur. La recherche vit dans `tools/signature.sh`, partagée avec `release.sh` : deux
-scripts qui cherchent l'identité chacun de son côté finissent par ne pas trouver la même. La
-copie de tous les jours cesse ainsi d'être moins capable que celle qu'on publie, sans que
-rien ne le dise. Et le coffre repasse tout seul à l'Enclave à la première ouverture qui
-suit : sans cela, la protection choisie faute de mieux serait restée définitive.
+**`build.sh` signe en ad-hoc, et c'est délibéré.** Quelqu'un qui clone ce dépôt doit pouvoir
+taper `./build.sh` et obtenir une application qui se lance : pas de compte Apple, pas de
+certificat, rien à configurer. C'est la condition pour qu'un projet ouvert le soit vraiment,
+et elle passe avant le confort de celui qui a un compte. Aller chercher tout seul une
+identité dans le trousseau serait d'ailleurs pire que de ne rien faire : on signerait Wuji
+avec le certificat qu'une autre équipe y a laissé, en écrivant son identifiant d'équipe dans
+les droits, sans que personne l'ait demandé.
+
+**Qui veut l'Enclave le demande, explicitement** — `WUJI_IDENTITY="…" ./build.sh` pour une
+fois, ou `echo auto > .identite-signature` une fois pour toutes, ce fichier n'étant pas suivi
+par Git. Le droit `keychain-access-groups` est alors écrit avec l'identifiant d'équipe lu dans
+le certificat, jamais codé en dur. Et si l'identité demandée ne peut pas signer, la
+compilation s'arrête en disant lesquelles existent : retomber sur l'ad-hoc en silence
+donnerait une application qui ressemble à ce qu'on voulait sans l'être. La recherche vit dans
+`tools/signature.sh`, partagée avec `release.sh` — deux scripts qui cherchent chacun de leur
+côté finissent par ne pas trouver la même chose. Le coffre repasse tout seul à l'Enclave à la
+première ouverture qui suit : sans cela, la protection choisie faute de mieux serait restée
+définitive.
 
 **Deux protections, et l'interface dit laquelle s'applique.** Un élément de trousseau à
 contrôle biométrique demande le droit `keychain-access-groups`, dont le groupe commence par

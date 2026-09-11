@@ -32,3 +32,6 @@ coffre.json
 # `Package.resolved` **est** suivi, et volontairement : il fige les versions des
 # dépendances, donc deux machines compilent le même navigateur. L'ignorer rendrait les
 # différences de comportement inexplicables.
+
+# L'identité de signature d'une machine — celle de son propriétaire, pas celle du dépôt.
+.identite-signature

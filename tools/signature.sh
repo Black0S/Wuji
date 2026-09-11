@@ -13,14 +13,37 @@
 # redemande le mot de passe du trousseau à chaque accès. Avec un certificat, l'exigence porte
 # sur le certificat et non sur le binaire : elle survit aux recompilations.
 
-# L'identité à utiliser, ou rien. `WUJI_IDENTITY` a le dernier mot.
+# La racine du dépôt, pour trouver `.identite-signature` d'où qu'on appelle le script.
+WUJI_RACINE="${WUJI_RACINE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+
+# L'identité pour une compilation locale — **et seulement si on la demande**.
 #
-# « Developer ID Application » d'abord, parce que c'est celle qui sert aussi à publier.
-# « Apple Development » ensuite : elle ne vaut rien pour la distribution, mais elle porte un
-# identifiant d'équipe et elle est stable — c'est tout ce qu'il faut pour compiler chez soi,
-# et elle s'obtient en une minute depuis Xcode.
+# **Le défaut est l'ad-hoc, et ce n'est pas un repli.** Quelqu'un qui clone le dépôt doit
+# pouvoir taper `./build.sh` et obtenir une application qui se lance : pas de compte Apple,
+# pas de certificat, rien à configurer. C'est la condition pour qu'un projet ouvert le soit
+# vraiment, et elle passe avant le confort de celui qui a un compte.
+#
+# **Et chercher tout seul serait pire que de ne rien faire** : on signerait Wuji avec le
+# certificat qu'une autre équipe a laissé dans le trousseau, en écrivant son identifiant
+# d'équipe dans les droits, sans que personne l'ait demandé.
+#
+# Deux façons de le demander, toutes deux explicites :
+#
+#   WUJI_IDENTITY="Apple Development: …"  ./build.sh     — pour une fois
+#   echo auto > .identite-signature                      — une fois pour toutes
+#
+# `auto` cherche dans le trousseau : « Developer ID Application » d'abord, puisqu'elle sert
+# aussi à publier ; « Apple Development » ensuite — elle ne vaut rien pour la distribution,
+# mais elle est stable et porte un identifiant d'équipe, ce qui suffit chez soi et s'obtient
+# en une minute depuis Xcode.
 wuji_identite() {
-    if [ -n "${WUJI_IDENTITY:-}" ]; then echo "$WUJI_IDENTITY"; return; fi
+    local demande="${WUJI_IDENTITY:-}"
+    if [ -z "$demande" ] && [ -f "$WUJI_RACINE/.identite-signature" ]; then
+        demande="$(tr -d '[:space:]' < "$WUJI_RACINE/.identite-signature" | head -1)"
+    fi
+    [ -n "$demande" ] || return
+    if [ "$demande" != "auto" ]; then echo "$demande"; return; fi
+
     local liste
     liste="$(security find-identity -v -p codesigning 2>/dev/null || true)"
     local motif
