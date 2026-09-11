@@ -234,7 +234,19 @@ extension SettingsPage {
                            + "L'empreinte est bien vérifiée par le système, mais la clé n'y "
                            + "est pas liée : un élément à contrôle biométrique demande un "
                            + "droit que seule une signature Developer ID porte, et cette "
-                           + "copie est signée ad-hoc. La version publiée utilise l'Enclave."
+                           + "copie est signée ad-hoc. La clé dort alors dans un fichier de "
+                           + "Wuji, lisible par votre seul compte — <strong>pas dans le "
+                           + "trousseau du Mac</strong>, qui redemandait son mot de passe à "
+                           + "chaque déverrouillage parce que la signature d'une copie "
+                           + "compilée change à chaque compilation. La version publiée "
+                           + "utilise l'Enclave et ne demande rien."
+                         : "")
+                      + (state.biometryLeftover
+                         ? " <strong>Un ancien élément reste dans votre trousseau</strong>, "
+                           + "sous « Wuji — clé du coffre » : Wuji n'y lit plus, et ne peut "
+                           + "pas l'effacer — le trousseau refuse la suppression à une "
+                           + "signature qu'il ne reconnaît plus. Il s'enlève depuis "
+                           + "« Trousseaux d'accès »."
                          : ""),
                   control: toggle(name: "biometry", isOn: state.biometryEnabled))
             : ""

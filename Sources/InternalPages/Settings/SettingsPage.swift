@@ -90,6 +90,9 @@ enum SettingsPage {
         /// une vérification que Wuji fait lui-même. La différence est réelle, donc elle est
         /// écrite sur la ligne plutôt que supposée.
         var biometrySealed: Bool
+        /// Un ancien élément dort encore dans le trousseau, que Wuji n'utilise plus et ne
+        /// peut pas effacer. Dit plutôt que tu, parce que c'est un secret de quelqu'un.
+        var biometryLeftover = false
         /// Le nom que le système donne à sa biométrie — « Touch ID » ici, autre chose
         /// ailleurs. On l'affiche tel quel plutôt que de le supposer.
         var biometryName: String

@@ -813,11 +813,11 @@ ajouter ou retirer une empreinte au Mac invalide la clé confiée, et sans ce re
 deviendrait inouvrable un matin sans qu'on ait rien fait.
 
 **Il faut dire ce que cela suppose.** Touch ID ne rend pas une clé, il authentifie. Pour
-qu'un doigt ouvre le coffre, la clé doit dormir quelque part que l'Enclave sécurisée garde —
-et sur macOS, cet endroit est le trousseau du système. Ce qui y va : **trente-deux octets**,
-la clé du coffre, inutiles sans `coffre.json` qui est ailleurs. Ce qui n'y va jamais : aucun
-identifiant, aucun mot de passe de site, aucun nom d'hôte. C'est éteint par défaut, et
-l'éteindre efface l'élément.
+qu'un doigt ouvre le coffre, la clé doit dormir quelque part de gardé — et sur macOS, le seul
+endroit vraiment gardé est l'Enclave sécurisée, qu'on atteint par le trousseau du système. Ce
+qui est confié : **trente-deux octets**, la clé du coffre, inutiles sans `coffre.json` qui est
+ailleurs. Ce qui n'est jamais confié : aucun identifiant, aucun mot de passe de site, aucun
+nom d'hôte. C'est éteint par défaut, et l'éteindre efface la clé confiée.
 
 **Deux protections, et l'interface dit laquelle s'applique.** Un élément de trousseau à
 contrôle biométrique demande le droit `keychain-access-groups`, dont le groupe commence par
@@ -827,6 +827,34 @@ paquet signé ad-hoc, mesuré ici. La version publiée, signée Developer ID, l'
 moment de signer. Une copie compilée localement retombe donc sur une protection plus faible :
 l'empreinte est bien vérifiée par le système, mais la clé n'y est pas liée. **La ligne des
 réglages l'écrit en toutes lettres** au lieu de laisser croire à l'Enclave.
+
+**Et cette protection-là a quitté le trousseau.** Elle y rangeait la clé comme un élément
+ordinaire, ce qui ajoutait une barrière — une autre application qui l'aurait demandée
+déclenchait une autorisation — mais coûtait bien plus cher que cela ne rapportait. Le
+trousseau attache chaque élément à l'application qui l'a créé, reconnue à sa signature ; une
+copie compilée sur place est signée *ad hoc*, et son empreinte change à chaque compilation —
+mesuré, deux compilations d'affilée donnent deux empreintes. Le système ne reconnaissait donc
+jamais Wuji d'un lancement à l'autre : **il réclamait le mot de passe du trousseau à chaque
+déverrouillage**, et « Toujours autoriser » n'autorisait que la version en cours d'exécution.
+Un coffre dont la promesse est de ne jamais faire appel au mot de passe du Mac le demandait
+plus souvent que n'importe quoi d'autre — et apprenait au passage à approuver les demandes du
+trousseau sans les lire, ce qui est pire que la barrière ainsi achetée. La clé dort désormais
+dans un fichier de Wuji, en `0600`, derrière la même vérification d'empreinte. Ce qu'on perd
+est exactement ceci : la demande d'autorisation pour une autre application, qui arrêtait
+quelqu'un au clavier et jamais du code tournant déjà sous votre compte — lequel pouvait de
+toute façon lire `coffre.json`. Sur la version publiée, rien de cela ne s'applique : l'Enclave
+prend la clé et le trousseau ne demande rien.
+
+**Le déménagement se fait une fois, et ce qui reste est dit.** La clé déjà rangée au trousseau
+en sort au premier déverrouillage qui suit — une dernière demande de mot de passe, inévitable,
+puisqu'on ne sort pas une clé de là sans franchir sa garde. Wuji tente ensuite d'effacer
+l'ancien élément, et **il n'y arrive pas toujours** : mesuré, un binaire signé autrement que
+celui qui a posé l'élément reçoit `-25244`, « Invalid attempt to change the owner of this
+item », et l'élément survit. Une trace sur le disque dit alors que Wuji n'ira plus y lire —
+sans elle, éteindre Touch ID n'aurait pas tenu, l'élément resté au trousseau répondant « oui,
+c'est allumé » au lancement suivant. Et la ligne des réglages signale le reste, avec où le
+supprimer : c'est un secret de plus dans le trousseau de quelqu'un, il a le droit de le
+savoir.
 
 Le coffre est fermé au lancement. Il ne s'ouvre pas de force : sur une page de connexion, la
 complétion affiche une ligne « Déverrouiller le coffre… » — la proposition se fait là où elle

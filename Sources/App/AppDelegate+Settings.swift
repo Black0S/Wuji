@@ -103,6 +103,7 @@ extension AppDelegate {
                            biometryAvailable: Biometrics.isAvailable,
                            biometryEnabled: Biometrics.isEnabled,
                            biometrySealed: Biometrics.protection == .secureEnclave,
+                           biometryLeftover: Biometrics.leftoverInKeychain,
                            biometryName: Biometrics.name)
     }
 
