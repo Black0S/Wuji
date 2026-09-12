@@ -51,6 +51,8 @@ enum CosmeticEngine {
             """
         }
 
+        // La garde du moteur complet est déclarée avec sa charge : la même fonction que
+        // les deux autres variantes, écrite une fois.
         let charge: [String: Any] = [
             "host": payload.host,
             "css": payload.css,
@@ -60,7 +62,7 @@ enum CosmeticEngine {
         ]
         guard let json = (try? JSONSerialization.data(withJSONObject: charge))
             .flatMap({ String(data: $0, encoding: .utf8) }) else { return nil }
-        return "(() => {\nconst charge = \(json);\n" + engine + "\n})();"
+        return "(() => {\nconst charge = \(json);\n" + surLeSite + "\n" + engine + "\n})();"
     }
 
     /// Le cadre est-il celui du site pour lequel ces règles ont été choisies ?
@@ -75,10 +77,38 @@ enum CosmeticEngine {
             .map { String($0.dropFirst().dropLast()) } ?? "\"\""
         return """
           const __site = \(encodé);
-          const __ici = location.hostname.toLowerCase();
-          if (__ici !== __site && !__ici.endsWith('.' + __site)) return;
+        \(surLeSite)
+          if (!__surLeSite(__site)) return;
         """
     }
+
+    /// Le cadre appartient-il à ce site ?
+    ///
+    /// **Un cadre `about:blank` n'a pas de nom d'hôte**, et pourtant il appartient à la page
+    /// qui l'a créé — il en partage l'origine. Beaucoup d'encarts vivent exactement là. La
+    /// comparaison sur `location.hostname` seule les écartait tous : on remonte donc aux
+    /// parents, ce que la même origine autorise, jusqu'à trouver un nom d'hôte.
+    static let surLeSite = #"""
+      const __surLeSite = (site) => {
+        const correspond = (h) => {
+          if (!h) return false;
+          const bas = h.toLowerCase();
+          return bas === site || bas.endsWith('.' + site);
+        };
+        if (correspond(location.hostname)) return true;
+        if (location.hostname) return false;
+        // `about:blank` et `srcdoc` : l'hôte est celui de l'ancêtre qui en a un.
+        let fenêtre = window;
+        for (let k = 0; k < 8; k++) {
+          try {
+            if (fenêtre.parent === fenêtre) break;
+            fenêtre = fenêtre.parent;
+            if (fenêtre.location.hostname) return correspond(fenêtre.location.hostname);
+          } catch (_) { return false; }
+        }
+        return false;
+      };
+    """#
 
     /// La feuille, et rien d'autre : le cas de la plupart des pages.
     private static func feuilleSeule(_ css: String, _ host: String) -> String {
@@ -128,8 +158,7 @@ enum CosmeticEngine {
       // `<iframe>` du même site, où la moitié des encarts vivent. Un cadre d'un tiers, lui,
       // reçoit le script mais pas les règles : elles ne sont pas les siennes.
       if (charge.host) {
-        const ici = location.hostname.toLowerCase();
-        if (ici !== charge.host && !ici.endsWith('.' + charge.host)) return;
+        if (!__surLeSite(charge.host)) return;
       }
 
       // --- La feuille : ce qui n'a pas besoin d'être évalué ---
@@ -191,7 +220,8 @@ enum CosmeticEngine {
       const ÉTENDUES = new Set(['contains', 'has-text', '-abp-contains', 'upward',
         'nth-ancestor', 'matches-css', 'matches-css-before', 'matches-css-after',
         'matches-attr', 'matches-property', 'xpath', 'min-text-length', 'matches-path',
-        'remove', 'style', 'watch-attr', 'others', 'matches-media', '-abp-properties']);
+        'remove', 'style', 'watch-attr', 'others', 'matches-media', '-abp-properties',
+        'matches-prop', 'spath', 'shadow', 'remove-attr', 'remove-class']);
       // Natives quand leur argument l'est, opérateurs sinon : `:has(div)` est du CSS que
       // WebKit sait faire, `:has(div:contains(x))` ne l'est pas.
       const CONDITIONNELLES = new Set(['has', 'if', 'if-not', 'not', 'is', '-abp-has']);
@@ -279,19 +309,34 @@ enum CosmeticEngine {
       const tous = () => [...document.querySelectorAll('*')];
       const sûr = (f, repli) => { try { return f(); } catch (_) { return repli; } };
 
-      const descendre = (noeuds, css) => {
+      // Frères compris : `:scope` posé sur le parent atteint `+ .x` et `~ .y`, qu'une
+      // requête sur le nœud lui-même ne peut pas voir.
+      const cheminDepuis = (noeuds, css) => {
         if (!css) return noeuds;
-        const suite = [];
-        const combinateur = /^[>+~]/.test(css);
+        const sortie = [];
         for (const n of noeuds) {
-          if (combinateur) {
-            suite.push(...sûr(() => [...n.querySelectorAll(':scope ' + css)], []));
+          if (/^[+~]/.test(css)) {
+            const parent = n.parentElement;
+            if (!parent) continue;
+            const frères = sûr(() => [...parent.querySelectorAll(':scope > *')], []);
+            const rang = frères.indexOf(n);
+            if (rang < 0) continue;
+            const candidats = css.startsWith('+') ? frères.slice(rang + 1, rang + 2)
+                                                  : frères.slice(rang + 1);
+            const reste = css.replace(/^[+~]\s*/, '');
+            for (const f of candidats) if (sûr(() => f.matches(reste), false)) sortie.push(f);
+          } else if (/^>/.test(css)) {
+            sortie.push(...sûr(() => [...n.querySelectorAll(':scope ' + css)], []));
           } else if (sûr(() => n.matches(css), false)) {
-            suite.push(n);
+            sortie.push(n);
+          } else {
+            sortie.push(...sûr(() => [...n.querySelectorAll(css)], []));
           }
         }
-        return suite;
+        return sortie;
       };
+
+      const descendre = (noeuds, css) => cheminDepuis(noeuds, css);
 
       const ancêtre = (n, arg) => {
         const nombre = Number(arg);
@@ -348,8 +393,44 @@ enum CosmeticEngine {
             return noeuds.filter((n) => styleDe(n, arg, '::after'));
           case 'matches-attr':
             return noeuds.filter((n) => sûr(() => attributCorrespond(n, arg), false));
-          case 'matches-property':
+          case 'matches-property': case 'matches-prop':
             return noeuds.filter((n) => sûr(() => propriétéCorrespond(n, arg), false));
+          // **`:spath()` — le chemin qui suit le sujet.** Un sélecteur placé après un
+          // opérateur désigne autre chose que le sujet : un descendant, mais aussi un frère.
+          // Le repli sur `matches` couvrait le premier cas et laissait tomber le second, en
+          // silence. `:scope` sur le parent rend les frères atteignables.
+          case 'spath':
+            return cheminDepuis(noeuds, arg);
+          // Descendre dans les racines fantômes ouvertes : `querySelectorAll` n'y entre pas,
+          // et une régie qui pose son encart dans un composant y serait hors d'atteinte.
+          case 'shadow': {
+            const sortie = [];
+            const vus = new Set();
+            const descendre = (racine) => {
+              if (!racine || vus.has(racine)) return;
+              vus.add(racine);
+              sûr(() => sortie.push(...racine.querySelectorAll(arg)), null);
+              const enfants = sûr(() => [...racine.querySelectorAll('*')], []);
+              for (const el of enfants) if (el.shadowRoot) descendre(el.shadowRoot);
+            };
+            for (const n of (noeuds.length ? noeuds : [document])) {
+              descendre(n.shadowRoot || n);
+            }
+            return sortie;
+          }
+          // Deux opérateurs qui agissent au lieu de filtrer, comme `:style()` et `:remove()`.
+          case 'remove-attr': case 'remove-class': {
+            const noms = String(arg || '').split(/[|,\s]+/).filter(Boolean);
+            for (const n of noeuds) {
+              for (const nom of noms) {
+                sûr(() => op === 'remove-attr' ? n.removeAttribute(nom) : n.classList.remove(nom),
+                    null);
+              }
+            }
+            // Ils ne masquent pas : l'ensemble rendu est vide, sinon le sujet disparaîtrait
+            // en plus d'avoir perdu son attribut.
+            return [];
+          }
           case 'matches-path':
             return motif(arg)(location.pathname + location.search) ? noeuds : [];
           case 'matches-media': {

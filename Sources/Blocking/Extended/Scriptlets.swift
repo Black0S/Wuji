@@ -120,10 +120,8 @@ enum Scriptlets {
           // propriété dans le cadre d'un tiers, en revanche, serait agir chez quelqu'un
           // qu'aucune règle ne désigne.
           const __site = \(site);
-          if (__site) {
-            const __ici = location.hostname.toLowerCase();
-            if (__ici !== __site && !__ici.endsWith('.' + __site)) return;
-          }
+        \(CosmeticEngine.surLeSite)
+          if (__site && !__surLeSite(__site)) return;
         \(library)
           const appels = \(json);
           for (const appel of appels) {

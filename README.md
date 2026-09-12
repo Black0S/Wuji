@@ -456,6 +456,20 @@ sept qui manquent ne visent pas la publicité. Ce qui reste dehors partout : `xm
 `trusted-replace-argument`, et le filtrage HTML (`$$`, 197 règles) qui demande de réécrire la
 réponse avant que WebKit ne l'analyse — aucune interface publique ne le permet.
 
+**Relu contre les deux autres.** [AdGuard Mini](https://github.com/AdguardTeam/AdguardMiniForMac)
+répartit ses règles sur six bloqueurs de contenu — c'est ainsi qu'on dépasse la limite de
+cent cinquante mille par extension — et injecte `scriptlets.js`, `extended-css.js` et
+`adguard-extra` dans **tous les cadres, `about:blank` compris**.
+[uBOL](https://github.com/uBlockOrigin/uBOL-home) filtre par `declarativeNetRequest` et porte
+son propre moteur procédural. La comparaison de leurs jeux d'opérateurs avec le nôtre a
+rendu quatre manques, tous comblés depuis : `:spath()` — un sélecteur placé après un
+opérateur peut désigner un *frère*, et le repli sur `matches` laissait tomber ce cas en
+silence —, `:shadow()` pour les racines fantômes ouvertes, `:remove-attr()` et
+`:remove-class()` comme opérateurs et non seulement comme primitives, et l'alias
+`:matches-prop()`. Et le détail d'AdGuard qui manquait : un cadre `about:blank` n'a pas de
+nom d'hôte mais appartient bien à la page qui l'a créé — la garde de site les écartait tous,
+alors que beaucoup d'encarts vivent exactement là.
+
 **Les primitives sont nommées, et écrites ici.** Une liste ne nous fait pas exécuter son
 code : elle demande un geste que nous avons écrit, qu'on peut relire, et qui ne fait que ce
 que son nom dit — `set-constant`, `set-cookie`, `abort-on-property-read`, `remove-attr`… Une
