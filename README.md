@@ -909,6 +909,28 @@ moment de signer. Une copie compilée localement retombe donc sur une protection
 l'empreinte est bien vérifiée par le système, mais la clé n'y est pas liée. **La ligne des
 réglages l'écrit en toutes lettres** au lieu de laisser croire à l'Enclave.
 
+**Une condition qu'on ne comprend pas rend la règle inerte, jamais plus large.** Mesuré sur
+ce système : le compilateur accepte une clé de déclencheur qu'il ne connaît pas, et l'ignore.
+Une règle écrite `{"url-filter": ".*", "resource-type": ["script"], "load-type":
+["third-party"], "si-jamais-vu": […]}` — où c'est la dernière clé qui restreint — devient
+donc « bloquer tous les scripts tiers du web ». C'est le comportement le plus dangereux qui
+soit, et il se déclenchera à chaque capacité que WebKit ajoutera sans que Wuji le sache. Un
+balayage d'octets relève les noms de clés avant de compiler : six millisecondes par
+mégaoctet, mesuré, et il ne construit rien.
+
+Le danger inverse existe aussi, et il est plus visible : une *valeur* inconnue —
+`resource-type: ["xmlhttprequest"]`, deux conditions de domaine dans le même déclencheur,
+`request-method` en tableau — fait refuser le fichier **entier**. Des dizaines de milliers
+de règles perdues pour une. On relit alors, on écarte les fautives et l'on retente ; ce
+chemin-là ne sert que quand quelque chose a vraiment cassé, et la page dit combien de règles
+ont été écartées plutôt que de laisser croire à une liste entière.
+
+Le vocabulaire admis a été relevé sur le compilateur et non dans une documentation :
+`raw` et `csp-report` sont acceptés en `resource-type`, `xmlhttprequest` et `object` non ;
+`if-frame-url`, `unless-frame-url` et `request-method` existent et sont bel et bien
+appliqués — vérifié à l'exécution, une règle scopée par `if-frame-url` ne bloque rien sur
+un autre site.
+
 **Et cette protection-là a quitté le trousseau.** Elle y rangeait la clé comme un élément
 ordinaire, ce qui ajoutait une barrière — une autre application qui l'aurait demandée
 déclenchait une autorisation — mais coûtait bien plus cher que cela ne rapportait. Le

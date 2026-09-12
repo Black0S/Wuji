@@ -59,6 +59,9 @@ final class ContentBlocker {
     /// doigt de celui qui venait de la cocher.
     private(set) var working: [String: String] = [:]
     private(set) var failure: Failure?
+    /// Combien de règles ont été écartées par la garde, liste par liste. Dit plutôt que tu :
+    /// une liste amputée sans qu'on le sache est une liste en qui on croit à tort.
+    private(set) var dropped: [String: Int] = [:]
     /// Prévenu quand l'état change — la page se redessine, la barre rallume son bouclier.
     var onChange: (() -> Void)?
 
@@ -379,7 +382,25 @@ final class ContentBlocker {
         onChange?()
         var compiled: [WKContentRuleList] = []
         for part in parts {
-            guard let rules = await compile(identifier: part.identifier, json: part.json) else {
+            // **Une condition qu'on ne comprend pas rend la règle inerte, jamais plus
+            // large.** WebKit ignore une clé de déclencheur inconnue : une règle dont c'est
+            // justement cette clé qui restreint devient alors « bloquer tout ». Le balayage
+            // coûte six millisecondes par mégaoctet et ne construit rien — voir `RuleGuard`.
+            var json = part.json
+            if !RuleGuard.onlyKnownKeys(json), let propre = RuleGuard.filtered(json) {
+                json = propre.json
+                dropped[list.id, default: 0] += propre.dropped
+            }
+            var rules = await compile(identifier: part.identifier, json: json)
+            if rules == nil, let propre = RuleGuard.filtered(part.json) {
+                // Le chemin cher, et seulement quand quelque chose a cassé : une valeur
+                // inconnue — `resource-type: ["xmlhttprequest"]` — fait refuser le fichier
+                // **entier**. On relit, on écarte les fautives, on retente. Des dizaines de
+                // milliers de règles valent mieux qu'un fichier perdu pour une.
+                rules = await compile(identifier: part.identifier, json: propre.json)
+                if rules != nil { dropped[list.id, default: 0] += propre.dropped }
+            }
+            guard let rules else {
                 // WebKit refuse une liste qu'il ne sait pas lire, et ne dit pas laquelle des
                 // cent mille règles l'a gênée. On nomme le fichier : c'est ce qu'il faut
                 // pour aller voir dans le dépôt.

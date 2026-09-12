@@ -375,9 +375,51 @@ extension Scriptlets {
               const el = document.currentScript;
               return el && el.tagName === 'SCRIPT' && !el.src ? (el.textContent || '') : null;
             };
+
+            // **Une fonction reste une fonction.** Remplacer `addEventListener` par un
+            // accesseur paraît équivalent — la lecture rend la même chose — mais
+            // `Object.getOwnPropertyDescriptor()` rend alors un descripteur sans `value`.
+            // Le polyfill Shady DOM de YouTube recopie ce descripteur pour fabriquer
+            // `__shady_addEventListener` : il y copiait `undefined`, et la page mourait sur
+            // « undefined is not an object ». Mesuré : deux liens vidéo sur l'accueil, puis
+            // zéro, et la page restait à son squelette.
+            //
+            // On enveloppe donc l'appel au lieu de piéger la lecture. L'intention de la
+            // règle est tenue — le script en ligne qui correspond est arrêté quand il s'en
+            // sert — et rien ne change pour les autres.
+            if (typeof gardée === 'function') {
+              const original = gardée;
+              const enveloppe = function (...args) {
+                const texte = courant();
+                if (texte !== null && teste(texte)) throw new ReferenceError(clé);
+                return original.apply(this, args);
+              };
+              // Le nom et la signature sont recopiés : un site qui les inspecte ne doit pas
+              // découvrir l'enveloppe.
+              try {
+                Object.defineProperty(enveloppe, 'name', { value: original.name });
+                Object.defineProperty(enveloppe, 'length', { value: original.length });
+                enveloppe.toString = () => original.toString();
+              } catch (_) {}
+              try {
+                Object.defineProperty(objet, clé, {
+                  configurable: true, writable: true, value: enveloppe
+                });
+              } catch (_) {}
+              return;
+            }
+
             try {
               Object.defineProperty(objet, clé, {
-                configurable: false,
+                // **`configurable: true`, et c'est tout le correctif.** Cette primitive ne
+                // scelle pas une propriété : elle arrête *un* script en ligne et laisse
+                // passer tout le monde. La sceller empêchait la page de la redéfinir —
+                // `Object.defineProperty` y lève une `TypeError` — et YouTube, qui remplace
+                // `EventTarget.prototype.addEventListener` à son démarrage, s'arrêtait là :
+                // le squelette s'affichait, les vignettes n'arrivaient jamais. Mesuré, avec
+                // les trois règles génériques de la liste d'uBlock : deux liens vidéo sur
+                // l'accueil, puis zéro.
+                configurable: true,
                 get() {
                   const texte = courant();
                   if (texte !== null && teste(texte)) throw new ReferenceError(clé);

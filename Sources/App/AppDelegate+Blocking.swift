@@ -337,6 +337,11 @@ extension AppDelegate {
                                                  : await blocking.install(list)
                 if let failure {
                     layout.toast.show("« \(list.name) » : \(failure)")
+                } else if let écartées = blocking.dropped[list.id], écartées > 0 {
+                    // **Une liste amputée se dit.** Une liste en qui on croit à tort est
+                    // pire qu'une liste absente : on cesse de chercher ailleurs.
+                    layout.toast.show("« \(list.name) » en service — \(list.rules) règles, "
+                        + "\(écartées) écartée\(écartées > 1 ? "s" : "") faute d'être comprises")
                 } else {
                     layout.toast.show("« \(list.name) » en service — \(list.rules) règles")
                 }
