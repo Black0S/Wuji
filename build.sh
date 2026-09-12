@@ -52,13 +52,15 @@ cp Sources/PublicSuffix/Data/*.bin "$APP/Contents/Resources/"
 #   WUJI_IDENTITY="Apple Development: …"  ./build.sh     — pour une fois
 #   echo auto > .identite-signature                      — une fois pour toutes
 . "$(dirname "$0")/tools/signature.sh"
-IDENTITE="$(wuji_identite)"
+# `|| true` en plus du `return 0` de la fonction : une ceinture et des bretelles pour une
+# ligne dont l'échec, la dernière fois, a produit un paquet non signé en silence.
+IDENTITE="$(wuji_identite || true)"
 if [ -n "$IDENTITE" ]; then
     # **On ne retombe pas sur l'ad-hoc en silence.** L'identité a été demandée
     # explicitement ; signer autrement donnerait une application qui ressemble à ce qu'on
     # voulait sans l'être, et l'on chercherait longtemps pourquoi le coffre redemande le
     # mot de passe du trousseau.
-    DROITS="$(wuji_droits "$IDENTITE")"
+    DROITS="$(wuji_droits "$IDENTITE" || true)"
     if [ -n "$DROITS" ]; then
         SIGNE=(codesign --force --sign "$IDENTITE" --entitlements "$DROITS" --generate-entitlement-der "$APP")
     else

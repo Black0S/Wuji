@@ -104,7 +104,7 @@ plutil -replace CFBundleVersion -string "$CONSTRUCTION" .build/Wuji.app/Contents
 #
 # Sans ce droit, `SecItemAdd` rend -34018 et Wuji retombe sur sa protection logicielle —
 # ce qu'il dit alors dans ses réglages, plutôt que de laisser croire à l'Enclave.
-DROITS="$(wuji_droits "$IDENTITE")"
+DROITS="$(wuji_droits "$IDENTITE" || true)"
 if [ -n "$DROITS" ]; then
   echo "→ droits : keychain-access-groups $(wuji_equipe "$IDENTITE").com.wuji.browser"
 else

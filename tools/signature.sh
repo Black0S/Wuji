@@ -41,8 +41,12 @@ wuji_identite() {
     if [ -z "$demande" ] && [ -f "$WUJI_RACINE/.identite-signature" ]; then
         demande="$(tr -d '[:space:]' < "$WUJI_RACINE/.identite-signature" | head -1)"
     fi
-    [ -n "$demande" ] || return
-    if [ "$demande" != "auto" ]; then echo "$demande"; return; fi
+    # **`return 0` et non `return`.** Un `return` nu rend l'état de la dernière commande —
+    # ici le test qui vient d'échouer, donc 1. Sous `set -e`, une affectation par
+    # substitution propage cet état : `build.sh` mourait juste avant de signer, et sortait
+    # un paquet sans signature sans un mot. Ne rien avoir à dire n'est pas une erreur.
+    [ -n "$demande" ] || return 0
+    if [ "$demande" != "auto" ]; then echo "$demande"; return 0; fi
 
     local liste
     liste="$(security find-identity -v -p codesigning 2>/dev/null || true)"
@@ -50,8 +54,9 @@ wuji_identite() {
     for motif in "Developer ID Application" "Apple Development" "Apple Distribution"; do
         local trouvee
         trouvee="$(printf '%s\n' "$liste" | grep "$motif" | head -1 | sed 's/.*"\(.*\)"/\1/' || true)"
-        if [ -n "$trouvee" ]; then echo "$trouvee"; return; fi
+        if [ -n "$trouvee" ]; then echo "$trouvee"; return 0; fi
     done
+    return 0
 }
 
 # L'identifiant d'équipe lu dans le certificat, jamais écrit en dur : il diffère d'une
@@ -75,7 +80,7 @@ wuji_droits() {
     local identite="$1" fichier="${2:-.build/wuji.entitlements}"
     local equipe
     equipe="$(wuji_equipe "$identite")"
-    [ -n "$equipe" ] || { rm -f "$fichier"; return; }
+    [ -n "$equipe" ] || { rm -f "$fichier"; return 0; }
     cat > "$fichier" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

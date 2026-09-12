@@ -63,8 +63,23 @@ else
 fi
 
 echo "→ paquet"
-./build.sh release >/dev/null && codesign --verify --strict .build/Wuji.app \
-    && echo "  ✓ .build/Wuji.app assemblé et signé" || STATUT=1
+# **Le sceau est vérifié à part.** `build.sh` a déjà sorti un paquet sans signature sans le
+# dire : la fonction qui cherche l'identité rendait 1 quand il n'y avait rien à trouver, et
+# `set -e` tuait le script juste avant de signer. Le contrôle du sceau nomme la panne au lieu
+# de la laisser sous un « ✗ » muet.
+if ! ./build.sh release >/dev/null; then
+    echo "  ✗ l'assemblage du paquet a échoué"
+    STATUT=1
+elif [ ! -d .build/Wuji.app/Contents/_CodeSignature ]; then
+    echo "  ✗ paquet assemblé mais **non signé** — pas de Contents/_CodeSignature"
+    STATUT=1
+elif ! codesign --verify --strict .build/Wuji.app 2>/dev/null; then
+    echo "  ✗ la signature du paquet ne se vérifie pas"
+    codesign --verify --strict --verbose=2 .build/Wuji.app 2>&1 | sed 's/^/    /'
+    STATUT=1
+else
+    echo "  ✓ .build/Wuji.app assemblé et signé"
+fi
 
 [ "$STATUT" -eq 0 ] && echo "→ tout est vert" || echo "→ il reste des erreurs"
 exit "$STATUT"
