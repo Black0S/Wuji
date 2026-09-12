@@ -56,7 +56,10 @@ enum Scriptlets {
         "nobab": "prevent-bab",
         "cookie-remover": "remove-cookie",
         "trusted-set-attr": "set-attr",
-        "abp-contains": "contains"
+        "abp-contains": "contains",
+        "trusted-replace-fetch-response": "replace-fetch-response",
+        "trusted-replace-xhr-response": "replace-xhr-response",
+        "trusted-set": "set-constant"
     ]
 
     /// Ce que la bibliothèque sait faire. Un nom absent d'ici n'est pas envoyé à la page :
@@ -72,7 +75,9 @@ enum Scriptlets {
         "prevent-element-src-loading", "prevent-bab",
         "remove-attr", "remove-class", "remove-node-text", "replace-node-text",
         "json-prune", "href-sanitizer", "click-element", "nowebrtc", "log",
-        "set-attr", "hide-in-shadow-dom", "trusted-suppress-native-method"
+        "set-attr", "hide-in-shadow-dom", "trusted-suppress-native-method",
+        "json-prune-fetch-response", "json-prune-xhr-response",
+        "replace-fetch-response", "replace-xhr-response", "trusted-prevent-dom-bypass"
     ]
 
     /// `ubo-aopr.js` → `abort-on-property-read`.

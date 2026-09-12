@@ -51,6 +51,10 @@ extension Scriptlets {
           case 'yes': return 'yes';
           case 'no': return 'no';
           default: {
+            // `json:` — ce que `trusted-set` emploie pour poser autre chose qu'un scalaire.
+            if (typeof v === 'string' && v.startsWith('json:')) {
+              try { return JSON.parse(v.slice(5)); } catch (_) { return undefined; }
+            }
             const n = Number(v);
             return Number.isNaN(n) ? v : n;
           }
@@ -128,6 +132,159 @@ extension Scriptlets {
           }
         };
       })();
+
+      // **Un chemin JSON peut porter des jokers.** Les règles de YouTube écrivent
+      // `entries.[-].command.reelWatchEndpoint.adClientParams.isAd` : `[]`, `[-]` et `*`
+      // veulent tous dire « n'importe quel élément à ce niveau ». Un lecteur de chemin qui
+      // ne saurait que les points laisserait passer la moitié des règles qui comptent.
+      const joker = (c) => c === '*' || c === '[]' || c === '[-]';
+
+      const parcourir = (objet, parts, faire) => {
+        if (objet === null || typeof objet !== 'object') return;
+        if (parts.length === 1) return faire(objet, parts[0]);
+        const [tête, ...reste] = parts;
+        if (joker(tête)) {
+          for (const clé of Object.keys(objet)) parcourir(objet[clé], reste, faire);
+        } else if (tête in objet) {
+          parcourir(objet[tête], reste, faire);
+        }
+      };
+
+      const lireChemin = (objet, chemin) => {
+        let courant = objet;
+        for (const part of chemin.split('.')) {
+          if (courant === null || courant === undefined) return undefined;
+          if (joker(part)) {
+            const clés = Object.keys(courant);
+            if (!clés.length) return undefined;
+            courant = courant[clés[0]];
+          } else {
+            courant = courant[part];
+          }
+        }
+        return courant;
+      };
+
+      // Rend une fonction qui élague un objet, ou le laisse tel quel si les conditions
+      // demandées n'y sont pas : une règle qui exige `playerResponse` ne doit pas toucher
+      // à une réponse qui n'en a pas.
+      const élagueur = (àRetirer, requis) => {
+        const chemins = String(àRetirer || '').split(/\s+/).filter(Boolean);
+        const nécessaires = String(requis || '').split(/\s+/).filter(Boolean);
+        return (objet) => {
+          if (!objet || typeof objet !== 'object' || !chemins.length) return objet;
+          if (nécessaires.length
+              && !nécessaires.every((c) => lireChemin(objet, c) !== undefined)) return objet;
+          for (const chemin of chemins) {
+            const parts = chemin.split('.');
+            parcourir(objet, parts, (parent, clé) => {
+              if (parent && typeof parent === 'object') {
+                if (joker(clé)) { for (const k of Object.keys(parent)) delete parent[k]; }
+                else delete parent[clé];
+              }
+            });
+          }
+          return objet;
+        };
+      };
+
+      // Les guillemets simples d'une règle ne font pas partie du motif : `'"adPlacements"'`
+      // veut dire la chaîne `"adPlacements"`, guillemets doubles compris.
+      const dénuder = (t) => {
+        const s = String(t === undefined ? '' : t);
+        return /^'.*'$/s.test(s) ? s.slice(1, -1) : s;
+      };
+
+      // Un motif de remplacement : expression régulière entre barres, ou texte littéral.
+      const remplaceur = (motifTexte, remplacement) => {
+        const brut = dénuder(motifTexte);
+        const vers = dénuder(remplacement);
+        if (!brut) return null;
+        if (brut.length > 2 && brut.startsWith('/') && brut.lastIndexOf('/') > 0) {
+          const fin = brut.lastIndexOf('/');
+          try {
+            const drapeaux = brut.slice(fin + 1) || 'g';
+            const re = new RegExp(brut.slice(1, fin),
+                                  drapeaux.includes('g') ? drapeaux : drapeaux + 'g');
+            return (texte) => texte.replace(re, vers);
+          } catch (_) { return null; }
+        }
+        return (texte) => texte.split(brut).join(vers);
+      };
+
+      // **Réécrire une réponse réseau.** C'est le seul endroit où l'on peut retirer les
+      // emplacements publicitaires d'un lecteur qui les reçoit en JSON, après le chargement
+      // de la page : ni une règle de blocage ni une feuille de style n'y ont accès.
+      //
+      // Une tâche par règle, un seul détournement de `fetch` et un seul de `XMLHttpRequest` :
+      // dix règles sur la même page ne doivent pas empiler dix couches d'enveloppes.
+      const tâchesFetch = [];
+      const tâchesXhr = [];
+      let fetchPosé = false;
+      let xhrPosé = false;
+
+      const poserFetch = () => {
+        if (fetchPosé) return;
+        fetchPosé = true;
+        const original = window.fetch;
+        if (typeof original !== 'function') return;
+        window.fetch = function (entrée, options) {
+          const url = typeof entrée === 'string' ? entrée
+                    : (entrée && entrée.url) ? entrée.url : String(entrée);
+          const tâches = tâchesFetch.filter((t) => t.teste(url));
+          const promesse = original.call(this, entrée, options);
+          if (!tâches.length) return promesse;
+          return promesse.then((réponse) => {
+            if (!réponse || !réponse.ok) return réponse;
+            return réponse.clone().text().then((texte) => {
+              let sortie = texte;
+              for (const t of tâches) { try { sortie = t.changer(sortie); } catch (_) {} }
+              if (sortie === texte) return réponse;
+              const neuve = new Response(sortie, { status: réponse.status,
+                                                   statusText: réponse.statusText,
+                                                   headers: réponse.headers });
+              // `url` n'est pas copiée par le constructeur, et du code la lit.
+              try { Object.defineProperty(neuve, 'url', { value: réponse.url }); } catch (_) {}
+              return neuve;
+            }).catch(() => réponse);
+          });
+        };
+      };
+
+      // **Une sous-classe, pas un détournement de `send`.** `responseText` est en lecture
+      // seule : la seule façon de rendre autre chose est de redéfinir l'accesseur, donc
+      // d'hériter. Poser un écouteur dans `send` arriverait après celui de la page.
+      const poserXhr = () => {
+        if (xhrPosé) return;
+        xhrPosé = true;
+        const Base = window.XMLHttpRequest;
+        if (typeof Base !== 'function') return;
+        window.XMLHttpRequest = class extends Base {
+          open(méthode, url, ...reste) {
+            this.__wujiUrl = String(url);
+            return super.open(méthode, url, ...reste);
+          }
+          __wujiChanger(texte) {
+            if (typeof texte !== 'string' || !texte) return texte;
+            if (this.__wujiSource === texte) return this.__wujiSortie;
+            let sortie = texte;
+            for (const t of tâchesXhr) {
+              if (!t.teste(this.__wujiUrl || '')) continue;
+              try { sortie = t.changer(sortie); } catch (_) {}
+            }
+            this.__wujiSource = texte;
+            this.__wujiSortie = sortie;
+            return sortie;
+          }
+          get responseText() { return this.__wujiChanger(super.responseText); }
+          get response() {
+            const brut = super.response;
+            // Une réponse déjà décodée — `json`, `blob` — n'est pas du texte : on ne
+            // prétend pas la réécrire.
+            return typeof brut === 'string' ? this.__wujiChanger(brut) : brut;
+          }
+        };
+      };
 
       const élémentsDe = (sélecteur) => {
         try { return [...document.querySelectorAll(sélecteur)]; } catch (_) { return []; }
@@ -458,25 +615,77 @@ extension Scriptlets {
           });
         },
 
+        // --- Réécriture des réponses réseau ---
+        //
+        // **C'est ce qui bloque les publicités de YouTube.** Les emplacements arrivent dans
+        // le JSON de `/youtubei/v1/player`, demandé par `fetch` après le chargement : aucune
+        // règle de blocage ne peut le refuser — c'est la même requête qui porte la vidéo —
+        // et aucune feuille de style ne le voit. Il faut lire la réponse et en retirer les
+        // emplacements avant que le lecteur ne la lise.
+
+        'json-prune-fetch-response': (àRetirer, requis, où) => {
+          const élague = élagueur(àRetirer, requis);
+          const teste = motif(où);
+          poserFetch();
+          tâchesFetch.push({ teste, changer: (texte) => {
+            const objet = JSON.parse(texte);
+            return JSON.stringify(élague(objet));
+          } });
+        },
+
+        'json-prune-xhr-response': (àRetirer, requis, où) => {
+          const élague = élagueur(àRetirer, requis);
+          const teste = motif(où);
+          poserXhr();
+          tâchesXhr.push({ teste, changer: (texte) => {
+            const objet = JSON.parse(texte);
+            return JSON.stringify(élague(objet));
+          } });
+        },
+
+        'replace-fetch-response': (motifTexte, remplacement, où) => {
+          const changer = remplaceur(motifTexte, remplacement);
+          if (!changer) return;
+          poserFetch();
+          tâchesFetch.push({ teste: motif(où), changer });
+        },
+
+        'replace-xhr-response': (motifTexte, remplacement, où) => {
+          const changer = remplaceur(motifTexte, remplacement);
+          if (!changer) return;
+          poserXhr();
+          tâchesXhr.push({ teste: motif(où), changer });
+        },
+
+        // **Le site ne récupère pas un `fetch` neuf en passant par un cadre.** C'est la
+        // parade connue contre le détournement : créer un `<iframe>`, y lire la fonction
+        // d'origine que personne n'a touchée, et s'en servir. On repose donc la nôtre dans
+        // le cadre au moment où il entre dans le document.
+        'trusted-prevent-dom-bypass': (chemin, propriétés) => {
+          const noms = String(propriétés || 'fetch').split(/[\s,|]+/).filter(Boolean);
+          auBout(window, chemin || 'Node.prototype.appendChild', (objet, clé) => {
+            const original = objet[clé];
+            if (typeof original !== 'function') return;
+            try {
+              objet[clé] = function (...args) {
+                const rendu = original.apply(this, args);
+                try {
+                  const noeud = args[0];
+                  if (noeud && noeud.tagName === 'IFRAME' && noeud.contentWindow) {
+                    for (const nom of noms) {
+                      if (window[nom] !== undefined) noeud.contentWindow[nom] = window[nom];
+                    }
+                  }
+                } catch (_) {}
+                return rendu;
+              };
+            } catch (_) {}
+          });
+        },
+
         'json-prune': (àRetirer, requis) => {
-          const chemins = String(àRetirer || '').split(/\s+/).filter(Boolean);
-          const nécessaires = String(requis || '').split(/\s+/).filter(Boolean);
-          if (!chemins.length) return;
-          const lire = (objet, chemin) => chemin.split('.').reduce(
-            (o, c) => (o === undefined || o === null ? o : o[c]), objet);
-          const élaguer = (objet) => {
-            if (!objet || typeof objet !== 'object') return objet;
-            if (nécessaires.length
-                && !nécessaires.every((c) => lire(objet, c) !== undefined)) return objet;
-            for (const chemin of chemins) {
-              const parts = chemin.split('.');
-              const clé = parts.pop();
-              const parent = parts.reduce(
-                (o, c) => (o === undefined || o === null ? o : o[c]), objet);
-              if (parent && typeof parent === 'object') delete parent[clé];
-            }
-            return objet;
-          };
+          if (!String(àRetirer || '').trim()) return;
+          const élaguer = élagueur(àRetirer, requis);
           const analyser = JSON.parse;
           JSON.parse = function (...reste) { return élaguer(analyser.apply(this, reste)); };
           if (window.Response && Response.prototype.json) {

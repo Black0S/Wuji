@@ -433,13 +433,28 @@ la conversion les avait écartés pour le marqueur de la règle, pas pour leur c
 renvoie en feuille de style plutôt qu'au moteur : sans cela, une seule règle générique aurait
 imposé l'évaluateur et son observateur de mutations à **toutes** les pages.
 
-**Ce qui est appliqué, compté.** Sur les 58 666 règles des cinquante annexes : **98,2 %**
+**Ce qui est appliqué, compté.** Sur les 58 666 règles des cinquante annexes : **98,5 %**
 sont posées. Les styles, tous ; les sélecteurs procéduraux, 15 542 sur 15 554 — les douze qui
 restent sont des coquilles des listes d'origine, `:rgba()` ou `:translate()` pris pour des
-opérateurs ; les primitives nommées, 97 %. Ce qui manque tient en deux familles : celles qui
-réécrivent une réponse réseau — `json-prune-fetch-response`, `xml-prune`,
-`trusted-replace-xhr-response` — et le filtrage HTML (`$$`, 197 règles), qui demande de
-réécrire la réponse avant que WebKit ne l'analyse : aucune interface publique ne le permet.
+opérateurs ; les primitives nommées, 98 %.
+
+**Réécrire une réponse réseau, et pourquoi il le fallait.** Les publicités de YouTube ne
+s'attrapent ni par une règle de blocage ni par une feuille de style : les emplacements
+arrivent dans le JSON de `/youtubei/v1/player`, demandé par `fetch` après le chargement, et
+c'est la même requête qui porte la vidéo — la refuser, c'est refuser la vidéo. Il faut lire
+la réponse et en retirer les emplacements avant que le lecteur ne la lise. D'où
+`json-prune-fetch-response`, `json-prune-xhr-response` et les deux `replace-*-response`, avec
+les chemins à jokers que ces règles emploient — `entries.[-].command.…`. `XMLHttpRequest` est
+sous-classé plutôt que détourné : `responseText` est en lecture seule, et un écouteur posé
+dans `send` arriverait après celui de la page. S'y ajoute `trusted-prevent-dom-bypass`, qui
+repose notre `fetch` dans les cadres qu'un site crée pour en récupérer un neuf — la parade
+connue contre le détournement.
+
+Sur `www.youtube.com`, une page reçoit ainsi **82 règles**, dont les trois familles de
+réécriture ; les primitives que les listes y demandent sont appliquées à **91 %**, et les
+sept qui manquent ne visent pas la publicité. Ce qui reste dehors partout : `xml-prune` et
+`trusted-replace-argument`, et le filtrage HTML (`$$`, 197 règles) qui demande de réécrire la
+réponse avant que WebKit ne l'analyse — aucune interface publique ne le permet.
 
 **Les primitives sont nommées, et écrites ici.** Une liste ne nous fait pas exécuter son
 code : elle demande un geste que nous avons écrit, qu'on peut relire, et qui ne fait que ce
