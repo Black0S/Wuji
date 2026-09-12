@@ -64,14 +64,18 @@ extension AppDelegate {
         let payload = injectionPayload(for: url)
         guard !payload.isEmpty else { return }
 
+        // **Dans tous les cadres, pas seulement le principal.** La moitié des encarts d'un
+        // site vivent dans un `<iframe>` qu'il sert lui-même, et les règles écrites pour lui
+        // ne les atteignaient pas. Chaque script vérifie chez qui il se réveille : le cadre
+        // d'un tiers reçoit le code mais pas les règles, qui ne sont pas les siennes.
         if let moteur = CosmeticEngine.script(for: payload) {
             controller.addUserScript(WKUserScript(source: moteur, injectionTime: .atDocumentStart,
-                                                  forMainFrameOnly: true, in: .defaultClient))
+                                                  forMainFrameOnly: false, in: .defaultClient))
         }
         if !payload.scriptlets.isEmpty {
-            controller.addUserScript(WKUserScript(source: Scriptlets.script(for: payload.scriptlets),
-                                                  injectionTime: .atDocumentStart,
-                                                  forMainFrameOnly: true, in: .page))
+            controller.addUserScript(WKUserScript(
+                source: Scriptlets.script(for: payload.scriptlets, host: payload.host),
+                injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
         }
     }
 }

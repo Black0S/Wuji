@@ -162,6 +162,50 @@ struct ExtendedRulesTests {
         try? FileManager.default.removeItem(at: dossier)
     }
 
+    @Test func lesReglesDunSiteNeSortentPasDeChezLui() {
+        // **Le moteur est posé dans tous les cadres**, parce que la moitié des encarts d'un
+        // site vivent dans un `<iframe>` qu'il sert lui-même. Un cadre d'un tiers reçoit donc
+        // le script : chaque variante vérifie chez qui elle se réveille avant d'agir.
+        let règles = ExtendedRules(
+            styles: [.init(domains: ["exemple.fr"], selector: ".pub", declarations: "display: none")],
+            procedural: [.init(domains: ["exemple.fr"], selector: "div:contains(Pub)")],
+            scriptlets: [.init(domains: ["exemple.fr"], name: "set-constant", args: ["a", "1"])])
+        let p = magasin(règles).payload(for: "exemple.fr")
+        #expect(p.host == "exemple.fr")
+
+        for variante in [CosmeticEngine.script(for: p),
+                         CosmeticEngine.script(for: { var q = p; q.procedural = []; return q }()),
+                         CosmeticEngine.script(for: { var q = p; q.procedural = []
+                                                      q.removals = [".x"]; return q }())] {
+            let js = try? #require(variante)
+            #expect(js?.contains("location.hostname") == true)
+            #expect(js?.contains("exemple.fr") == true)
+        }
+        #expect(Scriptlets.script(for: p.scriptlets, host: p.host)
+            .contains(#"const __site = "exemple.fr";"#))
+        // Sans site — une charge sans domaine —, la garde est là mais désarmée : elle
+        // n'aurait rien à comparer, et refuser tout vaudrait ne rien appliquer du tout.
+        #expect(Scriptlets.script(for: p.scriptlets).contains(#"const __site = "";"#))
+    }
+
+    @Test func ceQueLeMoteurNeSaitPasFaireNeMasqueRien() throws {
+        // **Le principe le plus important de tout ce fichier.** Un opérateur inconnu qui
+        // laisse passer l'ensemble reviendrait à ignorer la condition : `div:jamais-vu(x)`
+        // masquerait alors tous les `div`. Mieux vaut une règle sans effet qu'une règle qui
+        // emporte la page. Le moteur rend donc l'ensemble vide par défaut.
+        var charge = ExtendedStore.Payload()
+        charge.procedural = ["div:jamais-vu(x)"]
+        // Les espaces sont écrasés avant de comparer : un essai qui dépend de
+        // l'indentation casse au premier reformatage, pour une raison qui n'en est pas une.
+        let js = try #require(CosmeticEngine.script(for: charge))
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        #expect(js.contains("default: return [];"))
+        // Et `:others()`, le seul opérateur qui rend plus qu'il ne reçoit, refuse de
+        // travailler sur un ensemble vide : sinon un sujet absent masquait la page entière.
+        #expect(js.contains("case 'others': {"))
+        #expect(js.contains("if (!noeuds.length) return [];"))
+    }
+
     @Test func leMoteurNePartQueSilADuTravail() {
         var feuille = ExtendedStore.Payload()
         feuille.css = ".pub { display: none }"

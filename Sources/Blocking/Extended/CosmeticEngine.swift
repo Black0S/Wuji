@@ -36,7 +36,7 @@ enum CosmeticEngine {
         // exactement ce qu'on reproche à un bloqueur d'extension.
         guard travail else {
             guard !payload.css.isEmpty else { return nil }
-            return "(() => {\n" + feuilleSeule(payload.css) + "\n})();"
+            return "(() => {\n" + feuilleSeule(payload.css, payload.host) + "\n})();"
         }
 
         if !compliqué {
@@ -44,7 +44,7 @@ enum CosmeticEngine {
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
             return """
             (() => {
-            \(feuilleSeule(payload.css))
+            \(feuilleSeule(payload.css, payload.host))
               const sélecteurs = \(json);
             \(remover)
             })();
@@ -52,6 +52,7 @@ enum CosmeticEngine {
         }
 
         let charge: [String: Any] = [
+            "host": payload.host,
             "css": payload.css,
             "procedural": payload.procedural,
             "styled": payload.styled,
@@ -62,8 +63,25 @@ enum CosmeticEngine {
         return "(() => {\nconst charge = \(json);\n" + engine + "\n})();"
     }
 
+    /// Le cadre est-il celui du site pour lequel ces règles ont été choisies ?
+    ///
+    /// Posée dans chaque variante du script, parce que chacune est injectée dans tous les
+    /// cadres du document — y compris ceux d'un autre domaine, à qui ces règles n'appartiennent
+    /// pas.
+    private static func garde(_ host: String) -> String {
+        guard !host.isEmpty else { return "" }
+        let encodé = (try? JSONSerialization.data(withJSONObject: [host]))
+            .flatMap { String(data: $0, encoding: .utf8) }
+            .map { String($0.dropFirst().dropLast()) } ?? "\"\""
+        return """
+          const __site = \(encodé);
+          const __ici = location.hostname.toLowerCase();
+          if (__ici !== __site && !__ici.endsWith('.' + __site)) return;
+        """
+    }
+
     /// La feuille, et rien d'autre : le cas de la plupart des pages.
-    private static func feuilleSeule(_ css: String) -> String {
+    private static func feuilleSeule(_ css: String, _ host: String) -> String {
         guard !css.isEmpty else { return "" }
         let encodé = (try? JSONSerialization.data(withJSONObject: [css]))
             .flatMap { String(data: $0, encoding: .utf8) }
@@ -71,6 +89,7 @@ enum CosmeticEngine {
         return """
           if (window.__wujiCosmetic) return;
           window.__wujiCosmetic = true;
+        \(garde(host))
           const feuille = document.createElement('style');
           feuille.id = '__wujiCosmetic';
           feuille.textContent = \(encodé);
@@ -104,6 +123,15 @@ enum CosmeticEngine {
       if (window.__wujiCosmetic) return;
       window.__wujiCosmetic = true;
 
+      // **Les règles d'un site ne s'appliquent pas dans le cadre d'un autre.** Le moteur est
+      // posé dans tous les cadres — c'est ce qui permet d'atteindre les contenus d'un
+      // `<iframe>` du même site, où la moitié des encarts vivent. Un cadre d'un tiers, lui,
+      // reçoit le script mais pas les règles : elles ne sont pas les siennes.
+      if (charge.host) {
+        const ici = location.hostname.toLowerCase();
+        if (ici !== charge.host && !ici.endsWith('.' + charge.host)) return;
+      }
+
       // --- La feuille : ce qui n'a pas besoin d'être évalué ---
       if (charge.css) {
         const poser = () => {
@@ -118,10 +146,44 @@ enum CosmeticEngine {
         else document.addEventListener('readystatechange', poser, { once: true });
       }
 
+      // Les virgules de premier niveau — hors parenthèses, crochets et guillemets.
+      const branches = (sel) => {
+        const morceaux = [];
+        let début = 0, prof = 0, crochet = 0, q = null;
+        for (let i = 0; i < sel.length; i++) {
+          const c = sel[i];
+          if (q) { if (c === '\\') i++; else if (c === q) q = null; continue; }
+          if (c === '"' || c === "'") q = c;
+          else if (c === '(') prof++;
+          else if (c === ')') prof--;
+          else if (c === '[') crochet++;
+          else if (c === ']') crochet--;
+          else if (c === ',' && !prof && !crochet) {
+            morceaux.push(sel.slice(début, i).trim());
+            début = i + 1;
+          }
+        }
+        morceaux.push(sel.slice(début).trim());
+        return morceaux.filter(Boolean);
+      };
+
       const règles = [];
-      for (const sel of charge.procedural) règles.push({ sel, action: 'masquer' });
-      for (const [sel, décl] of charge.styled) règles.push({ sel, action: 'style', décl });
-      for (const sel of charge.removals) règles.push({ sel, action: 'retirer' });
+      // **Découpé une fois, pas à chaque passe.** Le découpage est de l'analyse de chaîne :
+      // le refaire pour chaque règle à chaque mutation, c'est mille quatre cents analyses
+      // par seconde sur une page qui bouge, pour un résultat qui ne change jamais.
+      const ajouter = (sel, action, décl) => {
+        // **Une liste se scinde ici, une fois pour toutes.** `a:contains(x), b` est une
+        // liste de deux sélecteurs ; l'évaluer d'un bloc faisait tomber la virgule dans le
+        // CSS qui suit un opérateur, où `.matches(', b')` ne vaut rien — la règle entière
+        // ne masquait plus rien, silencieusement. Mesuré sur le dépôt : 250 sélecteurs
+        // étendus portent une virgule de premier niveau, soit un et demi pour cent.
+        for (const branche of branches(sel)) {
+          règles.push({ sel: branche, étapes: null, action, décl });
+        }
+      };
+      for (const sel of charge.procedural) ajouter(sel, 'masquer');
+      for (const [sel, décl] of charge.styled) ajouter(sel, 'style', décl);
+      for (const sel of charge.removals) ajouter(sel, 'retirer');
       if (!règles.length) return;
 
       // --- Découper un sélecteur en étapes ---
@@ -129,7 +191,7 @@ enum CosmeticEngine {
       const ÉTENDUES = new Set(['contains', 'has-text', '-abp-contains', 'upward',
         'nth-ancestor', 'matches-css', 'matches-css-before', 'matches-css-after',
         'matches-attr', 'matches-property', 'xpath', 'min-text-length', 'matches-path',
-        'remove', 'style', 'watch-attr', 'others']);
+        'remove', 'style', 'watch-attr', 'others', 'matches-media', '-abp-properties']);
       // Natives quand leur argument l'est, opérateurs sinon : `:has(div)` est du CSS que
       // WebKit sait faire, `:has(div:contains(x))` ne l'est pas.
       const CONDITIONNELLES = new Set(['has', 'if', 'if-not', 'not', 'is', '-abp-has']);
@@ -278,7 +340,7 @@ enum CosmeticEngine {
           }
           case 'upward': case 'nth-ancestor':
             return noeuds.map((n) => ancêtre(n, arg)).filter(Boolean);
-          case 'matches-css':
+          case 'matches-css': case '-abp-properties':
             return noeuds.filter((n) => styleDe(n, arg, null));
           case 'matches-css-before':
             return noeuds.filter((n) => styleDe(n, arg, '::before'));
@@ -290,6 +352,42 @@ enum CosmeticEngine {
             return noeuds.filter((n) => sûr(() => propriétéCorrespond(n, arg), false));
           case 'matches-path':
             return motif(arg)(location.pathname + location.search) ? noeuds : [];
+          case 'matches-media': {
+            // Une garde, comme `:matches-path()` : la règle vaut ou ne vaut pas, elle ne
+            // filtre rien.
+            const ok = sûr(() => matchMedia(arg.trim()).matches, false);
+            return ok ? noeuds : [];
+          }
+          // **`:others()` garde ce qui n'a rien à voir avec le sujet.** C'est le geste
+          // « masque tout le reste » : ni le sujet, ni ses ancêtres, ni ses descendants.
+          // Il était absent de la table tout en étant déclaré étendu : il retombait sur le
+          // cas par défaut, qui rend l'ensemble tel quel — autrement dit `div:others()`
+          // masquait **tous** les `div`, sujet compris. Soixante-cinq règles du dépôt
+          // l'emploient.
+          case 'others': {
+            // **Un sujet absent ne fait pas disparaître la page.** C'est le seul opérateur
+            // qui rend *plus* d'éléments qu'il n'en reçoit : avec un ensemble vide, « tout
+            // ce qui n'est pas le sujet » est la page entière. La garde générale ne pouvait
+            // rien — elle regarde le résultat, qui n'est pas vide, justement.
+            if (!noeuds.length) return [];
+            const sujets = new Set(noeuds);
+            const parents = new Set();
+            for (const n of noeuds) {
+              let p = n.parentElement;
+              while (p) { parents.add(p); p = p.parentElement; }
+            }
+            // Sous `body` seulement : `html`, `head` et les scripts ne sont « le reste »
+            // de rien, et les masquer n'aurait aucun sens.
+            return [...(document.body || document).querySelectorAll('*')].filter((el) => {
+              if (sujets.has(el) || parents.has(el)) return false;
+              for (const n of sujets) if (n.contains(el)) return false;
+              return true;
+            });
+          }
+          // Un modificateur, pas un filtre : il demande de réévaluer quand un attribut
+          // change, ce que l'observateur fait déjà pour toutes les règles.
+          case 'watch-attr':
+            return noeuds;
           case 'xpath': {
             const sortie = [];
             const contextes = noeuds.length ? noeuds : [document];
@@ -316,8 +414,12 @@ enum CosmeticEngine {
           // eux-mêmes.
           case 'not':
             return noeuds.filter((n) => !évaluerSur(n, arg));
+          // **Ce qu'on ne sait pas faire ne masque rien.** Rendre l'ensemble intact
+          // reviendrait à ignorer la condition : une règle qu'on ne comprend qu'à moitié
+          // masquerait alors bien plus que son auteur ne l'a écrit. Mieux vaut une règle
+          // sans effet qu'une règle qui emporte la page.
           default:
-            return noeuds;
+            return [];
         }
       };
 
@@ -327,6 +429,14 @@ enum CosmeticEngine {
       // un sélecteur valide pour `querySelectorAll`, et `:has(> span:contains(x))` ne
       // trouvait donc jamais rien — silencieusement, comme toute erreur de sélecteur.
       const évaluerDans = (racine, sous) => {
+        const liste = branches(sous);
+        if (liste.length > 1) {
+          for (const branche of liste) {
+            const trouvé = évaluerDans(racine, branche);
+            if (trouvé.length) return trouvé;
+          }
+          return [];
+        }
         const étapes = découper(sous);
         let noeuds = null;
         for (const étape of étapes) {
@@ -346,6 +456,8 @@ enum CosmeticEngine {
 
       // Le sous-sélecteur porte sur **cet élément-ci** : c'est ce que veut dire `:not()`.
       const évaluerSur = (racine, sous) => {
+        const liste = branches(sous);
+        if (liste.length > 1) return liste.some((b) => évaluerSur(racine, b));
         const étapes = découper(sous);
         let noeuds = [racine];
         for (const étape of étapes) {
@@ -358,8 +470,9 @@ enum CosmeticEngine {
         return noeuds.length > 0;
       };
 
-      const évaluer = (sel) => {
-        const étapes = découper(sel);
+      const évaluer = (règle) => {
+        if (!règle.étapes) règle.étapes = découper(règle.sel);
+        const étapes = règle.étapes;
         let noeuds = null;
         let action = null;
         for (const étape of étapes) {
@@ -396,9 +509,15 @@ enum CosmeticEngine {
         }
       };
 
+      // Le coût de la dernière passe et le nombre de passes, lisibles pour qui mesure.
+      // Deux affectations, dans le monde de Wuji : la page ne les voit pas, et elles
+      // évitent d'avoir à instrumenter le moteur pour savoir ce qu'il coûte.
+      let passes = 0;
       const passer = () => {
+        const départ = performance.now();
+        passes++;
         for (const règle of règles) {
-          const { noeuds, action } = sûr(() => évaluer(règle.sel), { noeuds: [], action: null });
+          const { noeuds, action } = sûr(() => évaluer(règle), { noeuds: [], action: null });
           const quoi = action ? action.type : règle.action;
           const décl = action && action.décl ? action.décl : règle.décl;
           for (const n of noeuds) {
@@ -412,22 +531,44 @@ enum CosmeticEngine {
             sûr(() => n.style.setProperty('display', 'none', 'important'), null);
           }
         }
+        window.__wujiCosmetic = { passes, ms: Math.round((performance.now() - départ) * 100) / 100,
+                                  règles: règles.length };
       };
 
       // **Une seule passe par image, pas une par mutation.** Une page qui écrit son DOM en
       // boucle — un fil d'actualité, une publicité qui se recharge — produit des centaines
       // de mutations par seconde ; les suivre une à une ferait du moteur le poste le plus
       // cher de la page, pour un résultat identique à l'œil.
-      let prévu = false;
-      const relâcher = () => { prévu = false; passer(); };
       // Une image **ou** un délai : une page masquée — onglet d'arrière-plan, fenêtre
       // réduite — n'a pas d'images, et le moteur n'y aurait jamais repassé après sa
-      // première lecture. Le drapeau fait que le second arrivé ne travaille pas deux fois.
+      // première lecture. Les deux sont donc armés.
+      //
+      // **Et un jeton, parce qu'un drapeau ne suffisait pas.** Il était baissé par le
+      // premier arrivé, si bien que le second trouvait la voie libre et refaisait la passe :
+      // chaque lot de mutations en coûtait deux, mesuré. Le jeton n'est valable qu'une fois.
+      let jeton = 0;
+      let coûteuse = false;
       const planifier = () => {
-        if (prévu) return;
-        prévu = true;
-        requestAnimationFrame(relâcher);
-        setTimeout(relâcher, 50);
+        if (jeton) return;
+        const mien = ++jeton;
+        const relâcher = () => {
+          if (jeton !== mien) return;
+          jeton = 0;
+          const début = performance.now();
+          passer();
+          // **Le moteur ne prend jamais la page en otage.** Une page qui réécrit son DOM en
+          // boucle — un fil d'actualité, un lecteur vidéo — produit des mutations sans fin ;
+          // si une passe coûte plus qu'une image, les enchaîner ferait du masquage cosmétique
+          // le poste le plus cher du document. Au-delà du budget, on espace : le résultat est
+          // le même à l'œil, et la page garde son fil.
+          coûteuse = performance.now() - début > 12;
+        };
+        if (coûteuse) {
+          setTimeout(relâcher, 250);
+        } else {
+          requestAnimationFrame(relâcher);
+          setTimeout(relâcher, 50);
+        }
       };
 
       const démarrer = () => {

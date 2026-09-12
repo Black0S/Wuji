@@ -453,14 +453,39 @@ la réponse avant que WebKit ne l'analyse : aucune interface publique ne le perm
 d'un site vaut aussi ici — suspendre le blocage et continuer d'injecter serait une pause qui
 n'en est pas une.
 
-Vérifié sur banc, dans un vrai moteur : douze cas de sélection procédurale — `:contains()`,
-`:upward()`, `:matches-css()`, `:xpath()`, `:has()` étendu, `:not()` étendu,
-`:min-text-length()`, `:matches-attr()`, `:style()`, `:remove()` — et dix-sept primitives,
-tous conformes. Deux défauts trouvés là plutôt qu'en production : `:has(> …)` ne trouvait rien
-faute de `:scope`, et `:not(…)` cherchait dans les descendants au lieu de l'élément lui-même.
-Un troisième valait pour tout le module : les passes suivant le DOM ne se déclenchaient plus
-dans une page masquée — un onglet d'arrière-plan n'a pas d'images — parce qu'elles
-n'attendaient que `requestAnimationFrame`.
+**Les règles d'un site ne sortent pas de chez lui.** Le moteur et les primitives sont posés
+dans **tous** les cadres du document — la moitié des encarts d'un site vivent dans un
+`<iframe>` qu'il sert lui-même, et les règles écrites pour lui ne les atteignaient pas. Un
+cadre d'un tiers reçoit donc le code, mais pas les règles : chaque script vérifie chez qui il
+se réveille avant d'agir. Appliquer les règles d'un site dans le cadre d'un autre serait au
+mieux sans effet, au pire un masquage chez quelqu'un qu'aucune règle ne désigne.
+
+**Ce qu'on ne sait pas faire ne masque rien.** Un opérateur inconnu laissait passer l'ensemble
+qu'il recevait, ce qui revient à ignorer la condition : `div:jamais-vu(x)` aurait masqué tous
+les `div`. Le moteur rend désormais l'ensemble vide — mieux vaut une règle sans effet qu'une
+règle qui emporte la page. Le même principe a réglé le cas de `:others()`, seul opérateur à
+rendre *plus* d'éléments qu'il n'en reçoit : avec un sujet absent, « tout ce qui n'est pas le
+sujet » était la page entière.
+
+**Un lot de mutations, une passe.** Une image et un délai sont armés ensemble, parce qu'une
+page masquée n'a pas d'images ; mais le drapeau qui les départageait était baissé par le
+premier arrivé, si bien que le second refaisait le travail — chaque lot en coûtait deux,
+mesuré. Un jeton à usage unique l'a remplacé. Et au-delà d'un budget de douze millisecondes,
+les passes suivantes s'espacent : une page qui réécrit son DOM sans fin ne doit pas faire du
+masquage cosmétique son poste le plus cher.
+
+Vérifié sur banc, dans un vrai moteur : **vingt-sept cas**, tous conformes. Douze de sélection
+procédurale — `:contains()`, `:upward()`, `:matches-css()`, `:xpath()`, `:has()` étendu,
+`:not()` étendu, `:min-text-length()`, `:matches-attr()`, `:style()`, `:remove()` —, dix-sept
+primitives, les listes de sélecteurs, les gardes de cadre dans les deux sens, et `:others()`
+avec et sans sujet. Les défauts trouvés là plutôt qu'en production : `:has(> …)` ne trouvait
+rien faute de `:scope` ; `:not(…)` cherchait dans les descendants au lieu de l'élément
+lui-même ; les listes de premier niveau — `a:contains(x), b`, deux cent cinquante sélecteurs
+du dépôt — ne masquaient rien du tout, la virgule tombant dans le CSS qui suit un opérateur ;
+`:others()`, déclaré mais non implémenté, masquait tout ce qu'il touchait ; `:matches-media()`
+et `:-abp-properties()` manquaient. Et un dernier qui valait pour tout le module : les passes
+suivant le DOM ne se déclenchaient plus dans une page masquée — un onglet d'arrière-plan n'a
+pas d'images — parce qu'elles n'attendaient que `requestAnimationFrame`.
 
 ### Ce que le bouclier n'annonce pas
 

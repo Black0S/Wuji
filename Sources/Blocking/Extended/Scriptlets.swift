@@ -87,13 +87,26 @@ enum Scriptlets {
     /// Le tout dans une fermeture, et sous un drapeau : un document qui rejoue ses scripts
     /// — un `history.pushState` suivi d'un retour — ne doit pas reposer deux fois les mêmes
     /// pièges, ce qui doublerait les compteurs et casserait les restaurations.
-    static func script(for calls: [[String]]) -> String {
+    static func script(for calls: [[String]], host: String = "") -> String {
         let json = (try? JSONSerialization.data(withJSONObject: calls))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let site = (try? JSONSerialization.data(withJSONObject: [host]))
+            .flatMap { String(data: $0, encoding: .utf8) }
+            .map { String($0.dropFirst().dropLast()) } ?? "\"\""
         return """
         (() => {
           if (window.__wujiScriptlets) return;
           window.__wujiScriptlets = true;
+          // **Les primitives d'un site ne s'exécutent pas dans le cadre d'un autre.** Elles
+          // sont posées dans chaque cadre — c'est ce qui permet d'atteindre un lecteur ou un
+          // mur anti-bloqueur enfermé dans un `<iframe>` du même site. Remplacer une
+          // propriété dans le cadre d'un tiers, en revanche, serait agir chez quelqu'un
+          // qu'aucune règle ne désigne.
+          const __site = \(site);
+          if (__site) {
+            const __ici = location.hostname.toLowerCase();
+            if (__ici !== __site && !__ici.endsWith('.' + __site)) return;
+          }
         \(library)
           const appels = \(json);
           for (const appel of appels) {

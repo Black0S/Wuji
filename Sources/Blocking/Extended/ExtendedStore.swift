@@ -19,6 +19,14 @@ final class ExtendedStore {
     /// Ce qu'un site reçoit. Tout est déjà résolu ici : la page n'a aucune décision à
     /// prendre, elle applique.
     struct Payload: Equatable {
+        /// Le site pour lequel ces règles ont été choisies.
+        ///
+        /// **Il voyage avec elles parce qu'un cadre n'est pas forcément la page.** Le moteur
+        /// est posé dans tous les cadres du document, y compris ceux d'un autre domaine ;
+        /// sans cette vérification, les règles d'un site s'appliqueraient dans le cadre
+        /// publicitaire d'un tiers — au mieux sans effet, au pire en masquant ce qu'il ne
+        /// fallait pas.
+        var host = ""
         /// Ce qui tient dans une feuille de style : le gros du lot, et le moins cher.
         var css = ""
         /// Les sélecteurs que le CSS ne résout pas — action par défaut : masquer.
@@ -264,6 +272,7 @@ final class ExtendedStore {
         }
 
         var payload = Payload()
+        payload.host = host
         var lignes: [String] = []
         var vues = Set<String>()
 
