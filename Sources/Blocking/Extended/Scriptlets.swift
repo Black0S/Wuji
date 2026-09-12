@@ -53,7 +53,10 @@ enum Scriptlets {
         "noeval": "prevent-eval-if",
         "noeval-if": "prevent-eval-if",
         "prevent-bab": "prevent-bab",
-        "nobab": "prevent-bab"
+        "nobab": "prevent-bab",
+        "cookie-remover": "remove-cookie",
+        "trusted-set-attr": "set-attr",
+        "abp-contains": "contains"
     ]
 
     /// Ce que la bibliothèque sait faire. Un nom absent d'ici n'est pas envoyé à la page :
@@ -68,7 +71,8 @@ enum Scriptlets {
         "prevent-window-open", "prevent-fetch", "prevent-xhr", "prevent-eval-if",
         "prevent-element-src-loading", "prevent-bab",
         "remove-attr", "remove-class", "remove-node-text", "replace-node-text",
-        "json-prune", "href-sanitizer", "click-element", "nowebrtc", "log"
+        "json-prune", "href-sanitizer", "click-element", "nowebrtc", "log",
+        "set-attr", "hide-in-shadow-dom", "trusted-suppress-native-method"
     ]
 
     /// `ubo-aopr.js` → `abort-on-property-read`.
@@ -88,7 +92,15 @@ enum Scriptlets {
     /// — un `history.pushState` suivi d'un retour — ne doit pas reposer deux fois les mêmes
     /// pièges, ce qui doublerait les compteurs et casserait les restaurations.
     static func script(for calls: [[String]], host: String = "") -> String {
-        let json = (try? JSONSerialization.data(withJSONObject: calls))
+        // **Le nom est ramené au canonique ici aussi.** Le magasin le fait déjà en
+        // choisissant les règles ; le refaire coûte trois mots et retire une classe entière
+        // d'erreurs — un appelant qui passerait `cookie-remover` obtenait sinon un geste
+        // introuvable, en silence, et l'on cherchait le défaut dans la primitive.
+        let canoniques = calls.compactMap { appel -> [String]? in
+            guard let nom = appel.first else { return nil }
+            return [canonical(nom)] + appel.dropFirst()
+        }
+        let json = (try? JSONSerialization.data(withJSONObject: canoniques))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         let site = (try? JSONSerialization.data(withJSONObject: [host]))
             .flatMap { String(data: $0, encoding: .utf8) }

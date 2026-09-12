@@ -433,6 +433,14 @@ la conversion les avait écartés pour le marqueur de la règle, pas pour leur c
 renvoie en feuille de style plutôt qu'au moteur : sans cela, une seule règle générique aurait
 imposé l'évaluateur et son observateur de mutations à **toutes** les pages.
 
+**Ce qui est appliqué, compté.** Sur les 58 666 règles des cinquante annexes : **98,2 %**
+sont posées. Les styles, tous ; les sélecteurs procéduraux, 15 542 sur 15 554 — les douze qui
+restent sont des coquilles des listes d'origine, `:rgba()` ou `:translate()` pris pour des
+opérateurs ; les primitives nommées, 97 %. Ce qui manque tient en deux familles : celles qui
+réécrivent une réponse réseau — `json-prune-fetch-response`, `xml-prune`,
+`trusted-replace-xhr-response` — et le filtrage HTML (`$$`, 197 règles), qui demande de
+réécrire la réponse avant que WebKit ne l'analyse : aucune interface publique ne le permet.
+
 **Les primitives sont nommées, et écrites ici.** Une liste ne nous fait pas exécuter son
 code : elle demande un geste que nous avons écrit, qu'on peut relire, et qui ne fait que ce
 que son nom dit — `set-constant`, `set-cookie`, `abort-on-property-read`, `remove-attr`… Une

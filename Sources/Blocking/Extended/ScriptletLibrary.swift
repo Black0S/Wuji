@@ -527,6 +527,59 @@ extension Scriptlets {
           });
         },
 
+        // Poser un attribut, comme `remove-attr` mais dans l'autre sens. Souvent employé
+        // pour rendre à un lecteur vidéo un attribut qu'une régie lui a retiré.
+        'set-attr': (sélecteur, nom, valeur) => {
+          if (!sélecteur || !nom) return;
+          const v = valeur === undefined ? '' : String(valeur);
+          àChaqueChangement(() => {
+            for (const el of élémentsDe(sélecteur)) {
+              if (el.getAttribute(nom) !== v) el.setAttribute(nom, v);
+            }
+          });
+        },
+
+        // **Le DOM caché d'un composant.** Un encart posé dans une racine fantôme échappe à
+        // `querySelectorAll` : il faut descendre dans chaque racine ouverte, une à une.
+        // Une racine fermée reste hors de portée — c'est ce que « fermée » veut dire.
+        'hide-in-shadow-dom': (sélecteur, base) => {
+          if (!sélecteur) return;
+          const descendre = (racine, vus) => {
+            if (!racine || vus.has(racine)) return;
+            vus.add(racine);
+            try {
+              for (const el of racine.querySelectorAll(sélecteur)) {
+                el.style.setProperty('display', 'none', 'important');
+              }
+            } catch (_) {}
+            const enfants = racine.querySelectorAll ? racine.querySelectorAll('*') : [];
+            for (const el of enfants) if (el.shadowRoot) descendre(el.shadowRoot, vus);
+          };
+          àChaqueChangement(() => {
+            const départ = base ? élémentsDe(base) : [document];
+            const vus = new Set();
+            for (const d of départ) descendre(d.shadowRoot || d, vus);
+          });
+        },
+
+        // Neutraliser une méthode native qu'un site emploie pour se défendre — le plus
+        // souvent `Object.defineProperty` ou `Element.attachShadow`. On rend une fonction
+        // qui ne fait rien plutôt que de lever : une exception casserait la page.
+        'trusted-suppress-native-method': (chemin, signature) => {
+          if (!chemin) return;
+          const teste = motif(signature);
+          auBout(window, chemin, (objet, clé) => {
+            const original = objet[clé];
+            if (typeof original !== 'function') return;
+            try {
+              objet[clé] = function (...args) {
+                if (teste(args.map((a) => String(a)).join(' '))) return undefined;
+                return original.apply(this, args);
+              };
+            } catch (_) {}
+          });
+        },
+
         'nowebrtc': () => {
           for (const nom of ['RTCPeerConnection', 'webkitRTCPeerConnection']) {
             if (typeof window[nom] !== 'function') continue;
